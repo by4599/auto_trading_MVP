@@ -27,7 +27,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 ## 현재 스코프 (이거 넘어서는 기능 제안하지 말 것)
 
 - 종목: 삼성전자(005930) 1개만
-- 전략: `VolatilityBreakoutStrategy` (변동성 돌파, K=0.5) — 매수 신호만, 출구는 Sprint 3
+- 전략: `VolatilityBreakoutStrategy` (변동성 돌파, K=0.5) — 매수 신호.
+  출구는 `TimeCutScheduler`(평일 15:15 KST 보유분 전량 매도, Gate 3)
 - 계좌: 한투 **모의투자** 계좌 (`@Profile("paper")`, 실전 전환은
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
 - 주문: 시장가 1주 고정 (수량 로직은 v2)
@@ -39,16 +40,16 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 | 룰 | 조건 | 실제 동작 상태 |
 |---|---|---|
 | `PendingOrderRule` | 보유 중/미체결 매수 존재 시 중복 매수 차단 | ✅ 활성 |
-| `PositionLimitRule` | 종목당 비중 최대 10% | ⚠️ 분모 오류 (F-7) |
+| `PositionLimitRule` | 종목당 비중 최대 10% | ✅ 활성 (Gate 1에서 분모 교정) |
 | `MaxPositionCountRule` | 최대 보유 종목 5개 | ✅ 활성 |
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (KST 타임존 가정, F-8) |
-| `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | 🔴 비활성 — 입력값 0.0 하드코딩 (F-5) |
-| `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | 🔴 오작동 위험 (F-1) |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | 🔴 비활성 — 입력값 0 하드코딩 (F-5) |
+| `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
+| `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | 🔴 비활성 — 입력값 0 하드코딩 (F-5 나머지, 타임컷 도입으로 이제 구현 가능) |
 
-> ⚠️ 계좌 단위 안전장치(일일손실·MDD)는 현재 작동하지 않는다. 강제청산 실행부
-> (`KisBrokerageApiClient`)도 스텁이라 청산 트리거 시 매매 중단까지만 되고
-> 실제 매도는 나가지 않는다. F-번호와 상세 근거는 `docs/TRADING-RULES-AUDIT.md` 참고.
+> 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
+> 단, **모의계좌 청산 리허설 1회 성공 전까지 Gate 2 완료 판정 아님**
+> (`POST /api/trading/liquidation-drill`). F-번호와 상세 근거는 `docs/TRADING-RULES-AUDIT.md` 참고.
 
 ## 패키지 구조
 
@@ -71,14 +72,18 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   FULL 승격 시 Trim 양보, 중복 청산 차단)
 - `research` 패키지 — `NewsAggregatorService`(RSS 4개, 30분 주기) +
   `NewsSentimentAnalyzer`(키워드 기반 호재/악재 1차 분류) + 워치리스트 매칭
+- `RiskMonitor`/`KisBalanceClient` (Gate 1) — 신호 독립 1초 상시 감시 + 잔고 실값 연동
+- `KisBrokerageApiClient` (Gate 2) — 강제청산 실행부 실구현 (잔고/전량매도/미체결취소)
+- `TimeCutScheduler` (Gate 3) — 평일 15:15 KST 보유분 전량 매도 (평시 OrderEngine 경로)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 
-1. `KisBrokerageApiClient` — 강제청산용 매도/잔고 API가 `UnsupportedOperationException`
-   스텁 (F-3, Sprint 3 최우선)
-2. 출구(매도) 전략 부재 — 15:15 타임컷 미구현. 매수 후 무기한 보유 상태 (F-4)
-3. 계좌 단위 룰이 매수 신호가 있을 때만 평가됨 — 신호 독립적 `RiskMonitor` 필요 (F-2)
-4. equity 산출이 현금 미포함 + `currentPrice = averagePrice` 근사 (F-1, F-7)
+1. `ConsecutiveLossRule` 입력값 0 하드코딩 — 실현손익 기반 연속손실 카운터 미구현 (F-5 나머지)
+2. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
+3. `currentPrice = averagePrice` 근사 잔존 — 현재가 API 교체 예정
+4. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 + 휴장일 미인지 (거래일 캘린더는 로드맵 항목)
+
+해소됨: F-1/F-2/F-5 일부/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2, 2026-07-08) · F-4 (Gate 3, 2026-07-08)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

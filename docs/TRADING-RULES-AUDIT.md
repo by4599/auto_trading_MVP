@@ -69,6 +69,13 @@
 
 ### F-4. 출구(매도) 전략이 존재하지 않는다 — 전략 정합성 훼손
 
+> ✅ **해소 (2026-07-08, Gate 3)**: `TimeCutScheduler` 신설 — 평일 15:15 KST(cron, `zone="Asia/Seoul"` 명시로
+> F-8 타임존 문제 미상속) 보유 포지션 전량을 Signal → RiskEngine → OrderEngine 평시 매도 경로로 정리.
+> FORCE_LIQUIDATING/EMERGENCY_STOPPED 시 양보(청산 상태머신이 포지션 소유), 미체결 SELL 존재 시
+> 중복 매도 방지, 종목별 예외 격리. 한계(운영 문서화): 15:15에 앱이 꺼져 있으면 해당일 타임컷은
+> 건너뛰고 다음 거래일 15:15에 정리된다. 휴장일에는 KIS 주문 거부가 에러 로그로 남는다(거래일 캘린더는 로드맵 별도 항목).
+> 검증: `TimeCutSchedulerTest` 9/9, 전체 스위트 73/73 통과.
+
 - 위치: [VolatilityBreakoutStrategy.java](../src/main/java/com/trading/strategy/VolatilityBreakoutStrategy.java) — SELL 신호를 생성하지 않음. ADR-001 2.3의 "Sleeve B 15:15 타임컷"도 어디에도 구현되어 있지 않다.
 - 결과: 래리 윌리엄스 변동성 돌파는 **당일 진입 → 당일(또는 익일 시가) 청산**이 전제인 단타 전략이다. 현재 시스템은 1주 매수 후 무기한 보유하며, `PendingOrderRule`이 재매수를 막으므로 사실상 "첫 돌파에 1주 사고 영원히 끝". 백테스트 통계와 전혀 다른 전략이 된다.
   - 부수 효과: 실현손익이 발생하지 않으므로 Sprint 3에서 `dailyPnlPercent`·`consecutiveLossCount`를 구현해도 입력이 영원히 0이다.
@@ -156,5 +163,6 @@
    테스트 23/23 통과 (RiskMonitorTest 9, KisPositionManagerTest 6, DailyLossRuleTest 4, LiquidationServiceTest 회귀 4).
 2. 🟡 **[Gate 2 — 청산 실행] 코드 완료 (2026-07-08)**: F-3 실장 + 리허설 엔드포인트.
    남은 것: **모의계좌 강제청산 리허설 1회** (장중 실행 권장 — 장외에는 주문 거부가 "부분 실패" 경로로 보고되는지 확인하는 것도 유효한 리허설).
-3. **[Gate 3 — 전략 완결]** F-4: 15:15 타임컷 구현 → 이후에야 실현손익 데이터가 쌓여 F-5의 입력이 생긴다.
+3. ✅ **[Gate 3 — 전략 완결] 타임컷 완료 (2026-07-08)**: F-4 `TimeCutScheduler` 구현.
+   남은 것: 실현손익 기반 `consecutiveLossCount` 연동 (F-5 나머지 — 매도 체결 데이터가 이제 생기므로 구현 가능).
 4. F-7, F-9, F-8 순으로 정리. F-6은 ADR-002 착수 시 함께.

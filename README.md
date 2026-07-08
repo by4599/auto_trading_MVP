@@ -196,7 +196,7 @@ Sprint 3 — 안전장치 실동작 ([검증 보고서](docs/TRADING-RULES-AUDIT
 1. ~~**equity 산출 교정** (F-1, F-7)~~ ✅ **완료 (Gate 1, 2026-07-07)** — `KisBalanceClient` 잔고 연동, 3초 캐시
 2. ~~**RiskMonitor 신설** (F-2)~~ ✅ **완료 (Gate 1, 2026-07-07)** — 1초 상시 감시 + dailyPnl 실값(F-5 일부)
 3. ~~**강제청산 실행부 실장** (F-3)~~ 🟡 **코드 완료 (Gate 2, 2026-07-08)** — 모의계좌 리허설 1회만 남음 (위 운영 주의 블록의 curl 명령) ← **완료 후 Gate 3 (타임컷)으로**
-4. **15:15 타임컷** (F-4): 보유분 당일 정리 — 이후 실현손익 기반 `dailyPnlPercent`·연속손실 카운터(F-5) 구현 가능
+4. ~~**15:15 타임컷** (F-4)~~ ✅ **완료 (Gate 3, 2026-07-08)** — `TimeCutScheduler` 평일 15:15 KST 보유분 전량 매도 (RiskEngine→OrderEngine 평시 경로). 다음: 실현손익 기반 연속손실 카운터(F-5 나머지)
 5. **주문 로직 현실화** ([방법론 §4.3](docs/INVESTMENT-METHODOLOGY.md)): 시장가 → 지정가 분할(Price Jitter, ADR-001 2.5) 전환, 체결가 기준 손절선·1R 재계산, 단주 내림·스킵 규칙, 필터 훅 4종(시간 창·거래량·트레일링·지수 — 기본 OFF, [백테스트 §3.3](docs/BACKTEST-DESIGN.md)에서 A/B 후 채택)
 6. **성과 기록 기반 마련** ([거버넌스 §8](docs/PERFORMANCE-GOVERNANCE.md)): order_history에 신호 시점가·수수료·세금 기록 + `PerformanceReporter` 주간 리포트 — 이후 강등/승격 판정의 데이터 원천
 7. **운영 신뢰성** ([운영 §8](docs/OPERATIONS.md)): `server.address=127.0.0.1`(즉시), 데드맨 스위치, SAFE_MODE + 기동 재동기화 시퀀스, 재가동 게이트(/start 직접 전환 금지), 거래일 캘린더
