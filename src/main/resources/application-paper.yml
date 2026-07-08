@@ -1,0 +1,28 @@
+# 제어/설정 API(거래 시작·중지, 강제청산 리허설, 앱키 입력)를 로컬에서만 접근 가능하게 제한.
+# 외부 노출이 필요해지면(VPS 이전) OPERATIONS.md §6의 인증 요건을 먼저 구현할 것.
+server:
+  address: 127.0.0.1
+
+kis:
+  base-url: https://openapivts.koreainvestment.com:29443
+  appkey: ${KIS_APPKEY}
+  secretkey: ${KIS_SECRETKEY}
+  account-no: ${KIS_ACCOUNT_NO}   # 예) 50000000-01
+
+telegram:
+  bot-token: ${TELEGRAM_BOT_TOKEN:}   # 비워두면 알림 스킵 (개발 환경)
+  chat-id: ${TELEGRAM_CHAT_ID:}
+
+# H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
+# 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
+# ./trading-db.mv.db 파일이 생성된다. .gitignore에 반드시 추가할 것.
+spring:
+  datasource:
+    url: jdbc:h2:file:./trading-db;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update      # 재기동 시 스키마를 삭제하지 않고 변경분만 적용
+    show-sql: false

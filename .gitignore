@@ -1,0 +1,32 @@
+# H2 파일 DB — 실행 데이터, 커밋하지 않음
+trading-db.mv.db
+trading-db.trace.db
+trading-db.lock.db
+
+# 백업 디렉토리
+backup/
+
+# KIS/Telegram 실제 키가 담긴 설정 파일
+application-paper-local.yml
+application-real.yml
+*.env
+.env
+
+# 빌드 결과물
+build/
+auto_trading-build/
+.gradle/
+out/
+bin/
+
+# 드라이버 설치 잔여물
+NVIDIA Corporation/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

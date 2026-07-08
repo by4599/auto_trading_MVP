@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoTrading MVP</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --muted:    #8b949e;
+      --subtle:   #6e7681;
+      --text:     #e6edf3;
+      --green:    #3fb950;
+      --red:      #f78166;
+      --yellow:   #d29922;
+      --blue:     #58a6ff;
+      --green-bg: #1a4731;
+      --red-bg:   #3d1f00;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── 헤더 ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-title { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.3px; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+    .badge.running  { background: var(--green-bg); color: var(--green); }
+    .badge.stopped  { background: var(--red-bg);   color: var(--red); }
+    .badge.warning  { background: #3d2f00;          color: var(--yellow); }
+    .badge.unknown  { background: #21262d;           color: var(--muted); }
+
+    .btn-icon {
+      background: #21262d;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.88rem;
+      padding: 6px 13px;
+      transition: background 0.15s;
+    }
+    .btn-icon:hover { background: var(--border); }
+
+    .btn-start {
+      background: #1a4731;
+      border: 1px solid #2ea043;
+      border-radius: 8px;
+      color: var(--green);
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      transition: opacity 0.15s;
+    }
+    .btn-stop {
+      background: var(--red-bg);
+      border: 1px solid #da3633;
+      border-radius: 8px;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      transition: opacity 0.15s;
+    }
+    .btn-start:hover, .btn-stop:hover { opacity: 0.78; }
+    .btn-start:disabled, .btn-stop:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* 토스트 알림 */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 0.85rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      z-index: 200;
+      max-width: 300px;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.ok   { border-color: #2ea043; color: var(--green); }
+    .toast.err  { border-color: #da3633; color: var(--red); }
+
+    /* ── 대시보드 그리드 ── */
+    .dashboard {
+      max-width: 960px;
+      margin: 24px auto;
+      padding: 0 20px 80px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 640px) {
+      .dashboard { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    .card.full-width  { grid-column: 1 / -1; }
+    .card.warn-border { border-color: var(--yellow); }
+
+    .card-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+
+    /* ── 현재가 카드 ── */
+    .quote-name  { font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
+    .quote-price { font-size: 2rem; font-weight: 700; letter-spacing: -1px; line-height: 1.1; }
+    .quote-change {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .quote-volume { margin-top: 10px; font-size: 0.78rem; color: var(--muted); }
+
+    /* ── 포지션 카드 ── */
+    .pos-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 7px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 0.83rem;
+    }
+    .pos-row:last-child { border-bottom: none; }
+    .pos-key  { color: var(--muted); }
+    .pos-val  { font-weight: 600; }
+
+    /* ── 숫자 색상 ── */
+    .up   { color: var(--red); }    /* 한국 주식: 상승=빨간 */
+    .down { color: var(--blue); }   /* 하락=파란 */
+    .flat { color: var(--muted); }
+
+    /* ── 손익 숫자 ── */
+    .pnl-big {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+    .pnl-sub { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+
+    /* ── 리스크 카드 ── */
+    .risk-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 7px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 0.83rem;
+    }
+    .risk-row:last-child { border-bottom: none; }
+    .risk-key { color: var(--muted); }
+
+    /* ── 미설정 배너 ── */
+    .uncfg-banner {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border: 1px solid var(--yellow);
+      border-radius: 12px;
+      padding: 22px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .uncfg-banner h3 { font-size: 0.95rem; color: var(--yellow); margin-bottom: 4px; }
+    .uncfg-banner p  { font-size: 0.82rem; color: var(--muted); }
+    .btn-primary {
+      background: #238636;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 9px 20px;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-primary:hover { opacity: 0.82; }
+
+    /* ── 체결 내역 테이블 ── */
+    .orders-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin-top: 4px;
+    }
+    .orders-table th {
+      text-align: left;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 0 8px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .orders-table td {
+      padding: 8px 8px;
+      border-bottom: 1px solid #21262d;
+      color: var(--text);
+    }
+    .orders-table tr:last-child td { border-bottom: none; }
+    .orders-table .side-buy  { color: var(--red); font-weight: 600; }
+    .orders-table .side-sell { color: var(--blue); font-weight: 600; }
+
+    .empty-state {
+      color: var(--subtle);
+      font-size: 0.83rem;
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    /* ── 설정 모달 ── */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .overlay.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 520px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 26px;
+    }
+    .modal-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .modal-hdr h2 { font-size: 1rem; font-weight: 700; }
+    .btn-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      padding: 2px 6px;
+    }
+    .btn-close:hover { color: var(--text); }
+
+    .section-hdr {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--blue);
+      margin: 16px 0 10px;
+    }
+    .hint { font-size: 0.76rem; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+    .hint a { color: var(--blue); text-decoration: none; }
+
+    .field { margin-bottom: 11px; }
+    .field label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 3px; }
+    .input-wrap { position: relative; }
+    input[type=text], input[type=password] {
+      width: 100%;
+      padding: 8px 38px 8px 11px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      font-size: 0.87rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--blue); }
+    .eye {
+      position: absolute;
+      right: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      color: var(--subtle);
+      user-select: none;
+      font-size: 0.9rem;
+    }
+    .field-hint { font-size: 0.71rem; color: var(--subtle); margin-top: 2px; }
+
+    .btn-save {
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 7px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-top: 3px;
+    }
+    .btn-save:hover { opacity: 0.82; }
+    .btn-save.green { background: #238636; color: #fff; }
+    .btn-save.ghost { background: #21262d; color: var(--blue); border: 1px solid var(--border); margin-top: 6px; }
+
+    .msg {
+      padding: 9px 12px;
+      border-radius: 7px;
+      margin-top: 10px;
+      font-size: 0.82rem;
+      display: none;
+      line-height: 1.4;
+    }
+    .msg.ok  { background: var(--green-bg); color: var(--green); border: 1px solid #2ea043; }
+    .msg.err { background: var(--red-bg);   color: var(--red);   border: 1px solid #da3633; }
+
+    .divider { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 0.8rem;
+    }
+    .status-row:last-child { border-bottom: none; }
+    .status-key { color: var(--muted); font-family: 'Consolas', monospace; }
+    .badge-sm { font-size: 0.67rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+    .badge-sm.set    { background: var(--green-bg); color: var(--green); }
+    .badge-sm.notset { background: var(--red-bg);   color: var(--red); }
+    .preview-text { color: var(--subtle); font-family: monospace; font-size: 0.75rem; margin-right: 6px; }
+  </style>
+</head>
+<body>
+
+<!-- ── 상단 바 ── -->
+<header class="topbar">
+  <div class="topbar-title">⚡ AutoTrading MVP</div>
+  <div class="topbar-right">
+    <span class="badge unknown" id="modeBadge">연결 중...</span>
+    <button class="btn-start" id="btnStart" onclick="tradingStart()" style="display:none">▶ 시작</button>
+    <button class="btn-stop"  id="btnStop"  onclick="tradingStop()"  style="display:none">⏸ 중지</button>
+    <button class="btn-icon"  onclick="openSettings()">⚙ 설정</button>
+  </div>
+</header>
+
+<!-- ── 대시보드 ── -->
+<div class="dashboard">
+
+  <!-- 미설정 배너 (isConfigured=false) -->
+  <div class="uncfg-banner" id="uncfgBanner" style="display:none">
+    <div>
+      <h3>🔑 API 키 설정 필요</h3>
+      <p>한국투자증권 모의투자 앱키를 입력하면 실시간 데이터가 연결됩니다.</p>
+    </div>
+    <button class="btn-primary" onclick="openSettings()">지금 설정</button>
+  </div>
+
+  <!-- ① 현재가 -->
+  <div class="card" id="quoteCard">
+    <div class="card-label">현재가</div>
+    <div class="quote-name" id="quoteName">삼성전자 · 005930</div>
+    <div class="quote-price" id="quotePrice">—</div>
+    <div class="quote-change" id="quoteChange"></div>
+    <div class="quote-volume" id="quoteVolume"></div>
+  </div>
+
+  <!-- ② 보유 포지션 -->
+  <div class="card" id="positionCard">
+    <div class="card-label">보유 포지션</div>
+    <div id="positionBody"><div class="empty-state">포지션 없음</div></div>
+  </div>
+
+  <!-- ③ 당일 손익 -->
+  <div class="card" id="pnlCard">
+    <div class="card-label">당일 손익</div>
+    <div class="pnl-big" id="pnlValue">—</div>
+    <div class="pnl-sub" id="pnlSub"></div>
+  </div>
+
+  <!-- ④ 리스크 상태 -->
+  <div class="card" id="riskCard">
+    <div class="card-label">리스크 상태</div>
+    <div id="riskBody">
+      <div class="risk-row">
+        <span class="risk-key">거래 모드</span>
+        <span id="riskMode">—</span>
+      </div>
+      <div class="risk-row">
+        <span class="risk-key">일손실</span>
+        <span id="riskDailyPnl">0.0%</span>
+      </div>
+      <div class="risk-row">
+        <span class="risk-key">연속손실</span>
+        <span id="riskConsecutive">0회</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ 최근 체결 내역 -->
+  <div class="card full-width" id="ordersCard">
+    <div class="card-label">최근 체결 내역</div>
+    <div id="ordersBody"><div class="empty-state">체결 내역 없음</div></div>
+  </div>
+
+</div><!-- /dashboard -->
+
+<!-- 토스트 알림 -->
+<div class="toast" id="toast"></div>
+
+<!-- ── 설정 모달 ── -->
+<div class="overlay" id="overlay" onclick="overlayClick(event)">
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>⚙ API 설정</h2>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+
+    <div class="section-hdr">📋 현재 설정 상태</div>
+    <div id="settingStatusRows"><span style="color:var(--subtle);font-size:0.8rem">조회 중...</span></div>
+
+    <hr class="divider">
+
+    <div class="section-hdr">🏦 KIS Open API 자격증명</div>
+    <p class="hint">
+      <a href="https://apiportal.koreainvestment.com" target="_blank">KIS Developers</a>에서
+      <strong style="color:var(--text)">모의투자</strong> 앱키를 발급받으세요.
+    </p>
+
+    <div class="field">
+      <label>KIS_APPKEY</label>
+      <div class="input-wrap">
+        <input type="password" id="appkey" placeholder="PSxxxxxxxxxxxxxxxxxx...">
+        <span class="eye" onclick="toggle('appkey')">👁</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>KIS_SECRETKEY</label>
+      <div class="input-wrap">
+        <input type="password" id="secretkey" placeholder="시크릿키 입력">
+        <span class="eye" onclick="toggle('secretkey')">👁</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>KIS_ACCOUNT_NO</label>
+      <input type="text" id="account_no" placeholder="50000000-01">
+      <div class="field-hint">계좌번호-상품코드 형식 (예: 50000000-01)</div>
+    </div>
+
+    <button class="btn-save green" onclick="saveKis()">저장 (재시작 불필요)</button>
+    <div class="msg" id="kisMsg"></div>
+
+    <hr class="divider">
+
+    <div class="section-hdr">💬 텔레그램 알림 <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
+    <p class="hint">비워두면 알림 없이 거래만 진행됩니다.</p>
+
+    <div class="field">
+      <label>TELEGRAM_BOT_TOKEN</label>
+      <div class="input-wrap">
+        <input type="password" id="tg_token" placeholder="@BotFather에서 발급">
+        <span class="eye" onclick="toggle('tg_token')">👁</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>TELEGRAM_CHAT_ID</label>
+      <input type="text" id="tg_chat" placeholder="123456789">
+    </div>
+
+    <button class="btn-save ghost" onclick="saveTelegram()">텔레그램 저장</button>
+    <div class="msg" id="tgMsg"></div>
+  </div>
+</div>
+
+<script>
+  // ── 유틸 ─────────────────────────────────────────────────────────────────
+
+  const cx = (...parts) => parts.filter(Boolean).join(' ');
+
+  const KRW = n => (n == null ? '—' : n.toLocaleString('ko-KR') + '원');
+  const VOL = n => {
+    if (n == null) return '—';
+    return n >= 1_000_000
+      ? (n / 1_000_000).toFixed(1) + 'M주'
+      : n.toLocaleString('ko-KR') + '주';
+  };
+  const SIGN = n => n > 0 ? '+' : '';
+  const PCT  = n => (n == null ? '—' : SIGN(n) + n.toFixed(2) + '%');
+
+  function priceClass(n) {
+    if (n > 0) return 'up';
+    if (n < 0) return 'down';
+    return 'flat';
+  }
+
+  // ── 토스트 알림 ──────────────────────────────────────────────────────────
+
+  let toastTimer = null;
+  function showToast(text, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = text;
+    el.className = cx('toast', type, 'show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  // ── 거래 제어 ─────────────────────────────────────────────────────────────
+
+  async function tradingStart() {
+    setCtrlBusy(true);
+    try {
+      const data = await post('/api/trading/start', {});
+      showToast(data.message, data.success ? 'ok' : 'err');
+      if (data.success) await loadStatus();
+    } catch (e) {
+      showToast('시작 실패: ' + e.message, 'err');
+    } finally {
+      setCtrlBusy(false);
+    }
+  }
+
+  async function tradingStop() {
+    setCtrlBusy(true);
+    try {
+      const data = await post('/api/trading/stop', {});
+      showToast(data.message, data.success ? 'ok' : 'err');
+      if (data.success) await loadStatus();
+    } catch (e) {
+      showToast('중지 실패: ' + e.message, 'err');
+    } finally {
+      setCtrlBusy(false);
+    }
+  }
+
+  function setCtrlBusy(busy) {
+    document.getElementById('btnStart').disabled = busy;
+    document.getElementById('btnStop').disabled  = busy;
+  }
+
+  // ── 상태 폴링 ─────────────────────────────────────────────────────────────
+
+  async function loadStatus() {
+    try {
+      const data = await get('/api/status');
+      updateModeBadge(data.configured, data.tradingMode);
+      document.getElementById('uncfgBanner').style.display =
+        data.configured ? 'none' : '';
+      updateCtrlButtons(data.configured, data.tradingMode);
+      return data;
+    } catch {
+      setModeBadge('unknown', '서버 연결 중...');
+      return null;
+    }
+  }
+
+  function updateModeBadge(configured, mode) {
+    if (!configured) { setModeBadge('warning', '설정 필요'); return; }
+    const map = {
+      RUNNING:           ['running', '거래 중'],
+      FORCE_LIQUIDATING: ['stopped', '강제 청산 중'],
+      EMERGENCY_STOPPED: ['stopped', '정지됨'],
+    };
+    const [cls, label] = map[mode] ?? ['unknown', mode];
+    setModeBadge(cls, label);
+  }
+
+  function setModeBadge(cls, label) {
+    const el = document.getElementById('modeBadge');
+    el.className = cx('badge', cls);
+    el.textContent = label;
+  }
+
+  function updateCtrlButtons(configured, mode) {
+    const btnStart = document.getElementById('btnStart');
+    const btnStop  = document.getElementById('btnStop');
+    if (!configured) {
+      btnStart.style.display = 'none';
+      btnStop.style.display  = 'none';
+      return;
+    }
+    const isRunning = mode === 'RUNNING';
+    btnStart.style.display = isRunning ? 'none' : '';
+    btnStop.style.display  = isRunning ? '' : 'none';
+  }
+
+  // ── 대시보드 카드 업데이트 ───────────────────────────────────────────────
+
+  async function loadQuote() {
+    try {
+      const d = await get('/api/market/quote/005930');
+      if (!d.configured) { return; }
+      if (d.error)        { return; }
+
+      const nameEl = document.getElementById('quoteName');
+      nameEl.textContent = (d.stockName || '삼성전자') + ' · 005930';
+
+      const priceEl = document.getElementById('quotePrice');
+      priceEl.textContent = KRW(d.currentPrice);
+      priceEl.className = cx('quote-price', priceClass(d.changeAmount));
+
+      const changeEl = document.getElementById('quoteChange');
+      changeEl.className = cx('quote-change', priceClass(d.changeAmount));
+      const arrow = d.changeAmount > 0 ? '▲' : d.changeAmount < 0 ? '▼' : '−';
+      changeEl.textContent = '';
+      const s1 = document.createElement('span');
+      s1.textContent = arrow + ' ' + SIGN(d.changeAmount) + KRW(d.changeAmount);
+      const s2 = document.createElement('span');
+      s2.textContent = PCT(d.changeRate);
+      changeEl.append(s1, s2);
+
+      document.getElementById('quoteVolume').textContent = '거래량 ' + VOL(d.volume);
+    } catch { /* KIS 미연결 시 유지 */ }
+  }
+
+  async function loadPosition() {
+    try {
+      const list = await get('/api/position');
+      const el = document.getElementById('positionBody');
+      el.textContent = '';
+
+      if (!list || list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '보유 포지션 없음';
+        el.appendChild(empty);
+        return;
+      }
+
+      list.forEach(p => {
+        const rows = [
+          ['종목코드',   p.stockCode],
+          ['보유 수량',  `${p.quantity}주`],
+          ['평균 단가',  KRW(p.averagePrice)],
+          ['현재가',     p.currentPrice != null ? KRW(p.currentPrice) : '—'],
+          ['미실현 손익', p.unrealizedPnl != null
+            ? SIGN(p.unrealizedPnl) + KRW(p.unrealizedPnl) + ' (' + PCT(p.unrealizedPnlRate) + ')'
+            : '—'],
+        ];
+        rows.forEach(([k, v]) => {
+          const row = document.createElement('div');
+          row.className = 'pos-row';
+          const keyEl = document.createElement('span');
+          keyEl.className = 'pos-key';
+          keyEl.textContent = k;
+          const valEl = document.createElement('span');
+          valEl.className = cx(
+            'pos-val',
+            k === '미실현 손익' && p.unrealizedPnl != null
+              ? priceClass(p.unrealizedPnl) : ''
+          );
+          valEl.textContent = v;
+          row.append(keyEl, valEl);
+          el.appendChild(row);
+        });
+      });
+    } catch { /* 유지 */ }
+  }
+
+  async function loadPnl() {
+    try {
+      const d = await get('/api/pnl/daily');
+      const pnlEl = document.getElementById('pnlValue');
+      const subEl = document.getElementById('pnlSub');
+
+      if (d.unrealizedPnl != null) {
+        pnlEl.className = cx('pnl-big', priceClass(d.unrealizedPnl));
+        pnlEl.textContent = SIGN(d.unrealizedPnl) + KRW(d.unrealizedPnl);
+      } else {
+        pnlEl.className = 'pnl-big flat';
+        pnlEl.textContent = '—';
+      }
+
+      subEl.textContent = '';
+      const lines = [
+        `오늘 체결: ${d.tradeCount}건`,
+        `실현손익: Sprint 3 예정`,
+      ];
+      lines.forEach(t => {
+        const span = document.createElement('div');
+        span.textContent = t;
+        subEl.appendChild(span);
+      });
+    } catch { /* 유지 */ }
+  }
+
+  async function loadRisk() {
+    try {
+      const d = await get('/api/risk/status');
+
+      const modeMap = {
+        RUNNING:           ['거래 중',      'up'],
+        FORCE_LIQUIDATING: ['강제 청산 중', 'down'],
+        EMERGENCY_STOPPED: ['긴급 정지',   'down'],
+      };
+      const [modeLabel, modeCls] = modeMap[d.tradingMode] ?? [d.tradingMode, 'flat'];
+
+      const modeEl = document.getElementById('riskMode');
+      modeEl.className = modeCls;
+      modeEl.textContent = modeLabel;
+
+      document.getElementById('riskDailyPnl').textContent =
+        PCT(d.dailyPnlPercent * 100) + ' (Sprint 3 예정)';
+      document.getElementById('riskConsecutive').textContent =
+        d.consecutiveLossCount + '회';
+    } catch { /* 유지 */ }
+  }
+
+  async function loadOrders() {
+    try {
+      const list = await get('/api/orders/filled');
+      const el = document.getElementById('ordersBody');
+      el.textContent = '';
+
+      if (!list || list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '체결 내역 없음';
+        el.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'orders-table';
+
+      const thead = document.createElement('thead');
+      const hrow = document.createElement('tr');
+      ['시각', '종목', '구분', '수량', '체결가', '상태'].forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = h;
+        hrow.appendChild(th);
+      });
+      thead.appendChild(hrow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      list.forEach(o => {
+        const tr = document.createElement('tr');
+        const isBuy = o.side === 'BUY';
+
+        const statusLabel = {
+          FILLED:        '체결',
+          PARTIAL_FILLED:'부분체결',
+          CANCELLED:     '취소',
+          FAILED:        '실패',
+          CANCEL_FAILED: '취소실패',
+        }[o.status] ?? o.status;
+
+        [
+          o.requestedAt,
+          o.stockCode,
+          isBuy ? '매수' : '매도',
+          o.filledQty + '주',
+          o.filledPrice != null ? KRW(o.filledPrice) : '—',
+          statusLabel,
+        ].forEach((v, i) => {
+          const td = document.createElement('td');
+          if (i === 2) td.className = isBuy ? 'side-buy' : 'side-sell';
+          td.textContent = v;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      el.appendChild(table);
+    } catch { /* 유지 */ }
+  }
+
+  async function loadAll() {
+    await Promise.allSettled([
+      loadStatus(),
+      loadQuote(),
+      loadPosition(),
+      loadPnl(),
+      loadRisk(),
+      loadOrders(),
+    ]);
+  }
+
+  // ── 설정 모달 ─────────────────────────────────────────────────────────────
+
+  function openSettings() {
+    document.getElementById('overlay').classList.add('open');
+    loadSettingStatus();
+  }
+  function closeSettings() { document.getElementById('overlay').classList.remove('open'); }
+  function overlayClick(e) { if (e.target.id === 'overlay') closeSettings(); }
+
+  async function loadSettingStatus() {
+    const container = document.getElementById('settingStatusRows');
+    container.textContent = '조회 중...';
+    try {
+      const data = await get('/api/settings');
+      container.textContent = '';
+      for (const [key, v] of Object.entries(data)) {
+        const isSet = v.set === 'true';
+        const row = document.createElement('div');
+        row.className = 'status-row';
+
+        const keyEl = document.createElement('span');
+        keyEl.className = 'status-key';
+        keyEl.textContent = key;
+
+        const right = document.createElement('span');
+        if (v.preview) {
+          const pre = document.createElement('span');
+          pre.className = 'preview-text';
+          pre.textContent = v.preview;
+          right.appendChild(pre);
+        }
+        const badge = document.createElement('span');
+        badge.className = cx('badge-sm', isSet ? 'set' : 'notset');
+        badge.textContent = isSet ? '설정됨' : '미설정';
+        right.appendChild(badge);
+
+        row.append(keyEl, right);
+        container.appendChild(row);
+      }
+    } catch { container.textContent = '상태 조회 실패'; }
+  }
+
+  function toggle(id) {
+    const el = document.getElementById(id);
+    el.type = el.type === 'password' ? 'text' : 'password';
+  }
+
+  async function saveKis() {
+    await doSave({
+      KIS_APPKEY:     document.getElementById('appkey').value,
+      KIS_SECRETKEY:  document.getElementById('secretkey').value,
+      KIS_ACCOUNT_NO: document.getElementById('account_no').value,
+    }, 'kisMsg');
+  }
+
+  async function saveTelegram() {
+    await doSave({
+      TELEGRAM_BOT_TOKEN: document.getElementById('tg_token').value,
+      TELEGRAM_CHAT_ID:   document.getElementById('tg_chat').value,
+    }, 'tgMsg');
+  }
+
+  async function doSave(body, msgId) {
+    const msg = document.getElementById(msgId);
+    try {
+      const res = await fetch('/api/settings', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (data.errors && data.errors.length > 0) {
+        showMsg(msg, 'err', '오류: ' + data.errors.join(', '));
+        return;
+      }
+      if (!data.saved || data.saved.length === 0) {
+        showMsg(msg, 'err', '저장할 값이 없습니다 (빈 칸은 무시됩니다)');
+        return;
+      }
+
+      const suffix = data.configured ? ' — 거래 연결!' : '';
+      showMsg(msg, 'ok', '✅ 저장: ' + data.saved.join(', ') + suffix);
+      loadSettingStatus();
+      loadAll(); // 대시보드 전체 즉시 갱신
+    } catch (e) {
+      showMsg(msg, 'err', '저장 실패: ' + e.message);
+    }
+  }
+
+  function showMsg(el, cls, text) {
+    el.className = cx('msg', cls);
+    el.textContent = text;
+    el.style.display = 'block';
+  }
+
+  // ── 공통 fetch ────────────────────────────────────────────────────────────
+
+  async function get(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+
+  async function post(url, body) {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+
+  // ── 초기화 ───────────────────────────────────────────────────────────────
+
+  async function init() {
+    const status = await loadStatus();
+    if (status && !status.configured) openSettings();
+
+    // 나머지 카드 병렬 로드
+    await Promise.allSettled([
+      loadQuote(),
+      loadPosition(),
+      loadPnl(),
+      loadRisk(),
+      loadOrders(),
+    ]);
+  }
+
+  init();
+
+  // 현재가: 5초, 나머지: 10초 폴링
+  const quoteTimer    = setInterval(loadQuote,    5_000);
+  const dashTimer     = setInterval(() => Promise.allSettled([
+    loadStatus(), loadPosition(), loadPnl(), loadRisk(), loadOrders()
+  ]), 10_000);
+
+  // 탭 비가시 시 폴링 일시정지
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearInterval(quoteTimer);
+      clearInterval(dashTimer);
+    }
+  });
+</script>
+</body>
+</html>

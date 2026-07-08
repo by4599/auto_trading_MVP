@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: auto-trading-mvp
+
+logging:
+  level:
+    com.trading: INFO
+    org.springframework.scheduling: WARN
+    org.hibernate.SQL: WARN
