@@ -26,19 +26,22 @@ public class ResearchController {
     private static final DateTimeFormatter DT_FMT =
             DateTimeFormatter.ofPattern("MM/dd HH:mm");
 
-    private final WatchlistRepository watchlistRepository;
-    private final NewsRepository      newsRepository;
-    private final KisApiClient        kisApiClient;
-    private final KisProperties       kisProperties;
+    private final WatchlistRepository    watchlistRepository;
+    private final NewsRepository         newsRepository;
+    private final KisApiClient           kisApiClient;
+    private final KisProperties          kisProperties;
+    private final RecommendationService  recommendationService;
 
-    public ResearchController(WatchlistRepository watchlistRepository,
-                               NewsRepository      newsRepository,
-                               KisApiClient        kisApiClient,
-                               KisProperties       kisProperties) {
-        this.watchlistRepository = watchlistRepository;
-        this.newsRepository      = newsRepository;
-        this.kisApiClient        = kisApiClient;
-        this.kisProperties       = kisProperties;
+    public ResearchController(WatchlistRepository   watchlistRepository,
+                               NewsRepository        newsRepository,
+                               KisApiClient          kisApiClient,
+                               KisProperties         kisProperties,
+                               RecommendationService recommendationService) {
+        this.watchlistRepository   = watchlistRepository;
+        this.newsRepository        = newsRepository;
+        this.kisApiClient          = kisApiClient;
+        this.kisProperties         = kisProperties;
+        this.recommendationService = recommendationService;
     }
 
     // ── 관심 종목 ─────────────────────────────────────────────────────────────
@@ -125,6 +128,19 @@ public class ResearchController {
                 .stream()
                 .map(this::toNewsRow)
                 .toList();
+    }
+
+    // ── 투자 추천 ─────────────────────────────────────────────────────────────
+
+    /**
+     * 뉴스 감성 기반 종목 추천 (표시 전용 — 자동 매매와 미연동).
+     * days는 1~30으로 제한한다 (시스템 경계 입력 검증).
+     */
+    @GetMapping("/recommendations")
+    public List<RecommendationService.Recommendation> getRecommendations(
+            @RequestParam(defaultValue = "3") int days) {
+        int bounded = Math.max(1, Math.min(days, 30));
+        return recommendationService.recommend(bounded);
     }
 
     // ── 종목 검증 ─────────────────────────────────────────────────────────────

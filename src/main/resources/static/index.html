@@ -255,6 +255,61 @@
       padding: 20px 0;
     }
 
+    /* ── 뉴스 추천 / 관심 종목 ── */
+    .reco-note {
+      color: var(--subtle);
+      font-size: 0.7rem;
+      font-weight: 400;
+      margin-left: 8px;
+    }
+    .reco-grade { font-weight: 700; }
+    .reco-headline {
+      display: block;
+      color: var(--subtle);
+      font-size: 0.73rem;
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 420px;
+    }
+    .reco-headline:hover { color: var(--text); text-decoration: underline; }
+    .wl-add {
+      display: flex;
+      gap: 8px;
+      margin: 6px 0 10px;
+    }
+    .wl-add input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: var(--text);
+      font-size: 0.8rem;
+    }
+    .wl-btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 16px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .wl-btn:hover { background: #2ea043; }
+    .wl-del {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--subtle);
+      font-size: 0.72rem;
+      padding: 3px 9px;
+      cursor: pointer;
+    }
+    .wl-del:hover { color: var(--red); border-color: var(--red); }
+
     /* ── 설정 모달 ── */
     .overlay {
       display: none;
@@ -445,6 +500,25 @@
   <div class="card full-width" id="ordersCard">
     <div class="card-label">최근 체결 내역</div>
     <div id="ordersBody"><div class="empty-state">체결 내역 없음</div></div>
+  </div>
+
+  <!-- ⑥ 뉴스 기반 투자 추천 -->
+  <div class="card full-width" id="recoCard">
+    <div class="card-label">📰 뉴스 기반 투자 추천
+      <span class="reco-note">최근 3일 뉴스 감성 집계 · 참고용 (자동 매매 미연동)</span>
+    </div>
+    <div id="recoBody"><div class="empty-state">관심 종목을 추가하면 뉴스 기반 추천이 표시됩니다</div></div>
+  </div>
+
+  <!-- ⑦ 관심 종목 관리 (뉴스 수집 대상) -->
+  <div class="card full-width" id="watchlistCard">
+    <div class="card-label">⭐ 관심 종목 (뉴스 수집 대상)</div>
+    <div class="wl-add">
+      <input type="text" id="wlCode" placeholder="종목코드 (예: 000660)" maxlength="20">
+      <input type="text" id="wlName" placeholder="종목명 (비우면 KIS 자동 조회)">
+      <button class="wl-btn" onclick="watchlistAdd()">추가</button>
+    </div>
+    <div id="watchlistBody"><div class="empty-state">관심 종목 없음</div></div>
   </div>
 
 </div><!-- /dashboard -->
@@ -809,6 +883,172 @@
     } catch { /* 유지 */ }
   }
 
+  // ── 뉴스 기반 투자 추천 ──────────────────────────────────────────────────
+
+  const GRADE_LABEL = {
+    BUY_CANDIDATE: ['매수 후보', 'up'],
+    CAUTION:       ['주의',      'down'],
+    NEUTRAL:       ['관망',      'flat'],
+  };
+  const SENTI_MARK = { POSITIVE: '🔴', NEGATIVE: '🔵', NEUTRAL: '⚪' };
+
+  async function loadRecommendations() {
+    try {
+      const list = await get('/api/research/recommendations');
+      const el = document.getElementById('recoBody');
+      el.textContent = '';
+
+      if (!list || list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '관심 종목을 추가하면 뉴스 기반 추천이 표시됩니다';
+        el.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'orders-table';
+
+      const thead = document.createElement('thead');
+      const hrow = document.createElement('tr');
+      ['종목', '판정', '점수', '호재', '악재', '뉴스', '최근 헤드라인'].forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = h;
+        hrow.appendChild(th);
+      });
+      thead.appendChild(hrow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      list.forEach(r => {
+        const tr = document.createElement('tr');
+        const [gradeLabel, gradeCls] = GRADE_LABEL[r.grade] ?? [r.grade, 'flat'];
+
+        const tdStock = document.createElement('td');
+        tdStock.textContent = (r.stockName || r.stockCode) + ' · ' + r.stockCode;
+        tr.appendChild(tdStock);
+
+        const tdGrade = document.createElement('td');
+        const gradeSpan = document.createElement('span');
+        gradeSpan.className = cx('reco-grade', gradeCls);
+        gradeSpan.textContent = gradeLabel;
+        tdGrade.appendChild(gradeSpan);
+        tr.appendChild(tdGrade);
+
+        [SIGN(r.score) + r.score, r.positiveCount + '건', r.negativeCount + '건', r.newsCount + '건']
+          .forEach(v => {
+            const td = document.createElement('td');
+            td.textContent = v;
+            tr.appendChild(td);
+          });
+
+        const tdNews = document.createElement('td');
+        (r.headlines || []).forEach(h => {
+          const a = document.createElement('a');
+          a.className = 'reco-headline';
+          a.href = h.url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = (SENTI_MARK[h.sentiment] ?? '⚪') + ' ' + h.title;
+          tdNews.appendChild(a);
+        });
+        if ((r.headlines || []).length === 0) tdNews.textContent = '—';
+        tr.appendChild(tdNews);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      el.appendChild(table);
+    } catch { /* 유지 */ }
+  }
+
+  // ── 관심 종목 관리 ───────────────────────────────────────────────────────
+
+  async function loadWatchlist() {
+    try {
+      const list = await get('/api/research/watchlist');
+      const el = document.getElementById('watchlistBody');
+      el.textContent = '';
+
+      if (!list || list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '관심 종목 없음';
+        el.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'orders-table';
+      const tbody = document.createElement('tbody');
+      list.forEach(w => {
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.textContent = (w.stockName || w.stockCode) + ' · ' + w.stockCode;
+        tr.appendChild(tdName);
+
+        const tdPrice = document.createElement('td');
+        if (w.currentPrice != null) {
+          tdPrice.className = priceClass(w.changeAmount ?? 0);
+          tdPrice.textContent = KRW(w.currentPrice) + ' (' + PCT(w.changeRate) + ')';
+        } else {
+          tdPrice.textContent = '—';
+        }
+        tr.appendChild(tdPrice);
+
+        const tdDel = document.createElement('td');
+        tdDel.style.textAlign = 'right';
+        const btn = document.createElement('button');
+        btn.className = 'wl-del';
+        btn.textContent = '삭제';
+        btn.onclick = () => watchlistRemove(w.stockCode);
+        tdDel.appendChild(btn);
+        tr.appendChild(tdDel);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      el.appendChild(table);
+    } catch { /* 유지 */ }
+  }
+
+  async function watchlistAdd() {
+    const codeEl = document.getElementById('wlCode');
+    const nameEl = document.getElementById('wlName');
+    const stockCode = codeEl.value.trim();
+    if (!stockCode) { showToast('종목코드를 입력하세요', 'err'); return; }
+
+    try {
+      const res = await fetch('/api/research/watchlist', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ stockCode, stockName: nameEl.value.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || '추가 실패', 'err'); return; }
+
+      showToast('관심 종목 추가: ' + (data.stockName || stockCode), 'ok');
+      codeEl.value = '';
+      nameEl.value = '';
+      await Promise.allSettled([loadWatchlist(), loadRecommendations()]);
+    } catch (e) {
+      showToast('추가 실패: ' + e.message, 'err');
+    }
+  }
+
+  async function watchlistRemove(stockCode) {
+    try {
+      const res = await fetch('/api/research/watchlist/' + encodeURIComponent(stockCode),
+        { method: 'DELETE' });
+      if (!res.ok) { showToast('삭제 실패 (HTTP ' + res.status + ')', 'err'); return; }
+      showToast('관심 종목 삭제: ' + stockCode, 'ok');
+      await Promise.allSettled([loadWatchlist(), loadRecommendations()]);
+    } catch (e) {
+      showToast('삭제 실패: ' + e.message, 'err');
+    }
+  }
+
   async function loadAll() {
     await Promise.allSettled([
       loadStatus(),
@@ -817,6 +1057,8 @@
       loadPnl(),
       loadRisk(),
       loadOrders(),
+      loadRecommendations(),
+      loadWatchlist(),
     ]);
   }
 
@@ -947,22 +1189,28 @@
       loadPnl(),
       loadRisk(),
       loadOrders(),
+      loadRecommendations(),
+      loadWatchlist(),
     ]);
   }
 
   init();
 
-  // 현재가: 5초, 나머지: 10초 폴링
+  // 현재가: 5초, 대시보드: 10초, 리서치(추천·관심종목): 60초 폴링
   const quoteTimer    = setInterval(loadQuote,    5_000);
   const dashTimer     = setInterval(() => Promise.allSettled([
     loadStatus(), loadPosition(), loadPnl(), loadRisk(), loadOrders()
   ]), 10_000);
+  const researchTimer = setInterval(() => Promise.allSettled([
+    loadRecommendations(), loadWatchlist()
+  ]), 60_000);
 
   // 탭 비가시 시 폴링 일시정지
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       clearInterval(quoteTimer);
       clearInterval(dashTimer);
+      clearInterval(researchTimer);
     }
   });
 </script>

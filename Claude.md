@@ -33,7 +33,7 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
 - 주문: 시장가 1주 고정 (수량 로직은 v2)
 - 알림: 텔레그램 (체결/에러/청산)
-- 뉴스(`research` 패키지): 수집·분류만, 매매 미연동 (연동은 Phase 3)
+- 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
 
 ## 7대 리스크 룰 (`com.trading.risk`, RiskEngine에 7개 주입됨)
 
@@ -76,6 +76,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 - `KisBrokerageApiClient` (Gate 2) — 강제청산 실행부 실구현 (잔고/전량매도/미체결취소)
 - `TimeCutScheduler` (Gate 3) — 평일 15:15 KST 보유분 전량 매도 (평시 OrderEngine 경로)
 - `TradeResultTracker` (Gate 3) — 매도 체결 실현손익 → 연속손실 카운터 (`portfolio_state` 영속화)
+- `RecommendationService` (`research`) — 관심 종목 뉴스 감성 집계 →
+  매수 후보/관망/주의 추천 (대시보드 표시 전용, 매매 미연동)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 

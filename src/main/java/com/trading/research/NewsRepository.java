@@ -16,6 +16,10 @@ public interface NewsRepository extends JpaRepository<NewsItem, Long> {
     /** 복수 종목 최신 뉴스 (관심 종목 전체 피드) */
     List<NewsItem> findTop50ByStockCodeInOrderByPublishedAtDesc(List<String> stockCodes);
 
+    /** 추천 집계용 — 복수 종목의 최근 N일 뉴스 (RecommendationService) */
+    List<NewsItem> findByStockCodeInAndPublishedAtAfterOrderByPublishedAtDesc(
+            List<String> stockCodes, LocalDateTime after);
+
     /** 중복 URL 체크 */
     boolean existsByUrl(String url);
 
