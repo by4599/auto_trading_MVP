@@ -10,7 +10,9 @@ import com.trading.order.OrderStatus;
 import com.trading.position.BalanceClient;
 import com.trading.position.BalanceClient.BalanceSnapshot;
 import com.trading.position.BalanceClient.Holding;
+import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -49,7 +51,8 @@ class KisBrokerageApiClientTest {
         orderHistoryRepository = mock(OrderHistoryRepository.class);
         FillStateUpdater fillStateUpdater = new FillStateUpdater(
                 orderHistoryRepository, mock(PositionRepository.class),
-                mock(ApplicationEventPublisher.class));
+                mock(ApplicationEventPublisher.class),
+                new TradeResultTracker(mock(PortfolioStateRepository.class)));
         sut = new KisBrokerageApiClient(balanceClient, orderClient, cancelClient,
                 orderHistoryRepository, fillStateUpdater);
     }

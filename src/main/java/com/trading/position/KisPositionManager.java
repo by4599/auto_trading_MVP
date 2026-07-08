@@ -1,6 +1,5 @@
 package com.trading.position;
 
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -25,8 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 성공 이력이 없으면 Position 테이블 기반 폴백(dailyPnl=0, totalAssetValue는
  * 평단가 근사 — RiskMonitor·GlobalEquityStopRule은 totalAssetValue<=0 가드로 오탐 방지).
  *
- * TODO Sprint 3 (Gate 3): consecutiveLossCount — 매도 체결(출구 전략) 구현 후
- * order_history의 실현손익 연속 카운트로 연동.
+ * consecutiveLossCount는 TradeResultTracker(portfolio_state 영속화)에서 읽는다 (F-5 해소).
  */
 @Service
 @Profile("paper")
@@ -39,20 +37,18 @@ public class KisPositionManager implements PositionManager {
     private final BalanceClient balanceClient;
     private final PositionRepository positionRepository;
     private final DailyEquityRepository dailyEquityRepository;
+    private final TradeResultTracker tradeResultTracker;
 
     private final AtomicReference<CachedSnapshot> cache = new AtomicReference<>();
 
     public KisPositionManager(BalanceClient balanceClient,
                               PositionRepository positionRepository,
-                              DailyEquityRepository dailyEquityRepository) {
+                              DailyEquityRepository dailyEquityRepository,
+                              TradeResultTracker tradeResultTracker) {
         this.balanceClient = balanceClient;
         this.positionRepository = positionRepository;
         this.dailyEquityRepository = dailyEquityRepository;
-    }
-
-    @PostConstruct
-    void warnInactiveRules() {
-        log.warn("[운영 주의] ConsecutiveLossRule 비활성 상태 — 출구 전략(Gate 3) 구현 전까지 연속 손실 카운터는 0 고정입니다");
+        this.tradeResultTracker = tradeResultTracker;
     }
 
     @Override
@@ -93,7 +89,8 @@ public class KisPositionManager implements PositionManager {
         log.debug("계좌 스냅샷(KIS): 총자산={} 일일손익={}% 보유종목={}",
                 totalAssetValue, String.format("%.2f", dailyPnlPercent * 100), snapshots.size());
 
-        return new Account(totalAssetValue, dailyPnlPercent, 0, snapshots);
+        return new Account(totalAssetValue, dailyPnlPercent,
+                tradeResultTracker.getConsecutiveLossCount(), snapshots);
     }
 
     /**
@@ -132,7 +129,8 @@ public class KisPositionManager implements PositionManager {
                 .mapToDouble(Account.PositionSnapshot::marketValue)
                 .sum();
 
-        return new Account(totalAssetValue, 0.0, 0, snapshots);
+        return new Account(totalAssetValue, 0.0,
+                tradeResultTracker.getConsecutiveLossCount(), snapshots);
     }
 
     // ── 내부 타입 ─────────────────────────────────────────────────────────────

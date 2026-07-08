@@ -2,6 +2,7 @@ package com.trading.order;
 
 import com.trading.RetryConfig;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultTracker;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -53,6 +54,7 @@ import static org.assertj.core.api.Assertions.*;
 @Import({
     FillStateUpdater.class,
     RetryConfig.class,
+    TradeResultTracker.class,
     OrderFilledEventTest.FillEventCapture.class,
     OrderFilledEventTest.RetryCounter.class
 })

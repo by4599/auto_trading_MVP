@@ -2,6 +2,7 @@ package com.trading.order;
 
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -45,13 +46,16 @@ public class FillStateUpdater {
     private final OrderHistoryRepository orderHistoryRepository;
     private final PositionRepository positionRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final TradeResultTracker tradeResultTracker;
 
     public FillStateUpdater(OrderHistoryRepository orderHistoryRepository,
                             PositionRepository positionRepository,
-                            ApplicationEventPublisher eventPublisher) {
+                            ApplicationEventPublisher eventPublisher,
+                            TradeResultTracker tradeResultTracker) {
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionRepository = positionRepository;
         this.eventPublisher = eventPublisher;
+        this.tradeResultTracker = tradeResultTracker;
     }
 
     /**
@@ -219,6 +223,9 @@ public class FillStateUpdater {
             pos.applyBuy(newlyFilled, fillPrice);
             positionRepository.save(pos);
         } else {
+            // applySell 전에 기록 — 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
+            tradeResultTracker.recordSellFill(
+                    order.getStockCode(), newlyFilled, fillPrice, pos.getAveragePrice());
             pos.applySell(newlyFilled);
             if (pos.getQuantity() == 0) positionRepository.delete(pos);
             else                        positionRepository.save(pos);

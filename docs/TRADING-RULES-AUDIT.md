@@ -17,7 +17,7 @@
 | 4 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 동작하나 타임존 의존 (F-8) |
 | 5 | `DailyLossRule` | -3% 매수차단 / -5% 강제청산 | ✅ **활성 (Gate 1)** — dailyPnl 실값 연동 + `RiskMonitor` 상시 감시 |
 | 6 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ **해소 (Gate 1)** — 현금 포함 equity + 신호 독립 감시 |
-| 7 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | 🔴 비활성 — 입력값 0 하드코딩, 매도 체결 데이터 필요 (Gate 3에서 F-4와 함께) |
+| 7 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ **활성 (Gate 3)** — `TradeResultTracker` 실현손익 스트릭 연동, 차단 개시 시 스트릭 리셋 |
 
 > README의 "6대 리스크 룰"은 실제와 불일치 — `PendingOrderRule` 포함 **7개**가 RiskEngine에 주입된다 (F-12).
 
@@ -87,11 +87,17 @@
 
 ### F-5. DailyLossRule·ConsecutiveLossRule 입력값 하드코딩 (문서화된 기지 사항)
 
-> 🟡 **절반 해소 (2026-07-07, Gate 1)**: `dailyPnlPercent` = (현재 총자산 − 당일 시작 자산) ÷ 당일 시작 자산으로
-> 실값 연동 (평가손익 포함, `daily_equity` 테이블에 기준 영속화 — 장중 재시작 안전).
-> `consecutiveLossCount`는 매도 체결 데이터가 필요하므로 Gate 3(F-4 출구 전략)과 함께 구현.
+> ✅ **해소 (2026-07-08, Gate 3)**: `dailyPnlPercent`는 Gate 1에서 실값 연동
+> (평가손익 포함, `daily_equity` 영속화 — 장중 재시작 안전).
+> `consecutiveLossCount`는 `TradeResultTracker` 신설 — 매도 체결(FillStateUpdater 트랜잭션 내)마다
+> 실현손익 = (체결가 − 평단가) × 수량으로 손실이면 +1, 수익/본전이면 0 리셋.
+> `portfolio_state`에 영속화(재시작 안전), `KisPositionManager.snapshotAccount()`가 실값 주입.
+> 부수 수정: `ConsecutiveLossRule`이 차단 개시 시 스트릭을 리셋하도록 변경 —
+> 리셋 없이는 1시간 후에도 count≥3이라 무기한 재차단되는 잠재 결함이 있었다.
+> 검증: `TradeResultTrackerTest` 7 + `ConsecutiveLossRuleTest` 4 + 통합 2, 전체 스위트 87/87 통과.
 
-- ~~`dailyPnlPercent = 0.0`~~, `consecutiveLossCount = 0` 고정. 기동 시 경고 로그를 남기는 점은 양호. F-4(출구 전략)가 선행되어야 실현손익이 생긴다는 의존 관계에 유의.
+- ~~`dailyPnlPercent = 0.0`, `consecutiveLossCount = 0` 고정~~. v1 한계: 매도 체결 청크 단위 1회 기록
+  (주문 1주 고정이라 "1 거래 = 1 기록" 성립 — v2 부분 체결 매도 도입 시 라운드트립 단위 집계로 전환 필요).
 
 ### F-6. Trim 3회 연속 실패 에스컬레이션은 도달 불가능한 데드코드
 
@@ -163,6 +169,6 @@
    테스트 23/23 통과 (RiskMonitorTest 9, KisPositionManagerTest 6, DailyLossRuleTest 4, LiquidationServiceTest 회귀 4).
 2. 🟡 **[Gate 2 — 청산 실행] 코드 완료 (2026-07-08)**: F-3 실장 + 리허설 엔드포인트.
    남은 것: **모의계좌 강제청산 리허설 1회** (장중 실행 권장 — 장외에는 주문 거부가 "부분 실패" 경로로 보고되는지 확인하는 것도 유효한 리허설).
-3. ✅ **[Gate 3 — 전략 완결] 타임컷 완료 (2026-07-08)**: F-4 `TimeCutScheduler` 구현.
-   남은 것: 실현손익 기반 `consecutiveLossCount` 연동 (F-5 나머지 — 매도 체결 데이터가 이제 생기므로 구현 가능).
+3. ✅ **[Gate 3 — 전략 완결] 완료 (2026-07-08)**: F-4 `TimeCutScheduler` +
+   F-5 나머지 `TradeResultTracker`(실현손익 연속손실 카운터, `ConsecutiveLossRule` 활성화).
 4. F-7, F-9, F-8 순으로 정리. F-6은 ADR-002 착수 시 함께.

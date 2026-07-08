@@ -45,7 +45,7 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (KST 타임존 가정, F-8) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | 🔴 비활성 — 입력값 0 하드코딩 (F-5 나머지, 타임컷 도입으로 이제 구현 가능) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭 연동) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
 > 단, **모의계좌 청산 리허설 1회 성공 전까지 Gate 2 완료 판정 아님**
@@ -75,15 +75,16 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 - `RiskMonitor`/`KisBalanceClient` (Gate 1) — 신호 독립 1초 상시 감시 + 잔고 실값 연동
 - `KisBrokerageApiClient` (Gate 2) — 강제청산 실행부 실구현 (잔고/전량매도/미체결취소)
 - `TimeCutScheduler` (Gate 3) — 평일 15:15 KST 보유분 전량 매도 (평시 OrderEngine 경로)
+- `TradeResultTracker` (Gate 3) — 매도 체결 실현손익 → 연속손실 카운터 (`portfolio_state` 영속화)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 
-1. `ConsecutiveLossRule` 입력값 0 하드코딩 — 실현손익 기반 연속손실 카운터 미구현 (F-5 나머지)
-2. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
-3. `currentPrice = averagePrice` 근사 잔존 — 현재가 API 교체 예정
-4. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 + 휴장일 미인지 (거래일 캘린더는 로드맵 항목)
+1. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
+2. `currentPrice = averagePrice` 근사 잔존 — 현재가 API 교체 예정
+3. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 + 휴장일 미인지 (거래일 캘린더는 로드맵 항목)
+4. 연속손실 기록은 매도 체결 청크 단위 — v2 부분 체결 매도 도입 시 라운드트립 집계로 전환 필요
 
-해소됨: F-1/F-2/F-5 일부/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2, 2026-07-08) · F-4 (Gate 3, 2026-07-08)
+해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2, 2026-07-08) · F-4/F-5 (Gate 3, 2026-07-08)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

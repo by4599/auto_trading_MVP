@@ -3,6 +3,7 @@ package com.trading.order;
 import com.trading.RetryConfig;
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 @DataJpaTest
 @ActiveProfiles("paper")
-@Import({FillStateUpdater.class, RetryConfig.class})
+@Import({FillStateUpdater.class, RetryConfig.class, TradeResultTracker.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)  // 테스트 자체 TX 없음 — 직접 관리
 @DisplayName("FillStateUpdater 동시성 통합 테스트")
 class FillStateConcurrencyTest {

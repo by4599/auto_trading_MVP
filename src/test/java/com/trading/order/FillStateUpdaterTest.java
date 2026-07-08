@@ -1,8 +1,11 @@
 package com.trading.order;
 
 import com.trading.RetryConfig;
+import com.trading.position.PortfolioState;
+import com.trading.position.PortfolioStateRepository;
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultTracker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,13 +26,14 @@ import static org.assertj.core.api.Assertions.*;
  */
 @DataJpaTest
 @ActiveProfiles("paper")
-@Import({FillStateUpdater.class, RetryConfig.class})
+@Import({FillStateUpdater.class, RetryConfig.class, TradeResultTracker.class})
 @DisplayName("FillStateUpdater 상태 가드 통합 테스트")
 class FillStateUpdaterTest {
 
     @Autowired FillStateUpdater stateUpdater;
     @Autowired OrderHistoryRepository orderRepo;
     @Autowired PositionRepository positionRepo;
+    @Autowired PortfolioStateRepository portfolioStateRepo;
 
     // ── CANCEL_FAILED 전이 ─────────────────────────────────────────────────────
 
@@ -159,6 +163,45 @@ class FillStateUpdaterTest {
         assertThatThrownBy(() -> stateUpdater.finalizeAfterCancel(order.getId(), 0, 0.0))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("CANCEL_REQUESTED");
+    }
+
+    // ── F-5: 매도 체결 → 실현손익 연속 손실 카운터 ───────────────────────────
+
+    @Test
+    @DisplayName("손실 매도 체결 → portfolio_state 연속손실 카운트 증가")
+    void loss_sell_fill_increments_consecutive_loss_count() {
+        // 보유: 1주 @73,000
+        Position pos = Position.empty("005930");
+        pos.applyBuy(1, 73_000.0);
+        positionRepo.saveAndFlush(pos);
+
+        // 72,000에 매도 체결 → 실현손익 -1,000
+        OrderHistory sell = orderRepo.saveAndFlush(
+                OrderHistory.accepted("005930", OrderSide.SELL, 1, "ORD-F5-01"));
+        stateUpdater.applyFill(sell.getId(), 1, 72_000.0);
+
+        assertThat(portfolioStateRepo.findById(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT))
+                .isPresent()
+                .hasValueSatisfying(s -> assertThat(s.getStateValue()).isEqualTo(1.0));
+    }
+
+    @Test
+    @DisplayName("수익 매도 체결 → 연속손실 카운트 0으로 리셋")
+    void profit_sell_fill_resets_consecutive_loss_count() {
+        portfolioStateRepo.saveAndFlush(
+                PortfolioState.of(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT, 2));
+
+        Position pos = Position.empty("005930");
+        pos.applyBuy(1, 73_000.0);
+        positionRepo.saveAndFlush(pos);
+
+        OrderHistory sell = orderRepo.saveAndFlush(
+                OrderHistory.accepted("005930", OrderSide.SELL, 1, "ORD-F5-02"));
+        stateUpdater.applyFill(sell.getId(), 1, 74_000.0); // +1,000
+
+        assertThat(portfolioStateRepo.findById(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT))
+                .isPresent()
+                .hasValueSatisfying(s -> assertThat(s.getStateValue()).isEqualTo(0.0));
     }
 
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────

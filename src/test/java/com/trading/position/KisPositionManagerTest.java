@@ -22,6 +22,7 @@ class KisPositionManagerTest {
     private BalanceClient balanceClient;
     private PositionRepository positionRepository;
     private DailyEquityRepository dailyEquityRepository;
+    private PortfolioStateRepository portfolioStateRepository;
     private KisPositionManager sut;
 
     @BeforeEach
@@ -29,7 +30,9 @@ class KisPositionManagerTest {
         balanceClient = mock(BalanceClient.class);
         positionRepository = mock(PositionRepository.class);
         dailyEquityRepository = mock(DailyEquityRepository.class);
-        sut = new KisPositionManager(balanceClient, positionRepository, dailyEquityRepository);
+        portfolioStateRepository = mock(PortfolioStateRepository.class);
+        sut = new KisPositionManager(balanceClient, positionRepository, dailyEquityRepository,
+                new TradeResultTracker(portfolioStateRepository));
     }
 
     // ── F-1: 총자산은 예수금 포함 tot_evlu_amt ──────────────────────────────
@@ -75,6 +78,21 @@ class KisPositionManagerTest {
 
         verify(dailyEquityRepository).save(any(DailyEquity.class));
         assertThat(account.getDailyPnlPercent()).isEqualTo(0.0);
+    }
+
+    // ── F-5: consecutiveLossCount는 TradeResultTracker(portfolio_state)에서 ──
+
+    @Test
+    void consecutive_loss_count_wired_from_portfolio_state() {
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, List.of()));
+        when(dailyEquityRepository.findById(any(LocalDate.class)))
+                .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));
+        when(portfolioStateRepository.findById(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT))
+                .thenReturn(Optional.of(PortfolioState.of(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT, 2)));
+
+        Account account = sut.snapshotAccount();
+
+        assertThat(account.getConsecutiveLossCount()).isEqualTo(2);
     }
 
     // ── TTL 캐시: 연속 호출 시 잔고 API는 1회만 ──────────────────────────────
