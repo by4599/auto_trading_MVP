@@ -206,7 +206,8 @@ Phase 2 완료 후, Phase 3 착수 전:
 
 - **백테스트 인프라 B-1~B-3** ([설계 문서](docs/BACKTEST-DESIGN.md)): 현행 K=0.5가 검증 안 된 값이므로, 소급 검증 결과에 따라 전략 유지/교체를 Phase 3 전에 판단한다
 
-Phase 3 이후 ([투자 판단 방법론 §5 단계표](docs/INVESTMENT-METHODOLOGY.md) 참고):
+Phase 3 이후 ([투자 판단 방법론 §5 단계표](docs/INVESTMENT-METHODOLOGY.md),
+컴포넌트 수준 실행 설계는 [추천→투자 파이프라인 설계](docs/RECOMMENDATION-TO-TRADE-DESIGN.md) 참고):
 
 - **3a**: DART 공시 수집 + 이벤트 택소노미 분류 — LLM으로 뉴스/공시를 `{유형, 방향, 강도, 대상}`으로 구조화
 - **3b**: 이벤트→밸류체인 매핑 테이블 + 재무 필터(ROE/부채비율/유동성 — 탈락용)

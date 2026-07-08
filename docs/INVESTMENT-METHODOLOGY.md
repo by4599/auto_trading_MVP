@@ -255,5 +255,6 @@ ATR(Average True Range)은 그 종목의 "평상시 하루 움직임 폭"이다.
 ## 6. 참고 — 관련 문서
 
 - [README.md](../README.md) — 전체 로드맵과 현재 구현 상태
+- [RECOMMENDATION-TO-TRADE-DESIGN.md](RECOMMENDATION-TO-TRADE-DESIGN.md) — §5 단계표의 컴포넌트 수준 실행 설계 (추천→검토→주문 파이프라인)
 - [TRADING-RULES-AUDIT.md](TRADING-RULES-AUDIT.md) — 현행 리스크 룰 검증 결과 (Phase 2 선행 과제)
 - [ADR-001](../ADR-001-multi-sleeve-risk-architecture_1.md) — 멀티 슬리브 자금 배분·청산 아키텍처
