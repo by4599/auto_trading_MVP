@@ -31,17 +31,23 @@ public class ResearchController {
     private final KisApiClient           kisApiClient;
     private final KisProperties          kisProperties;
     private final RecommendationService  recommendationService;
+    private final DisclosureRepository   disclosureRepository;
+    private final DartProperties         dartProperties;
 
     public ResearchController(WatchlistRepository   watchlistRepository,
                                NewsRepository        newsRepository,
                                KisApiClient          kisApiClient,
                                KisProperties         kisProperties,
-                               RecommendationService recommendationService) {
+                               RecommendationService recommendationService,
+                               DisclosureRepository  disclosureRepository,
+                               DartProperties        dartProperties) {
         this.watchlistRepository   = watchlistRepository;
         this.newsRepository        = newsRepository;
         this.kisApiClient          = kisApiClient;
         this.kisProperties         = kisProperties;
         this.recommendationService = recommendationService;
+        this.disclosureRepository  = disclosureRepository;
+        this.dartProperties        = dartProperties;
     }
 
     // ── 관심 종목 ─────────────────────────────────────────────────────────────
@@ -128,6 +134,30 @@ public class ResearchController {
                 .stream()
                 .map(this::toNewsRow)
                 .toList();
+    }
+
+    // ── DART 공시 ─────────────────────────────────────────────────────────────
+
+    /** 최근 공시 50건 (매매 유니버스 ∪ 워치리스트 대상, 30분 주기 수집) */
+    @GetMapping("/disclosures")
+    public Map<String, Object> getDisclosures() {
+        List<Map<String, Object>> rows = disclosureRepository
+                .findTop50ByOrderByDisclosedAtDescIdDesc().stream()
+                .map(d -> {
+                    Map<String, Object> row = new LinkedHashMap<String, Object>();
+                    row.put("stockCode",   d.getStockCode());
+                    row.put("corpName",    d.getCorpName());
+                    row.put("reportName",  d.getReportName());
+                    row.put("sentiment",   d.getSentiment());
+                    row.put("disclosedAt", d.getDisclosedAt().toString());
+                    row.put("url",         d.dartUrl());
+                    return row;
+                })
+                .toList();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("configured", dartProperties.isConfigured());
+        result.put("items", rows);
+        return result;
     }
 
     // ── 투자 추천 ─────────────────────────────────────────────────────────────

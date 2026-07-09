@@ -37,6 +37,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_position_stock_code ON position (stock_cod
 
 -- ──────────────────────────────────────────────────────────────────────────────
 
+-- DART 공시 (이벤트 백테스트 B-4 표본 — 자동 삭제하지 않음)
+CREATE TABLE IF NOT EXISTS disclosure_item (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    stock_code   VARCHAR(20)  NOT NULL,
+    corp_name    VARCHAR(100),
+    receipt_no   VARCHAR(20)  NOT NULL UNIQUE,
+    report_name  TEXT         NOT NULL,
+    disclosed_at DATE         NOT NULL,
+    fetched_at   TIMESTAMP    NOT NULL,
+    sentiment    VARCHAR(10),
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_disclosure_stock_code ON disclosure_item (stock_code);
+CREATE INDEX IF NOT EXISTS idx_disclosure_date       ON disclosure_item (disclosed_at);
+
+-- ──────────────────────────────────────────────────────────────────────────────
+
 -- 매매 유니버스 (자동 매매 대상 — 편입/제외는 웹 UI에서 사람이 직접, 게이트 G1)
 CREATE TABLE IF NOT EXISTS trading_universe (
     id         BIGINT       NOT NULL AUTO_INCREMENT,

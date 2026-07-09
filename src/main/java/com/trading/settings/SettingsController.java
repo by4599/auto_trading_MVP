@@ -2,6 +2,7 @@ package com.trading.settings;
 
 import com.trading.market.KisApiClient;
 import com.trading.market.KisProperties;
+import com.trading.research.DartProperties;
 import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +21,8 @@ public class SettingsController {
 
     private static final List<String> KEY_ORDER = List.of(
             "KIS_APPKEY", "KIS_SECRETKEY", "KIS_ACCOUNT_NO",
-            "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"
+            "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+            "DART_API_KEY"
     );
 
     private static final Set<String> ALLOWED_KEYS = new HashSet<>(KEY_ORDER);
@@ -28,13 +30,16 @@ public class SettingsController {
     private final KisProperties kisProperties;
     private final KisApiClient kisApiClient;
     private final TradingStatusManager statusManager;
+    private final DartProperties dartProperties;
 
     public SettingsController(KisProperties kisProperties,
                                KisApiClient kisApiClient,
-                               TradingStatusManager statusManager) {
+                               TradingStatusManager statusManager,
+                               DartProperties dartProperties) {
         this.kisProperties = kisProperties;
         this.kisApiClient  = kisApiClient;
         this.statusManager = statusManager;
+        this.dartProperties = dartProperties;
     }
 
     @GetMapping("/status")
@@ -99,6 +104,7 @@ public class SettingsController {
             case "KIS_APPKEY"          -> kisProperties.setAppkey(value);
             case "KIS_SECRETKEY"       -> kisProperties.setSecretkey(value);
             case "KIS_ACCOUNT_NO"      -> kisProperties.setAccountNo(value);
+            case "DART_API_KEY"        -> dartProperties.setApiKey(value);
             // TELEGRAM_* 는 별도 컴포넌트가 직접 env 읽음 — 여기선 setx만으로 충분
         }
     }

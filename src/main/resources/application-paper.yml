@@ -13,6 +13,9 @@ telegram:
   bot-token: ${TELEGRAM_BOT_TOKEN:}   # 비워두면 알림 스킵 (개발 환경)
   chat-id: ${TELEGRAM_CHAT_ID:}
 
+dart:
+  api-key: ${DART_API_KEY:}   # 비워두면 공시 수집 스킵 — https://opendart.fss.or.kr 무료 발급
+
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
 # ./trading-db.mv.db 파일이 생성된다. .gitignore에 반드시 추가할 것.

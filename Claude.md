@@ -37,6 +37,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   지정가 분할(Price Jitter)은 ADR-001 미결정 파라미터 해소 후
 - 알림: 텔레그램 (체결/에러/청산)
 - 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
+- 공시(DART): 유니버스∪워치리스트 대상 30분 주기 수집·표시 전용.
+  이벤트 백테스트(B-4) 표본이므로 **자동 삭제 금지**. DART_API_KEY 미설정 시 조용히 스킵
 
 ## 7대 리스크 룰 (`com.trading.risk`, RiskEngine에 7개 주입됨)
 
@@ -86,6 +88,9 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
 - `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,
   상한 20, 웹 UI 편입/제외) + `TradingScheduler` 라운드로빈 + 대시보드 유니버스 카드
+- DART 공시 수집 (2026-07-09, Phase 3a 수집부) — `DartDisclosureService`(30분 주기,
+  접수번호 중복 방지, 공시 유형 키워드 분류) + `HttpDartApiClient`(corpCode ZIP StAX 파싱)
+  + 대시보드 공시 카드. HTTP는 `DartApiClient` 인터페이스 뒤 (Mockito 제약 대응)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 

@@ -511,6 +511,14 @@
     <div id="recoBody"><div class="empty-state">관심 종목을 추가하면 뉴스 기반 추천이 표시됩니다</div></div>
   </div>
 
+  <!-- ⑥-b 최근 공시 (DART) -->
+  <div class="card full-width" id="disclosureCard">
+    <div class="card-label">📋 최근 공시 (DART)
+      <span class="reco-note">유니버스·관심 종목 대상 · 30분 주기 · 이벤트 백테스트 표본으로 축적</span>
+    </div>
+    <div id="disclosureBody"><div class="empty-state">DART 키를 설정하면 공시가 수집됩니다</div></div>
+  </div>
+
   <!-- ⑦ 관심 종목 관리 (뉴스 수집 대상) -->
   <div class="card full-width" id="watchlistCard">
     <div class="card-label">⭐ 관심 종목 (뉴스 수집 대상)</div>
@@ -588,6 +596,23 @@
 
     <button class="btn-save ghost" onclick="saveTelegram()">텔레그램 저장</button>
     <div class="msg" id="tgMsg"></div>
+
+    <hr class="divider">
+
+    <div class="section-hdr">📋 DART 공시 API <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
+    <p class="hint">
+      <a href="https://opendart.fss.or.kr" target="_blank">DART Open API</a>에서 무료 발급.
+      비워두면 공시 수집 없이 뉴스만 수집됩니다.
+    </p>
+    <div class="field">
+      <label>DART_API_KEY</label>
+      <div class="input-wrap">
+        <input type="password" id="dart_key" placeholder="40자리 인증키">
+        <span class="eye" onclick="toggle('dart_key')">👁</span>
+      </div>
+    </div>
+    <button class="btn-save ghost" onclick="saveDart()">DART 저장</button>
+    <div class="msg" id="dartMsg"></div>
   </div>
 </div>
 
@@ -1027,6 +1052,56 @@
     } catch { /* 유지 */ }
   }
 
+  // ── DART 공시 ────────────────────────────────────────────────────────────
+
+  async function loadDisclosures() {
+    try {
+      const d = await get('/api/research/disclosures');
+      const el = document.getElementById('disclosureBody');
+      el.textContent = '';
+
+      const items = d.items || [];
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = d.configured
+          ? '수집된 공시 없음 (30분 주기 수집 대기 중)'
+          : 'DART 키를 설정하면 공시가 수집됩니다 (⚙ 설정 → DART 공시 API)';
+        el.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'orders-table';
+      const tbody = document.createElement('tbody');
+      items.slice(0, 15).forEach(it => {
+        const tr = document.createElement('tr');
+
+        const tdDate = document.createElement('td');
+        tdDate.textContent = it.disclosedAt;
+        tr.appendChild(tdDate);
+
+        const tdCorp = document.createElement('td');
+        tdCorp.textContent = (it.corpName || it.stockCode) + ' · ' + it.stockCode;
+        tr.appendChild(tdCorp);
+
+        const tdReport = document.createElement('td');
+        const a = document.createElement('a');
+        a.className = 'reco-headline';
+        a.href = it.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = (SENTI_MARK[it.sentiment] ?? '⚪') + ' ' + it.reportName;
+        tdReport.appendChild(a);
+        tr.appendChild(tdReport);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      el.appendChild(table);
+    } catch { /* 유지 */ }
+  }
+
   // ── 관심 종목 관리 ───────────────────────────────────────────────────────
 
   async function loadWatchlist() {
@@ -1189,6 +1264,12 @@
     }, 'tgMsg');
   }
 
+  async function saveDart() {
+    await doSave({
+      DART_API_KEY: document.getElementById('dart_key').value,
+    }, 'dartMsg');
+  }
+
   async function doSave(body, msgId) {
     const msg = document.getElementById(msgId);
     try {
@@ -1256,6 +1337,7 @@
       loadOrders(),
       loadRecommendations(),
       loadWatchlist(),
+      loadDisclosures(),
     ]);
   }
 
@@ -1267,7 +1349,7 @@
     loadStatus(), loadPosition(), loadPnl(), loadRisk(), loadOrders()
   ]), 10_000);
   const researchTimer = setInterval(() => Promise.allSettled([
-    loadRecommendations(), loadWatchlist()
+    loadRecommendations(), loadWatchlist(), loadDisclosures()
   ]), 60_000);
 
   // 탭 비가시 시 폴링 일시정지
