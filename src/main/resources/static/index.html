@@ -455,13 +455,14 @@
     <button class="btn-primary" onclick="openSettings()">지금 설정</button>
   </div>
 
-  <!-- ① 현재가 -->
-  <div class="card" id="quoteCard">
-    <div class="card-label">현재가</div>
-    <div class="quote-name" id="quoteName">삼성전자 · 005930</div>
-    <div class="quote-price" id="quotePrice">—</div>
-    <div class="quote-change" id="quoteChange"></div>
-    <div class="quote-volume" id="quoteVolume"></div>
+  <!-- ① 매매 유니버스 (자동 매매 대상) -->
+  <div class="card" id="universeCard">
+    <div class="card-label">매매 유니버스 <span class="reco-note">자동 매매 대상 · 최대 20종목</span></div>
+    <div class="wl-add">
+      <input type="text" id="uvCode" placeholder="종목코드 6자리 (예: 000660)" maxlength="6">
+      <button class="wl-btn" onclick="universeAdd()">편입</button>
+    </div>
+    <div id="universeBody"><div class="empty-state">유니버스 비어 있음</div></div>
   </div>
 
   <!-- ② 보유 포지션 -->
@@ -703,31 +704,95 @@
 
   // ── 대시보드 카드 업데이트 ───────────────────────────────────────────────
 
-  async function loadQuote() {
+  async function loadUniverse() {
     try {
-      const d = await get('/api/market/quote/005930');
-      if (!d.configured) { return; }
-      if (d.error)        { return; }
+      const list = await get('/api/universe');
+      const el = document.getElementById('universeBody');
+      el.textContent = '';
 
-      const nameEl = document.getElementById('quoteName');
-      nameEl.textContent = (d.stockName || '삼성전자') + ' · 005930';
+      if (!list || list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '유니버스 비어 있음 — 종목을 편입하면 자동 매매가 시작됩니다';
+        el.appendChild(empty);
+        return;
+      }
 
-      const priceEl = document.getElementById('quotePrice');
-      priceEl.textContent = KRW(d.currentPrice);
-      priceEl.className = cx('quote-price', priceClass(d.changeAmount));
+      const table = document.createElement('table');
+      table.className = 'orders-table';
+      const tbody = document.createElement('tbody');
 
-      const changeEl = document.getElementById('quoteChange');
-      changeEl.className = cx('quote-change', priceClass(d.changeAmount));
-      const arrow = d.changeAmount > 0 ? '▲' : d.changeAmount < 0 ? '▼' : '−';
-      changeEl.textContent = '';
-      const s1 = document.createElement('span');
-      s1.textContent = arrow + ' ' + SIGN(d.changeAmount) + KRW(d.changeAmount);
-      const s2 = document.createElement('span');
-      s2.textContent = PCT(d.changeRate);
-      changeEl.append(s1, s2);
+      // 현재가는 순차 조회 — KIS 모의계좌 레이트리밋(초당 2건) 보호
+      for (const u of list) {
+        let quote = null;
+        try {
+          const q = await get('/api/market/quote/' + u.stockCode);
+          if (q.configured && !q.error) quote = q;
+        } catch { /* 시세 없이 행만 표시 */ }
 
-      document.getElementById('quoteVolume').textContent = '거래량 ' + VOL(d.volume);
-    } catch { /* KIS 미연결 시 유지 */ }
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.textContent = (quote?.stockName || u.stockName || u.stockCode) + ' · ' + u.stockCode;
+        tr.appendChild(tdName);
+
+        const tdPrice = document.createElement('td');
+        if (quote) {
+          tdPrice.className = priceClass(quote.changeAmount);
+          tdPrice.textContent = KRW(quote.currentPrice) + ' (' + PCT(quote.changeRate) + ')';
+        } else {
+          tdPrice.textContent = '—';
+        }
+        tr.appendChild(tdPrice);
+
+        const tdDel = document.createElement('td');
+        tdDel.style.textAlign = 'right';
+        const btn = document.createElement('button');
+        btn.className = 'wl-del';
+        btn.textContent = '제외';
+        btn.onclick = () => universeRemove(u.stockCode);
+        tdDel.appendChild(btn);
+        tr.appendChild(tdDel);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      el.appendChild(table);
+    } catch { /* 유지 */ }
+  }
+
+  async function universeAdd() {
+    const codeEl = document.getElementById('uvCode');
+    const stockCode = codeEl.value.trim();
+    if (!/^\d{6}$/.test(stockCode)) { showToast('종목코드는 6자리 숫자입니다', 'err'); return; }
+
+    try {
+      const res = await fetch('/api/universe', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ stockCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || '편입 실패', 'err'); return; }
+
+      showToast('매매 유니버스 편입: ' + stockCode, 'ok');
+      codeEl.value = '';
+      await loadUniverse();
+    } catch (e) {
+      showToast('편입 실패: ' + e.message, 'err');
+    }
+  }
+
+  async function universeRemove(stockCode) {
+    try {
+      const res = await fetch('/api/universe/' + encodeURIComponent(stockCode), { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || '제외 실패', 'err'); return; }
+      showToast('매매 유니버스 제외: ' + stockCode, 'ok');
+      await loadUniverse();
+    } catch (e) {
+      showToast('제외 실패: ' + e.message, 'err');
+    }
   }
 
   async function loadPosition() {
@@ -817,7 +882,7 @@
       modeEl.textContent = modeLabel;
 
       document.getElementById('riskDailyPnl').textContent =
-        PCT(d.dailyPnlPercent * 100) + ' (Sprint 3 예정)';
+        PCT(d.dailyPnlPercent * 100);
       document.getElementById('riskConsecutive').textContent =
         d.consecutiveLossCount + '회';
     } catch { /* 유지 */ }
@@ -1052,7 +1117,7 @@
   async function loadAll() {
     await Promise.allSettled([
       loadStatus(),
-      loadQuote(),
+      loadUniverse(),
       loadPosition(),
       loadPnl(),
       loadRisk(),
@@ -1184,7 +1249,7 @@
 
     // 나머지 카드 병렬 로드
     await Promise.allSettled([
-      loadQuote(),
+      loadUniverse(),
       loadPosition(),
       loadPnl(),
       loadRisk(),
@@ -1196,8 +1261,8 @@
 
   init();
 
-  // 현재가: 5초, 대시보드: 10초, 리서치(추천·관심종목): 60초 폴링
-  const quoteTimer    = setInterval(loadQuote,    5_000);
+  // 유니버스 시세: 15초 (종목 수 × KIS 레이트리밋 보호), 대시보드: 10초, 리서치: 60초 폴링
+  const quoteTimer    = setInterval(loadUniverse, 15_000);
   const dashTimer     = setInterval(() => Promise.allSettled([
     loadStatus(), loadPosition(), loadPnl(), loadRisk(), loadOrders()
   ]), 10_000);

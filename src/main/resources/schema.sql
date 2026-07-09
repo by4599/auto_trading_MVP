@@ -37,6 +37,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_position_stock_code ON position (stock_cod
 
 -- ──────────────────────────────────────────────────────────────────────────────
 
+-- 매매 유니버스 (자동 매매 대상 — 편입/제외는 웹 UI에서 사람이 직접, 게이트 G1)
+CREATE TABLE IF NOT EXISTS trading_universe (
+    id         BIGINT       NOT NULL AUTO_INCREMENT,
+    stock_code VARCHAR(20)  NOT NULL UNIQUE,
+    stock_name VARCHAR(100),
+    added_at   TIMESTAMP    NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_universe_stock_code ON trading_universe (stock_code);
+
+-- ──────────────────────────────────────────────────────────────────────────────
+
 -- 당일 시작 자산 (dailyPnlPercent 기준값). 날짜 키 교체가 곧 일일 리셋.
 CREATE TABLE IF NOT EXISTS daily_equity (
     trade_date   DATE           NOT NULL,

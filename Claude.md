@@ -26,7 +26,9 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 
 ## 현재 스코프 (이거 넘어서는 기능 제안하지 말 것)
 
-- 종목: 삼성전자(005930) 1개만
+- 종목: `trading_universe` 테이블 (최초 시드 005930, 최대 20종목).
+  편입/제외는 대시보드 UI에서 **사람이 직접** (수동 게이트 G1) — 뉴스 워치리스트와 별개.
+  KIS 모의 레이트리밋 때문에 스케줄러는 틱당 1종목 라운드로빈 (N종목 = 종목당 N초 간격)
 - 전략: `VolatilityBreakoutStrategy` (변동성 돌파, K=0.5) — 매수 신호.
   출구는 `TimeCutScheduler`(평일 15:15 KST 보유분 전량 매도, Gate 3)
 - 계좌: 한투 **모의투자** 계좌 (`@Profile("paper")`, 실전 전환은
@@ -56,7 +58,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 
 `market`(시세) / `strategy`(신호생성) / `signal`(신호 모음) /
 `risk`(검증·청산) / `order`(주문실행·체결) / `position`(계좌상태) /
-`scheduler`(오케스트레이션) / `research`(뉴스 수집·감성분류) /
+`scheduler`(오케스트레이션) / `universe`(매매 대상 관리) /
+`research`(뉴스 수집·감성분류) /
 `dashboard`·`settings`·`control`(웹 운영 도구, localhost:8080)
 
 자세한 설명은 `README.md` 참고.
@@ -81,6 +84,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   매수 후보/관망/주의 추천 (대시보드 표시 전용, 매매 미연동)
 - P2-A (2026-07-08) — `AtrCalculator`(ATR 14) + `OrderSizingService`(R 수량 역산) +
   `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
+- `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,
+  상한 20, 웹 UI 편입/제외) + `TradingScheduler` 라운드로빈 + 대시보드 유니버스 카드
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 

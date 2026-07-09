@@ -6,7 +6,9 @@ import com.trading.market.KisProperties;
 import com.trading.order.OrderHistory;
 import com.trading.order.OrderHistoryRepository;
 import com.trading.order.OrderStatus;
+import com.trading.position.Account;
 import com.trading.position.Position;
+import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
 import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
@@ -40,18 +42,21 @@ public class DashboardController {
     private final PositionRepository     positionRepository;
     private final OrderHistoryRepository orderHistoryRepository;
     private final TradingStatusManager   tradingStatusManager;
+    private final PositionManager        positionManager;
     private final ConcurrentHashMap<String, CachedQuote> quoteCache = new ConcurrentHashMap<>();
 
     public DashboardController(KisApiClient           kisApiClient,
                                 KisProperties          kisProperties,
                                 PositionRepository     positionRepository,
                                 OrderHistoryRepository orderHistoryRepository,
-                                TradingStatusManager   tradingStatusManager) {
+                                TradingStatusManager   tradingStatusManager,
+                                PositionManager        positionManager) {
         this.kisApiClient           = kisApiClient;
         this.kisProperties          = kisProperties;
         this.positionRepository     = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.tradingStatusManager   = tradingStatusManager;
+        this.positionManager        = positionManager;
     }
 
     // ── 1. 현재가 ─────────────────────────────────────────────────────────────
@@ -195,8 +200,21 @@ public class DashboardController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("tradingMode",          tradingStatusManager.getCurrentMode().name());
         result.put("configured",           kisProperties.isConfigured());
-        result.put("dailyPnlPercent",      0.0);   // Sprint 3: KIS VTTC8434R 연동 예정
-        result.put("consecutiveLossCount", 0);      // Sprint 3: order_history 집계 예정
+
+        // Gate 1·3 실값 — 잔고 스냅샷(3초 캐시) 재사용, 실패 시 0 폴백
+        double dailyPnl = 0.0;
+        int consecutiveLosses = 0;
+        if (kisProperties.isConfigured()) {
+            try {
+                Account account = positionManager.snapshotAccount();
+                dailyPnl = account.getDailyPnlPercent();
+                consecutiveLosses = account.getConsecutiveLossCount();
+            } catch (Exception e) {
+                log.warn("리스크 상태 스냅샷 실패 — 0 폴백: {}", e.getMessage());
+            }
+        }
+        result.put("dailyPnlPercent",      dailyPnl);
+        result.put("consecutiveLossCount", consecutiveLosses);
         return result;
     }
 
