@@ -58,14 +58,52 @@ public class KisMarketDataService implements MarketDataService {
      * "오늘인지 아닌지" 검사만으로 안전하게 최근 완성 거래일을 얻을 수 있다.
      */
     private Candle fetchYesterdayCandle(String stockCode) {
-        String today      = LocalDate.now().format(DATE_FMT);
-        String tenDaysAgo = LocalDate.now().minusDays(10).format(DATE_FMT);
+        String today = LocalDate.now().format(DATE_FMT);
+        DailyChartResponse resp = fetchDailyChart(stockCode, LocalDate.now().minusDays(10));
 
-        DailyChartResponse resp = kisApiClient.getClient().get()
+        if (resp == null || resp.output2() == null || resp.output2().size() < 2) {
+            throw new IllegalStateException("전일 일봉 없음: stockCode=" + stockCode);
+        }
+
+        // output2[0]이 오늘(장 중 미완성)이면 건너뛴다
+        int idx = today.equals(resp.output2().get(0).date()) ? 1 : 0;
+        return toCandle(resp.output2().get(idx));
+    }
+
+    /**
+     * 최근 완성 일봉 N개 (과거→최신). 당일 미완성 봉 제외.
+     * 조회 범위는 휴장일 여유를 두고 N×2+10일을 잡는다.
+     */
+    @Override
+    public List<Candle> getDailyCandles(String stockCode, int days) {
+        String today = LocalDate.now().format(DATE_FMT);
+        DailyChartResponse resp = fetchDailyChart(
+                stockCode, LocalDate.now().minusDays((long) days * 2 + 10));
+
+        if (resp == null || resp.output2() == null || resp.output2().isEmpty()) {
+            throw new IllegalStateException("일봉 조회 실패: stockCode=" + stockCode);
+        }
+
+        // KIS 응답은 최신→과거 순 — 당일을 건너뛰고 N개 수집 후 과거→최신으로 뒤집는다
+        List<Candle> collected = new java.util.ArrayList<>();
+        for (DailyData d : resp.output2()) {
+            if (d.date() == null || today.equals(d.date())) continue;
+            collected.add(toCandle(d));
+            if (collected.size() == days) break;
+        }
+        java.util.Collections.reverse(collected);
+        return List.copyOf(collected);
+    }
+
+    private DailyChartResponse fetchDailyChart(String stockCode, LocalDate from) {
+        String today    = LocalDate.now().format(DATE_FMT);
+        String fromDate = from.format(DATE_FMT);
+
+        return kisApiClient.getClient().get()
                 .uri(b -> b.path("/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice")
                         .queryParam("FID_COND_MRKT_DIV_CODE", MARKET_CODE)
                         .queryParam("FID_INPUT_ISCD",         stockCode)
-                        .queryParam("FID_INPUT_DATE_1",       tenDaysAgo)
+                        .queryParam("FID_INPUT_DATE_1",       fromDate)
                         .queryParam("FID_INPUT_DATE_2",       today)
                         .queryParam("FID_PERIOD_DIV_CODE",    "D")
                         .queryParam("FID_ORG_ADJ_PRC",        "1")
@@ -74,14 +112,9 @@ public class KisMarketDataService implements MarketDataService {
                 .header("custtype", "P")
                 .retrieve()
                 .body(DailyChartResponse.class);
+    }
 
-        if (resp == null || resp.output2() == null || resp.output2().size() < 2) {
-            throw new IllegalStateException("전일 일봉 없음: stockCode=" + stockCode);
-        }
-
-        // output2[0]이 오늘(장 중 미완성)이면 건너뛴다
-        int idx = today.equals(resp.output2().get(0).date()) ? 1 : 0;
-        DailyData d = resp.output2().get(idx);
+    private static Candle toCandle(DailyData d) {
         return new Candle(
                 LocalDate.parse(d.date(), DATE_FMT),
                 parseDouble(d.open()),

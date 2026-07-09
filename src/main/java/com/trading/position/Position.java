@@ -32,6 +32,10 @@ public class Position {
     @Column(name = "average_price", nullable = false)
     private double averagePrice;
 
+    /** ATR 손절선 (체결가 − ATR×k). null = 미장착 (StopLossArmer가 체결 후 장착) */
+    @Column(name = "stop_price")
+    private Double stopPrice;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -55,6 +59,12 @@ public class Position {
         this.updatedAt     = LocalDateTime.now();
     }
 
+    /** 체결가 기준 ATR 손절선 장착 (방법론 §4.1 — 신호 시점가가 아닌 실제 체결가로 계산) */
+    public void armStopLoss(double stopPrice) {
+        this.stopPrice = stopPrice;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     /** 매도 체결 반영 — 수량 감소, 평균단가 유지 */
     public void applySell(int filledQty) {
         if (filledQty > this.quantity) {
@@ -73,5 +83,6 @@ public class Position {
     public String getStockCode()     { return stockCode; }
     public int getQuantity()         { return quantity; }
     public double getAveragePrice()  { return averagePrice; }
+    public Double getStopPrice()     { return stopPrice; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

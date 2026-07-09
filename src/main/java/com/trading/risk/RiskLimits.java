@@ -16,5 +16,16 @@ public final class RiskLimits {
     /** 전고점(peakEquity) 대비 MDD 10% 초과: 강제청산 트리거 (ADR-001 2.2) */
     public static final double MDD_LIMIT = 0.10;
 
+    // ── 진입 사이징 / 손절 (방법론 §4.1·4.3 — P2-A) ──────────────────────────
+
+    /** 1회 진입 허용 손실(1R) = 계좌의 1% */
+    public static final double RISK_FRACTION_PER_TRADE = 0.01;
+
+    /** 손절폭 = ATR(14) × 이 배수. ⚠ 잠정값 — B-3 백테스트 검증 대상 (1.5~2.0) */
+    public static final double ATR_STOP_MULTIPLIER = 1.5;
+
+    /** 단주 내림으로 실제 리스크가 1R 대비 이 비율을 벗어나면 진입 스킵 (방법론 §4.3) */
+    public static final double SIZING_MAX_DISTORTION = 0.20;
+
     private RiskLimits() {}
 }

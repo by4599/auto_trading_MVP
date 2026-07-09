@@ -31,7 +31,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   출구는 `TimeCutScheduler`(평일 15:15 KST 보유분 전량 매도, Gate 3)
 - 계좌: 한투 **모의투자** 계좌 (`@Profile("paper")`, 실전 전환은
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
-- 주문: 시장가 1주 고정 (수량 로직은 v2)
+- 주문: 시장가, 수량은 R 사이징(`OrderSizingService` — 1R=계좌 1% ÷ ATR 손절폭, 단주 내림).
+  지정가 분할(Price Jitter)은 ADR-001 미결정 파라미터 해소 후
 - 알림: 텔레그램 (체결/에러/청산)
 - 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
 
@@ -42,7 +43,7 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 | `PendingOrderRule` | 보유 중/미체결 매수 존재 시 중복 매수 차단 | ✅ 활성 |
 | `PositionLimitRule` | 종목당 비중 최대 10% | ✅ 활성 (Gate 1에서 분모 교정) |
 | `MaxPositionCountRule` | 최대 보유 종목 5개 | ✅ 활성 |
-| `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (KST 타임존 가정, F-8) |
+| `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭 연동) |
@@ -78,15 +79,19 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 - `TradeResultTracker` (Gate 3) — 매도 체결 실현손익 → 연속손실 카운터 (`portfolio_state` 영속화)
 - `RecommendationService` (`research`) — 관심 종목 뉴스 감성 집계 →
   매수 후보/관망/주의 추천 (대시보드 표시 전용, 매매 미연동)
+- P2-A (2026-07-08) — `AtrCalculator`(ATR 14) + `OrderSizingService`(R 수량 역산) +
+  `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 
 1. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
-2. `currentPrice = averagePrice` 근사 잔존 — 현재가 API 교체 예정
+2. 지정가 분할(Price Jitter) 미구현 — ADR-001 3장 파라미터(가격 간격·주문 개수) 결정 선행
 3. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 + 휴장일 미인지 (거래일 캘린더는 로드맵 항목)
-4. 연속손실 기록은 매도 체결 청크 단위 — v2 부분 체결 매도 도입 시 라운드트립 집계로 전환 필요
+4. 연속손실 기록은 매도 체결 청크 단위 — 부분 체결 매도 시 라운드트립 집계로 전환 필요
+   (R 사이징으로 수량 > 1 매도가 가능해져 발생 확률 상승)
+5. 부분 체결 매수는 손절선 미장착 (전량 체결 이벤트에만 장착) — 타임컷이 최후 방어선
 
-해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2, 2026-07-08) · F-4/F-5 (Gate 3, 2026-07-08)
+해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

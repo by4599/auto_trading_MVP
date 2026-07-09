@@ -14,7 +14,7 @@
 | 1 | `PendingOrderRule` | 보유 중/미체결 매수 존재 시 중복 매수 차단 | ✅ 정상 |
 | 2 | `PositionLimitRule` | 종목당 비중 10% 초과 매수 차단 | ✅ **해소 (Gate 1)** — 분모가 현금 포함 총자산으로 교정됨 (F-7=F-1 동일 원인) |
 | 3 | `MaxPositionCountRule` | 보유 5종목 이상 매수 차단 | ✅ 정상 (매도 완료 시 포지션 행 삭제 확인, [FillStateUpdater.java:223](../src/main/java/com/trading/order/FillStateUpdater.java)) |
-| 4 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 동작하나 타임존 의존 (F-8) |
+| 4 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ **해소 (P2-A)** — KST 고정 Clock 주입 (F-8) |
 | 5 | `DailyLossRule` | -3% 매수차단 / -5% 강제청산 | ✅ **활성 (Gate 1)** — dailyPnl 실값 연동 + `RiskMonitor` 상시 감시 |
 | 6 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ **해소 (Gate 1)** — 현금 포함 equity + 신호 독립 감시 |
 | 7 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ **활성 (Gate 3)** — `TradeResultTracker` 실현손익 스트릭 연동, 차단 개시 시 스트릭 리셋 |
@@ -120,6 +120,10 @@
 ## MEDIUM
 
 ### F-8. MarketCloseRule이 시스템 기본 타임존에 의존
+
+> ✅ **해소 (2026-07-08, P2-A)**: `ClockConfig`가 `Asia/Seoul` 고정 Clock 빈을 제공하고
+> `MarketCloseRule`이 주입받아 `LocalTime.now(clock)`으로 판정. 백테스트(B-2)는 이 빈을
+> 가상 시계로 교체하면 된다. 검증: `MarketCloseRuleTest` 4건 (15:20 정각은 통과 — isAfter 의도 확정).
 
 - `LocalTime.now()` 사용 — 현재 Windows(KST)에서는 정상이나, 클라우드(UTC) 이전 시 15:20 컷이 자정 근처로 밀린다. `Clock` 주입 + `ZoneId.of("Asia/Seoul")` 고정 권장. (경계값: 정확히 15:20:00은 `isAfter`라 통과 — 의도 확인 필요, 사소함)
 

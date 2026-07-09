@@ -29,8 +29,7 @@ import java.util.List;
  * Signal → RiskEngine → OrderEngine 경로를 사용한다.
  * FORCE_LIQUIDATING/EMERGENCY_STOPPED 상태에서는 양보한다 (포지션 소유권은 청산 상태머신).
  *
- * v1 제약: OrderEngine 매도는 1주 고정이며, PendingOrderRule이 보유 중 재매수를
- * 차단하므로 포지션 수량은 항상 1이다. 수량 > 1이 관측되면 경고만 남긴다 (v2 수량 로직).
+ * 매도 수량은 OrderEngine이 보유 전량으로 결정한다 (P2-A R 사이징 이후 수량 > 1 가능).
  */
 @Component
 @Profile("paper")
@@ -105,10 +104,6 @@ public class TimeCutScheduler {
         if (hasPendingSell(stockCode)) {
             log.warn("[타임컷] 미체결 SELL 존재 — 중복 매도 방지: stockCode={}", stockCode);
             return;
-        }
-        if (pos.getQuantity() > 1) {
-            log.warn("[타임컷] 수량 {}주 관측 — v1 매도는 1주 고정이라 잔여분이 남는다 (v2 수량 로직 필요): stockCode={}",
-                    pos.getQuantity(), stockCode);
         }
 
         Signal signal = Signal.sell(stockCode, STRATEGY_NAME);

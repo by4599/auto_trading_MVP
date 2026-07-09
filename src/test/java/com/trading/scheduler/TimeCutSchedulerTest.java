@@ -1,10 +1,13 @@
 package com.trading.scheduler;
 
+import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketDataService;
 import com.trading.order.KisOrderClient;
 import com.trading.order.OrderEngine;
 import com.trading.order.OrderHistoryRepository;
 import com.trading.order.OrderSide;
+import com.trading.order.OrderSizingService;
 import com.trading.order.OrderStatus;
 import com.trading.position.Position;
 import com.trading.position.PositionManager;
@@ -20,7 +23,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -65,9 +70,12 @@ class TimeCutSchedulerTest {
     }
 
     private TimeCutScheduler scheduler(List<RiskRule> rules) {
+        OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator()),
+                positionRepository);
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
-                new RiskEngine(rules), new OrderEngine(orderClient, statusManager),
+                new RiskEngine(rules), orderEngine,
                 statusManager, kisProperties);
     }
 
@@ -77,16 +85,24 @@ class TimeCutSchedulerTest {
         return pos;
     }
 
+    /** findAll(스케줄러 순회) + findByStockCode(OrderEngine 전량 매도) 스텁을 함께 구성 */
+    private void givenHoldings(Position... positions) {
+        when(positionRepository.findAll()).thenReturn(List.of(positions));
+        for (Position p : positions) {
+            when(positionRepository.findByStockCode(p.getStockCode())).thenReturn(Optional.of(p));
+        }
+    }
+
     // ── 기본 흐름 ─────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("보유 포지션 존재 → SELL 신호가 RiskEngine→OrderEngine 경로로 매도 실행")
     void sells_held_position_through_order_engine() {
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient).sell("005930");
+        verify(orderClient).sell("005930", 1);
     }
 
     @Test
@@ -96,17 +112,17 @@ class TimeCutSchedulerTest {
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test
     @DisplayName("수량 0 포지션(정리된 행) → 매도 없음")
     void zero_quantity_position_skipped() {
-        when(positionRepository.findAll()).thenReturn(List.of(Position.empty("005930")));
+        givenHoldings(Position.empty("005930"));
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     // ── 가드 ─────────────────────────────────────────────────────────────────
@@ -115,56 +131,56 @@ class TimeCutSchedulerTest {
     @DisplayName("FORCE_LIQUIDATING 모드 → 타임컷 양보 (청산 경로가 포지션 소유)")
     void yields_to_liquidation_mode() {
         statusManager.changeMode(TradingMode.FORCE_LIQUIDATING);
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test
     @DisplayName("EMERGENCY_STOPPED 모드 → 매도 없음")
     void skips_when_emergency_stopped() {
         statusManager.changeMode(TradingMode.EMERGENCY_STOPPED);
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test
     @DisplayName("KIS 자격증명 미설정 → 매도 없음")
     void skips_when_not_configured() {
         kisProperties.setAppkey("");
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test
     @DisplayName("미체결 SELL 주문 존재 → 중복 매도 방지")
     void skips_when_pending_sell_exists() {
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
         when(orderHistoryRepository.existsByStockCodeAndSideAndStatus(
                 "005930", OrderSide.SELL, OrderStatus.ACCEPTED)).thenReturn(true);
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test
     @DisplayName("RiskRule 거부 → 매도 없음 (RiskEngine을 건너뛰지 않는다)")
     void respects_risk_engine_rejection() {
-        when(positionRepository.findAll()).thenReturn(List.of(holding("005930", 1, 72500.0)));
+        givenHoldings(holding("005930", 1, 72500.0));
         RiskRule rejectAll = (signal, account) -> RiskResult.reject("테스트 거부");
 
         scheduler(List.of(rejectAll)).executeTimeCut();
 
-        verify(orderClient, never()).sell(anyString());
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     // ── 종목별 예외 격리 ─────────────────────────────────────────────────────
@@ -172,12 +188,11 @@ class TimeCutSchedulerTest {
     @Test
     @DisplayName("한 종목 매도 실패해도 나머지 종목은 계속 진행")
     void one_failure_does_not_stop_the_rest() {
-        when(positionRepository.findAll()).thenReturn(List.of(
-                holding("005930", 1, 72500.0), holding("000660", 1, 190000.0)));
-        doThrow(new IllegalStateException("KIS 오류")).when(orderClient).sell("005930");
+        givenHoldings(holding("005930", 1, 72500.0), holding("000660", 1, 190000.0));
+        doThrow(new IllegalStateException("KIS 오류")).when(orderClient).sell("005930", 1);
 
         scheduler(List.of()).executeTimeCut();
 
-        verify(orderClient).sell("000660");
+        verify(orderClient).sell("000660", 1);
     }
 }

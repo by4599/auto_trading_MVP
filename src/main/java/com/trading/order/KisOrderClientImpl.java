@@ -45,6 +45,14 @@ public class KisOrderClientImpl implements KisOrderClient {
     }
 
     @Override
+    public void buy(String stockCode, int quantity) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("매수 수량은 1 이상이어야 합니다: " + quantity);
+        }
+        placeOrder(TR_BUY, stockCode, OrderSide.BUY, quantity);
+    }
+
+    @Override
     public void sell(String stockCode) {
         placeOrder(TR_SELL, stockCode, OrderSide.SELL, ORD_QTY);
     }

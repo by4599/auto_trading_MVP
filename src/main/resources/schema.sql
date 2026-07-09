@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS position (
     stock_code    VARCHAR(20)   NOT NULL UNIQUE,
     quantity      INT           NOT NULL DEFAULT 0,
     average_price DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    stop_price    DECIMAL(12, 2),          -- ATR 손절선 (StopLossArmer가 체결 후 기록)
     updated_at    TIMESTAMP     NOT NULL,
     PRIMARY KEY (id)
 );
