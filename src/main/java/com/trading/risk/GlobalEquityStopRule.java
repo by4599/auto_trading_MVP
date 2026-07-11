@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 // 이 룰은 진입 게이트로서 매수 "거부"만 담당한다.
 // 강제청산 트리거는 신호와 무관하게 도는 RiskMonitor가 담당한다 (역할 분리).
 @Component
-@Profile("paper")
+@Profile({"paper", "backtest"})   // backtest 미포함 시 MDD 매수 게이트가 조용히 사라진다
 public class GlobalEquityStopRule implements RiskRule {
 
     private final ShadowPortfolio shadowPortfolio;

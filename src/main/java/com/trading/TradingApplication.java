@@ -3,7 +3,6 @@ package com.trading;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 진입점.
@@ -16,7 +15,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *   - TelegramProperties (com.trading)
  */
 @SpringBootApplication
-@EnableScheduling
+// @EnableScheduling은 SchedulingConfig로 이동 — backtest 프로파일에서는 월클럭 스케줄러가
+// 가상 시계 재생과 경쟁해 결정성을 깨뜨리므로 (daily_equity 동시 삽입 사고) 비활성화한다.
 @ConfigurationPropertiesScan("com.trading")
 public class TradingApplication {
     public static void main(String[] args) {

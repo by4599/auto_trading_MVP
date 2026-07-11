@@ -91,6 +91,16 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 - DART 공시 수집 (2026-07-09, Phase 3a 수집부) — `DartDisclosureService`(30분 주기,
   접수번호 중복 방지, 공시 유형 키워드 분류) + `HttpDartApiClient`(corpCode ZIP StAX 파싱)
   + 대시보드 공시 카드. HTTP는 `DartApiClient` 인터페이스 뒤 (Mockito 제약 대응)
+- 백테스트 인프라 B-1~B-3 (2026-07-10, `com.trading.backtest`) — `candle_history` 적재
+  (`CandleBackfillService` 3년 일봉+KOSPI, `MinuteCandleCollector` 15:40 당일 분봉 전방 축적)
+  + 일봉 근사 엔진(`BacktestRunner`/`DailyBarSimulator` — 이분탐색 진입가, 비관적 손절,
+  왕복 비용 0.41%, `MutableClock` @Primary, 전용 `backtest-db`) + B-3 검증
+  (`WalkForwardEngine` 6/3/3 + K 민감도 + 필터 A/B → `logs/backtest/REPORT-*.md`,
+  합격 시 `docs/BACKTEST-BASELINE.yml`). 실행: `--spring.profiles.active=backtest`.
+  K는 `StrategyParameters`(기본 0.5), 필터 4종은 `FilterProperties`(기본 전부 OFF —
+  시간창·거래량 필터는 분봉 축적 후 검증). 상세: BACKTEST-DESIGN.md §6 v1 구현 노트.
+  ⚠️ `@EnableScheduling`은 `SchedulingConfig`(@Profile("!backtest"))에 있다 —
+  백테스트 결정성 때문에 애플리케이션 클래스로 되돌리지 말 것
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 

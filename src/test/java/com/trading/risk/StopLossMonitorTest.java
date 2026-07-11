@@ -59,7 +59,8 @@ class StopLossMonitorTest {
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
-                new RiskEngine(List.of()), orderEngine, statusManager, kisProperties);
+                new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
+                new TrailingStopTracker(new com.trading.strategy.FilterProperties()));
     }
 
     /** 보유 33주 @72,500, 손절선 69,500, 현재가 currentPrice인 상태를 구성 */

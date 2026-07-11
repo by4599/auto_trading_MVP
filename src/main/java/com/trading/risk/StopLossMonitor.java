@@ -32,6 +32,7 @@ public class StopLossMonitor {
     private static final Logger log = LoggerFactory.getLogger(StopLossMonitor.class);
 
     private static final String STRATEGY_NAME = "StopLoss-ATR";
+    private static final String TRAILING_NAME = "TrailingStop";
 
     private final PositionRepository positionRepository;
     private final OrderHistoryRepository orderHistoryRepository;
@@ -40,6 +41,7 @@ public class StopLossMonitor {
     private final OrderEngine orderEngine;
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
+    private final TrailingStopTracker trailingStopTracker;
 
     public StopLossMonitor(PositionRepository positionRepository,
                            OrderHistoryRepository orderHistoryRepository,
@@ -47,7 +49,8 @@ public class StopLossMonitor {
                            RiskEngine riskEngine,
                            OrderEngine orderEngine,
                            TradingStatusManager statusManager,
-                           KisProperties kisProperties) {
+                           KisProperties kisProperties,
+                           TrailingStopTracker trailingStopTracker) {
         this.positionRepository = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionManager = positionManager;
@@ -55,6 +58,7 @@ public class StopLossMonitor {
         this.orderEngine = orderEngine;
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
+        this.trailingStopTracker = trailingStopTracker;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -86,25 +90,39 @@ public class StopLossMonitor {
 
     private void checkOne(Account.PositionSnapshot snapshot, Account account) {
         Position pos = positionRepository.findByStockCode(snapshot.stockCode()).orElse(null);
-        if (pos == null || pos.getStopPrice() == null || pos.getQuantity() <= 0) return;
+        if (pos == null || pos.getQuantity() <= 0) return;
 
         double current = snapshot.currentPrice();
         if (current <= 0) return;                       // 시세 불명 — 판정하지 않는다
-        if (current > pos.getStopPrice()) return;
 
-        if (hasPendingSell(snapshot.stockCode())) return; // 중복 매도 방지
-
-        Signal signal = Signal.sell(snapshot.stockCode(), STRATEGY_NAME);
-        RiskResult result = riskEngine.check(signal, account);
-        if (!result.isPass()) {
-            log.warn("[StopLoss] RiskEngine 거부: {} 사유={}", snapshot.stockCode(), result.getReason());
+        // 트레일링 스톱 필터 (§3.3, 기본 OFF) — ATR 손절과 별개의 수익 보존 훅
+        trailingStopTracker.updateHigh(snapshot.stockCode(), current);
+        if (trailingStopTracker.exitPrice(
+                snapshot.stockCode(), current, pos.getAveragePrice()).isPresent()) {
+            sellVia(TRAILING_NAME, snapshot.stockCode(), account, current, pos);
             return;
         }
 
-        log.warn("[StopLoss] 손절 트리거: {} 현재가={} 손절가={}",
-                snapshot.stockCode(), String.format("%.0f", current),
-                String.format("%.0f", pos.getStopPrice()));
+        if (pos.getStopPrice() == null || current > pos.getStopPrice()) return;
+        sellVia(STRATEGY_NAME, snapshot.stockCode(), account, current, pos);
+    }
+
+    private void sellVia(String reason, String stockCode, Account account,
+                         double current, Position pos) {
+        if (hasPendingSell(stockCode)) return; // 중복 매도 방지
+
+        Signal signal = Signal.sell(stockCode, reason);
+        RiskResult result = riskEngine.check(signal, account);
+        if (!result.isPass()) {
+            log.warn("[StopLoss] RiskEngine 거부: {} 사유={}", stockCode, result.getReason());
+            return;
+        }
+
+        log.warn("[StopLoss] {} 트리거: {} 현재가={} 손절가={}",
+                reason, stockCode, String.format("%.0f", current),
+                pos.getStopPrice() == null ? "-" : String.format("%.0f", pos.getStopPrice()));
         orderEngine.execute(signal);
+        trailingStopTracker.clear(stockCode);
     }
 
     private boolean hasPendingSell(String stockCode) {

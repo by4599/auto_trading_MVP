@@ -15,7 +15,13 @@ import java.util.List;
 @Component
 public class VolatilityBreakoutStrategy implements Strategy {
 
-    private static final double K = 0.5;
+    private final StrategyParameters parameters;
+    private final FilterProperties filters;
+
+    public VolatilityBreakoutStrategy(StrategyParameters parameters, FilterProperties filters) {
+        this.parameters = parameters;
+        this.filters = filters;
+    }
 
     @Override
     public String getName() {
@@ -31,8 +37,14 @@ public class VolatilityBreakoutStrategy implements Strategy {
         Candle yesterday = candles.get(candles.size() - 2);
         Candle today = candles.get(candles.size() - 1);
 
+        // 거래량 확인 필터 (§3.3, 기본 OFF): 당일 누적 거래량이 전일 총량 × ratio 미만이면 불신
+        if (filters.getVolumeConfirm().isEnabled()
+                && today.volume() < yesterday.volume() * filters.getVolumeConfirm().getRatio()) {
+            return List.of();
+        }
+
         double range = yesterday.getHigh() - yesterday.getLow();
-        double breakoutPrice = today.getOpen() + range * K;
+        double breakoutPrice = today.getOpen() + range * parameters.getK();
 
         if (today.getClose() > breakoutPrice) {
             return List.of(Signal.buy(stockCode, getName()));

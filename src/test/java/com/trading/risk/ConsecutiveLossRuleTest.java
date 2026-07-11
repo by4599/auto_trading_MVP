@@ -45,7 +45,8 @@ class ConsecutiveLossRuleTest {
                     return s;
                 });
         tracker = new TradeResultTracker(repo);
-        rule = new ConsecutiveLossRule(tracker);
+        rule = new ConsecutiveLossRule(tracker,
+                java.time.Clock.system(java.time.ZoneId.of("Asia/Seoul")));
     }
 
     private static Account accountWithLossCount(int losses) {

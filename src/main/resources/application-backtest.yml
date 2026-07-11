@@ -1,0 +1,40 @@
+# 백테스트 프로파일 (B-2) — 실행: --spring.profiles.active=backtest
+#
+# 라이브 trading-db와 완전히 분리된 backtest-db를 쓴다.
+# PendingOrderRule 등 리스크 룰이 JPA를 직접 읽으므로, 시뮬 주문이
+# 라이브 DB에 섞이면 실계좌 판단이 오염된다. backtest-db.mv.db는 .gitignore 대상.
+server:
+  address: 127.0.0.1
+
+spring:
+  main:
+    web-application-type: none   # 대시보드 불필요 — 배치처럼 실행 후 종료
+
+  datasource:
+    url: jdbc:h2:file:./backtest-db;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+# candle_history 백필에 KIS 시세 API가 필요하다 (모의투자 URL — paper와 동일)
+kis:
+  base-url: https://openapivts.koreainvestment.com:29443
+  appkey: ${KIS_APPKEY}
+  secretkey: ${KIS_SECRETKEY}
+  account-no: ${KIS_ACCOUNT_NO}
+
+# 백테스트 중 알림/공시 수집은 차단
+telegram:
+  bot-token: ""
+  chat-id: ""
+dart:
+  api-key: ""
+
+backtest:
+  years: 3
+  include-kospi: true
+  initial-cash: 10000000

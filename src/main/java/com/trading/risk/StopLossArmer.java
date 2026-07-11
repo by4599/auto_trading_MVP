@@ -27,7 +27,7 @@ import java.util.OptionalDouble;
  * 최후 방어선으로 당일 정리한다.
  */
 @Component
-@Profile("paper")
+@Profile({"paper", "backtest"})   // 백테스트 동기 체결(BacktestOrderClient)의 커밋 후에도 동일 경로로 손절 장착
 public class StopLossArmer {
 
     private static final Logger log = LoggerFactory.getLogger(StopLossArmer.class);
