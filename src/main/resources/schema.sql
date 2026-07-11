@@ -47,7 +47,24 @@ CREATE TABLE IF NOT EXISTS disclosure_item (
     disclosed_at DATE         NOT NULL,
     fetched_at   TIMESTAMP    NOT NULL,
     sentiment    VARCHAR(10),
+    event_type   VARCHAR(30),             -- 이벤트 택소노미 (B-4 통계 그룹 키)
     PRIMARY KEY (id)
+);
+
+-- 이벤트 유형 레지스트리 (B-4 통계 + 승격 상태 — PROMOTED는 사람만, 게이트 G2)
+CREATE TABLE IF NOT EXISTS event_type_registry (
+    event_type  VARCHAR(30)  NOT NULL,
+    status      VARCHAR(12)  NOT NULL DEFAULT 'RECORDED',
+    samples     INT          NOT NULL DEFAULT 0,
+    win_rate_d5 DOUBLE       NOT NULL DEFAULT 0,
+    median_d1   DOUBLE       NOT NULL DEFAULT 0,
+    median_d5   DOUBLE       NOT NULL DEFAULT 0,
+    median_d10  DOUBLE       NOT NULL DEFAULT 0,
+    median_d20  DOUBLE       NOT NULL DEFAULT 0,
+    p25_d5      DOUBLE       NOT NULL DEFAULT 0,
+    p25_d20     DOUBLE       NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMP    NOT NULL,
+    PRIMARY KEY (event_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_disclosure_stock_code ON disclosure_item (stock_code);

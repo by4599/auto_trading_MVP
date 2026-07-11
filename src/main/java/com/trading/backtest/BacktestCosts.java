@@ -12,6 +12,10 @@ public final class BacktestCosts {
     public static final double COMMISSION_RATE = 0.00015;  // 편도 위탁수수료 0.015%
     public static final double SELL_TAX_RATE   = 0.0018;   // 매도 제세금 0.18% (보수)
 
+    /** 왕복 총비용 ≈ 0.41% — 이벤트 통계(B-4)의 CANDIDATE 문턱값으로도 쓰인다 */
+    public static final double ROUND_TRIP_COST =
+            SLIPPAGE_RATE * 2 + COMMISSION_RATE * 2 + SELL_TAX_RATE;
+
     private BacktestCosts() {}
 
     /** 매수 체결가 = 시장가 × (1 + 슬리피지) */

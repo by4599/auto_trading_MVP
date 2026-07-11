@@ -129,7 +129,7 @@ BacktestRunner: 가상 시계를 1틱씩 전진시키며 기존
 | B-1 | `candle_history` 스키마 + 야간 적재 배치 | 3년치 일봉/분봉 데이터 |
 | B-2 | 백테스트 구현체 3종 + BacktestRunner + Clock 리팩터 | `--spring.profiles.active=backtest` 실행 가능 |
 | B-3 | **현행 변동성 돌파 소급 검증** — K 민감도 + Walk-Forward + 필터 4종 A/B (§3.3) | K=0.5 채택/기각 근거, 채택 필터 목록, 기준선 파일 |
-| B-4 | 이벤트 백테스트 확장 (공시/뉴스 반응 통계) | 이벤트 유형별 기대수익 테이블 (Phase 3c) |
+| B-4 | 이벤트 백테스트 확장 (공시/뉴스 반응 통계) — 🟡 **코드 완료 (2026-07-11)**: `EventBacktestPipeline`(`--backtest.mode=events`) = 공시 3년 소급 백필(페이지네이션) + `EventStatsBacktester`(유형별 D+1/5/10/20, 진입=공시 익일 시가 — 선견 편향 차단) + `event_type_registry`(CANDIDATE 자동 표기·PROMOTED는 사람만) + EVENT-REPORT. **실행은 DART_API_KEY 발급 대기** | 이벤트 유형별 기대수익 테이블 (Phase 3c) |
 
 - 위치: Phase 2와 3 사이. **B-3 결과가 나쁘면 Phase 3 착수 전에 전략 교체를 판단**할
   수 있으므로, 빠를수록 좋다 (지금은 검증 안 된 전략의 인프라를 다지고 있는 셈).

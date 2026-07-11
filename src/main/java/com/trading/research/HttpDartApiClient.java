@@ -74,7 +74,25 @@ public class HttpDartApiClient implements DartApiClient {
 
     @Override
     public List<DartDisclosure> fetchRecentDisclosures(String corpCode, LocalDate from, LocalDate to) {
-        if (!isConfigured()) return List.of();
+        return fetchPage(corpCode, from, to, 1).disclosures();
+    }
+
+    /** 페이지네이션 순회 — 소급 백필용. 최대 30페이지(3,000건) 안전 상한. */
+    @Override
+    public List<DartDisclosure> fetchAllDisclosures(String corpCode, LocalDate from, LocalDate to) {
+        List<DartDisclosure> all = new ArrayList<>();
+        int page = 1;
+        while (page <= 30) {
+            Page result = fetchPage(corpCode, from, to, page);
+            all.addAll(result.disclosures());
+            if (page >= result.totalPages() || result.disclosures().isEmpty()) break;
+            page++;
+        }
+        return all;
+    }
+
+    private Page fetchPage(String corpCode, LocalDate from, LocalDate to, int pageNo) {
+        if (!isConfigured()) return Page.EMPTY;
         try {
             String json = httpClient.get()
                     .uri(b -> b.path("/api/list.json")
@@ -82,19 +100,20 @@ public class HttpDartApiClient implements DartApiClient {
                             .queryParam("corp_code",  corpCode)
                             .queryParam("bgn_de",     from.format(DART_DATE))
                             .queryParam("end_de",     to.format(DART_DATE))
+                            .queryParam("page_no",    String.valueOf(pageNo))
                             .queryParam("page_count", "100")
                             .build())
                     .retrieve()
                     .body(String.class);
-            if (json == null) return List.of();
+            if (json == null) return Page.EMPTY;
 
             ListResponse resp = objectMapper.readValue(json, ListResponse.class);
-            if ("013".equals(resp.status())) return List.of();   // 조회 결과 없음 (정상)
+            if ("013".equals(resp.status())) return Page.EMPTY;   // 조회 결과 없음 (정상)
             if (!"000".equals(resp.status())) {
                 log.warn("[DART] list.json 오류: status={} message={}", resp.status(), resp.message());
-                return List.of();
+                return Page.EMPTY;
             }
-            if (resp.list() == null) return List.of();
+            if (resp.list() == null) return Page.EMPTY;
 
             List<DartDisclosure> result = new ArrayList<>();
             for (ListEntry e : resp.list()) {
@@ -103,11 +122,15 @@ public class HttpDartApiClient implements DartApiClient {
                         e.receiptNo(), e.reportName().strip(), e.corpName(),
                         LocalDate.parse(e.receiptDate(), DART_DATE)));
             }
-            return result;
+            return new Page(result, resp.totalPage() != null ? resp.totalPage() : 1);
         } catch (Exception e) {
-            log.warn("[DART] 공시 조회 실패 (corpCode={}): {}", corpCode, e.getMessage());
-            return List.of();
+            log.warn("[DART] 공시 조회 실패 (corpCode={} page={}): {}", corpCode, pageNo, e.getMessage());
+            return Page.EMPTY;
         }
+    }
+
+    private record Page(List<DartDisclosure> disclosures, int totalPages) {
+        static final Page EMPTY = new Page(List.of(), 1);
     }
 
     // ── corpCode.xml ZIP 파싱 ─────────────────────────────────────────────────
@@ -156,9 +179,10 @@ public class HttpDartApiClient implements DartApiClient {
     // ── DART 응답 DTO ─────────────────────────────────────────────────────────
 
     private record ListResponse(
-            @JsonProperty("status")  String status,
-            @JsonProperty("message") String message,
-            @JsonProperty("list")    List<ListEntry> list
+            @JsonProperty("status")     String status,
+            @JsonProperty("message")    String message,
+            @JsonProperty("total_page") Integer totalPage,
+            @JsonProperty("list")       List<ListEntry> list
     ) {}
 
     private record ListEntry(

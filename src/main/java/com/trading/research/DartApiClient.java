@@ -15,8 +15,11 @@ public interface DartApiClient {
     /** 상장사 전체의 종목코드 → (DART corp_code, 회사명) 매핑. 미설정/실패 시 빈 맵. */
     Map<String, CorpInfo> fetchCorpCodeMap();
 
-    /** 특정 회사의 기간 내 공시 목록 (최신순). 없으면 빈 리스트. */
+    /** 특정 회사의 기간 내 공시 목록 (최신순, 첫 페이지 100건). 없으면 빈 리스트. */
     List<DartDisclosure> fetchRecentDisclosures(String corpCode, LocalDate from, LocalDate to);
+
+    /** 기간 내 전체 공시 (페이지네이션 순회) — 소급 백필(B-4)용. 없으면 빈 리스트. */
+    List<DartDisclosure> fetchAllDisclosures(String corpCode, LocalDate from, LocalDate to);
 
     record CorpInfo(String corpCode, String corpName) {}
 

@@ -45,10 +45,15 @@ public class DisclosureItem {
     @Column(length = 10)
     private String sentiment;
 
+    /** 이벤트 택소노미 (DisclosureEventClassifier) — B-4 유형별 반응 통계의 그룹 키 */
+    @Column(name = "event_type", length = 30)
+    private String eventType;
+
     protected DisclosureItem() {}
 
     public static DisclosureItem of(String stockCode, String corpName, String receiptNo,
-                                    String reportName, LocalDate disclosedAt, String sentiment) {
+                                    String reportName, LocalDate disclosedAt,
+                                    String sentiment, String eventType) {
         DisclosureItem item = new DisclosureItem();
         item.stockCode   = stockCode;
         item.corpName    = corpName;
@@ -57,7 +62,14 @@ public class DisclosureItem {
         item.disclosedAt = disclosedAt;
         item.fetchedAt   = LocalDateTime.now();
         item.sentiment   = sentiment;
+        item.eventType   = eventType;
         return item;
+    }
+
+    /** 기존 수집분 재분류용 (event_type 컬럼 추가 마이그레이션) */
+    public void assignEventType(String eventType, String sentiment) {
+        this.eventType = eventType;
+        this.sentiment = sentiment;
     }
 
     /** DART 원문 열람 URL */
@@ -73,4 +85,5 @@ public class DisclosureItem {
     public LocalDate getDisclosedAt() { return disclosedAt; }
     public LocalDateTime getFetchedAt() { return fetchedAt; }
     public String getSentiment()      { return sentiment; }
+    public String getEventType()      { return eventType; }
 }

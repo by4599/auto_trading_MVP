@@ -92,8 +92,12 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 - `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,
   상한 20, 웹 UI 편입/제외) + `TradingScheduler` 라운드로빈 + 대시보드 유니버스 카드
 - DART 공시 수집 (2026-07-09, Phase 3a 수집부) — `DartDisclosureService`(30분 주기,
-  접수번호 중복 방지, 공시 유형 키워드 분류) + `HttpDartApiClient`(corpCode ZIP StAX 파싱)
+  접수번호 중복 방지) + `HttpDartApiClient`(corpCode ZIP StAX 파싱)
   + 대시보드 공시 카드. HTTP는 `DartApiClient` 인터페이스 뒤 (Mockito 제약 대응)
+- B-4 이벤트 백테스트 (2026-07-11, Phase 3c 엔진) — `DisclosureEventClassifier`
+  (공시 택소노미 13유형) + `EventBacktestPipeline`(`--backtest.mode=events`:
+  공시 3년 소급 백필 → 유형별 D+1/5/10/20 통계 → `event_type_registry` CANDIDATE 표기).
+  **PROMOTED 승격은 사람만 (게이트 G2)**. 실행은 DART_API_KEY 발급 대기
 - 백테스트 인프라 B-1~B-3 (2026-07-10, `com.trading.backtest`) — `candle_history` 적재
   (`CandleBackfillService` 3년 일봉+KOSPI, `MinuteCandleCollector` 15:40 당일 분봉 전방 축적)
   + 일봉 근사 엔진(`BacktestRunner`/`DailyBarSimulator` — 이분탐색 진입가, 비관적 손절,

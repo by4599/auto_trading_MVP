@@ -45,7 +45,7 @@ class DartDisclosureServiceTest {
         universeRepository = mock(TradingUniverseRepository.class);
         sut = new DartDisclosureService(dartApiClient, disclosureRepository,
                 watchlistRepository, new TradingUniverseService(universeRepository),
-                new NewsSentimentAnalyzer());
+                new DisclosureEventClassifier(new NewsSentimentAnalyzer()));
 
         when(dartApiClient.isConfigured()).thenReturn(true);
         when(universeRepository.findAll()).thenReturn(List.of());
@@ -87,6 +87,7 @@ class DartDisclosureServiceTest {
         verify(disclosureRepository).save(captor.capture());
         assertThat(captor.getValue().getStockCode()).isEqualTo("005930");
         assertThat(captor.getValue().getSentiment()).isEqualTo("POSITIVE");
+        assertThat(captor.getValue().getEventType()).isEqualTo("SUPPLY_CONTRACT");
     }
 
     @Test
@@ -148,15 +149,5 @@ class DartDisclosureServiceTest {
         verify(dartApiClient, atLeastOnce()).fetchRecentDisclosures(anyString(), any(), any());
     }
 
-    // ── 공시 유형 분류 ────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("공시 유형 오버라이드: 공급계약=호재, 유상증자=악재, 소송=악재")
-    void classifies_report_types() {
-        assertThat(sut.classify("단일판매ㆍ공급계약체결")).isEqualTo("POSITIVE");
-        assertThat(sut.classify("유상증자결정")).isEqualTo("NEGATIVE");
-        assertThat(sut.classify("소송등의제기")).isEqualTo("NEGATIVE");
-        assertThat(sut.classify("무상증자결정")).isEqualTo("POSITIVE");
-        assertThat(sut.classify("주요사항보고서")).isEqualTo("NEUTRAL");
-    }
+    // 공시 유형/방향 분류는 DisclosureEventClassifierTest에서 검증한다
 }

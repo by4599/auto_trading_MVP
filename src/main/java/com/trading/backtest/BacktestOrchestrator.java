@@ -43,6 +43,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private final BacktestDataProperties properties;
     private final Clock clock;
     private final ConfigurableApplicationContext context;
+    private final EventBacktestPipeline eventPipeline;
 
     public BacktestOrchestrator(CandleBackfillService backfillService,
                                 BacktestRunner runner,
@@ -52,7 +53,8 @@ public class BacktestOrchestrator implements CommandLineRunner {
                                 FilterProperties filters,
                                 BacktestDataProperties properties,
                                 Clock clock,
-                                ConfigurableApplicationContext context) {
+                                ConfigurableApplicationContext context,
+                                EventBacktestPipeline eventPipeline) {
         this.backfillService = backfillService;
         this.runner = runner;
         this.walkForwardEngine = walkForwardEngine;
@@ -62,6 +64,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         this.properties = properties;
         this.clock = clock;
         this.context = context;
+        this.eventPipeline = eventPipeline;
     }
 
     @Override
@@ -86,6 +89,12 @@ public class BacktestOrchestrator implements CommandLineRunner {
         List<String> symbols = backfillService.targetSymbols();
         LocalDate from = LocalDate.now(clock).minusYears(properties.getYears());
         LocalDate to = backfillService.rangeTo();
+
+        if ("events".equalsIgnoreCase(properties.getMode())) {
+            // B-4: 공시 이벤트 유형별 반응 통계 (--backtest.mode=events)
+            eventPipeline.run();
+            return;
+        }
 
         if ("smoke".equalsIgnoreCase(properties.getMode())) {
             BacktestRunner.RunResult smoke = runner.run(

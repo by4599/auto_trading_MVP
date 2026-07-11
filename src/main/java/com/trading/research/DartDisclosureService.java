@@ -31,28 +31,11 @@ public class DartDisclosureService {
     private static final int LOOKBACK_DAYS = 7;
     private static final long CORP_MAP_TTL_MILLIS = 7L * 24 * 3600 * 1000; // 7일
 
-    /** 공시 유형별 감성 오버라이드 — 보고서명에 키워드 포함 시 우선 적용 (순서 의미 있음) */
-    private static final List<Map.Entry<String, String>> REPORT_OVERRIDES = List.of(
-            Map.entry("단일판매ㆍ공급계약",  "POSITIVE"),
-            Map.entry("공급계약",            "POSITIVE"),
-            Map.entry("무상증자",            "POSITIVE"),
-            Map.entry("자기주식취득",        "POSITIVE"),
-            Map.entry("자기주식 취득",       "POSITIVE"),
-            Map.entry("현금ㆍ현물배당",      "POSITIVE"),
-            Map.entry("유상증자",            "NEGATIVE"),
-            Map.entry("전환사채",            "NEGATIVE"),
-            Map.entry("신주인수권부사채",    "NEGATIVE"),
-            Map.entry("자기주식처분",        "NEGATIVE"),
-            Map.entry("소송",                "NEGATIVE"),
-            Map.entry("거래정지",            "NEGATIVE"),
-            Map.entry("불성실공시",          "NEGATIVE")
-    );
-
     private final DartApiClient dartApiClient;
     private final DisclosureRepository disclosureRepository;
     private final WatchlistRepository watchlistRepository;
     private final TradingUniverseService universeService;
-    private final NewsSentimentAnalyzer sentimentAnalyzer;
+    private final DisclosureEventClassifier eventClassifier;
 
     private volatile Map<String, DartApiClient.CorpInfo> corpMap = Map.of();
     private volatile long corpMapLoadedAt = 0L;
@@ -62,12 +45,25 @@ public class DartDisclosureService {
                                  DisclosureRepository disclosureRepository,
                                  WatchlistRepository watchlistRepository,
                                  TradingUniverseService universeService,
-                                 NewsSentimentAnalyzer sentimentAnalyzer) {
+                                 DisclosureEventClassifier eventClassifier) {
         this.dartApiClient = dartApiClient;
         this.disclosureRepository = disclosureRepository;
         this.watchlistRepository = watchlistRepository;
         this.universeService = universeService;
-        this.sentimentAnalyzer = sentimentAnalyzer;
+        this.eventClassifier = eventClassifier;
+    }
+
+    /** event_type 컬럼 추가 이전 수집분 재분류 (1회성 마이그레이션) */
+    @jakarta.annotation.PostConstruct
+    void reclassifyLegacyRows() {
+        List<DisclosureItem> legacy = disclosureRepository.findByEventTypeIsNull();
+        if (legacy.isEmpty()) return;
+        for (DisclosureItem item : legacy) {
+            DisclosureEventClassifier.EventClass ec = eventClassifier.classify(item.getReportName());
+            item.assignEventType(ec.type(), ec.sentiment());
+        }
+        disclosureRepository.saveAll(legacy);
+        log.info("[DART] 기존 공시 {}건 이벤트 유형 재분류 완료", legacy.size());
     }
 
     /** 기동 2분 후 첫 수집, 이후 30분 주기 */
@@ -108,9 +104,10 @@ public class DartDisclosureService {
                 for (DartApiClient.DartDisclosure d
                         : dartApiClient.fetchRecentDisclosures(corp.corpCode(), from, to)) {
                     if (disclosureRepository.existsByReceiptNo(d.receiptNo())) continue;
+                    DisclosureEventClassifier.EventClass ec = eventClassifier.classify(d.reportName());
                     disclosureRepository.save(DisclosureItem.of(
                             stockCode, d.corpName(), d.receiptNo(), d.reportName(),
-                            d.disclosedAt(), classify(d.reportName())));
+                            d.disclosedAt(), ec.sentiment(), ec.type()));
                     saved++;
                 }
             } catch (Exception e) {
@@ -142,11 +139,4 @@ public class DartDisclosureService {
         return corpMap;
     }
 
-    String classify(String reportName) {
-        if (reportName == null) return "NEUTRAL";
-        for (Map.Entry<String, String> override : REPORT_OVERRIDES) {
-            if (reportName.contains(override.getKey())) return override.getValue();
-        }
-        return sentimentAnalyzer.analyze(reportName);
-    }
 }
