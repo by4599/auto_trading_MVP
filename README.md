@@ -204,7 +204,7 @@ Sprint 3 — 안전장치 실동작 ([검증 보고서](docs/TRADING-RULES-AUDIT
 
 Phase 2 완료 후, Phase 3 착수 전:
 
-- **백테스트 인프라 B-1~B-3** ([설계 문서](docs/BACKTEST-DESIGN.md)): 현행 K=0.5가 검증 안 된 값이므로, 소급 검증 결과에 따라 전략 유지/교체를 Phase 3 전에 판단한다
+- ~~**백테스트 인프라 B-1~B-3**~~ ✅ **완료 (2026-07-11)** — 판정 **❌ 불합격**: 검증 PF 0.66·기대값 −0.33%·MDD 50.4%, 10개 Walk-Forward 윈도우 전부 PF<1.0, K 0.4~0.6 전부 미달 ([설계 문서 §7](docs/BACKTEST-DESIGN.md) 판정 상세). **현행 당일 변동성 돌파는 실전 승격 불가 — Phase 3 착수 전 전략 교체/재설계 판단 필요** (분봉 축적 후 시간창·거래량 필터 재검증이 기각 전 마지막 확인 항목)
 
 Phase 3 이후 ([투자 판단 방법론 §5 단계표](docs/INVESTMENT-METHODOLOGY.md),
 컴포넌트 수준 실행 설계는 [추천→투자 파이프라인 설계](docs/RECOMMENDATION-TO-TRADE-DESIGN.md) 참고):

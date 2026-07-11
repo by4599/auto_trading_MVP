@@ -31,6 +31,9 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   KIS 모의 레이트리밋 때문에 스케줄러는 틱당 1종목 라운드로빈 (N종목 = 종목당 N초 간격)
 - 전략: `VolatilityBreakoutStrategy` (변동성 돌파, K=0.5) — 매수 신호.
   출구는 `TimeCutScheduler`(평일 15:15 KST 보유분 전량 매도, Gate 3)
+  ⚠ **B-3 백테스트 불합격 (2026-07-11)**: 검증 PF 0.66, 전 윈도우 PF<1.0 —
+  실전 승격 불가, 전략 교체/재설계 판단 대기 (BACKTEST-DESIGN §7).
+  모의투자는 파이프라인 검증 목적으로만 계속 운영
 - 계좌: 한투 **모의투자** 계좌 (`@Profile("paper")`, 실전 전환은
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
 - 주문: 시장가, 수량은 R 사이징(`OrderSizingService` — 1R=계좌 1% ÷ ATR 손절폭, 단주 내림).
