@@ -15,8 +15,28 @@ import java.util.Map;
 @Component
 public class DisclosureEventClassifier {
 
-    /** 키워드 → (유형, 잠정 방향). 순서 의미 있음 — 먼저 맞은 것이 우선 */
+    /** 키워드 → (유형, 잠정 방향). 순서 의미 있음 — 먼저 맞은 것이 우선.
+     *  정례·행정성 공시를 먼저 걸러야 "매수주식"의 '수주' 같은 부분 문자열 오분류를 막는다. */
     private static final List<Map.Entry<String, EventClass>> RULES = List.of(
+            // ── 정례·행정성 공시 (이벤트성 낮음 — 통계 노이즈 분리용) ──
+            Map.entry("소유상황보고서",     new EventClass("INSIDER_OWNERSHIP", "NEUTRAL")),
+            Map.entry("대량보유상황보고서", new EventClass("LARGE_HOLDING",     "NEUTRAL")),
+            Map.entry("기업설명회",         new EventClass("IR_EVENT",          "NEUTRAL")),
+            Map.entry("풍문",               new EventClass("RUMOR_CLARIFY",     "NEUTRAL")),
+            Map.entry("해명",               new EventClass("RUMOR_CLARIFY",     "NEUTRAL")),
+            Map.entry("특수관계인",         new EventClass("RELATED_PARTY",     "NEUTRAL")),
+            Map.entry("계열회사",           new EventClass("RELATED_PARTY",     "NEUTRAL")),
+            Map.entry("사업보고서",         new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("반기보고서",         new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("분기보고서",         new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("감사보고서",         new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("대규모기업집단",     new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("증권발행실적",       new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("일괄신고",           new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("주주총회",           new EventClass("REGULAR_FILING",    "NEUTRAL")),
+            Map.entry("실적공시예고",       new EventClass("GUIDANCE",          "NEUTRAL")),
+            Map.entry("영업실적등에대한전망", new EventClass("GUIDANCE",        "NEUTRAL")),
+            // ── 이벤트성 공시 (방법론 §1 택소노미) ──
             Map.entry("단일판매ㆍ공급계약", new EventClass("SUPPLY_CONTRACT", "POSITIVE")),
             Map.entry("공급계약",           new EventClass("SUPPLY_CONTRACT", "POSITIVE")),
             Map.entry("수주",               new EventClass("SUPPLY_CONTRACT", "POSITIVE")),

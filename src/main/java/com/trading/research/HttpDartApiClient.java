@@ -1,5 +1,6 @@
 package com.trading.research;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -178,6 +179,7 @@ public class HttpDartApiClient implements DartApiClient {
 
     // ── DART 응답 DTO ─────────────────────────────────────────────────────────
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record ListResponse(
             @JsonProperty("status")     String status,
             @JsonProperty("message")    String message,
@@ -185,6 +187,7 @@ public class HttpDartApiClient implements DartApiClient {
             @JsonProperty("list")       List<ListEntry> list
     ) {}
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record ListEntry(
             @JsonProperty("rcept_no")  String receiptNo,
             @JsonProperty("report_nm") String reportName,
