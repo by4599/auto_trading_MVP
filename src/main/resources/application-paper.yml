@@ -16,6 +16,18 @@ telegram:
 dart:
   api-key: ${DART_API_KEY:}   # 비워두면 공시 수집 스킵 — https://opendart.fss.or.kr 무료 발급
 
+# §3.3 A/B 채택 필터 (REPORT-20260713-0735) — 조합이 검증 구간 PF 0.66→0.81,
+# MDD 49.2→27.9%로 동반 우위. 전략 자체는 여전히 불합격(PF<1)이므로 이 필터는
+# "파이프라인 검증용 모의투자의 출혈 축소"이지 실전 승격 근거가 아니다.
+trading:
+  filters:
+    trailing-stop:
+      enabled: true
+      trail-pct: 0.01
+    disclosure-cooldown:
+      enabled: true
+      cooldown-days: 5
+
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
 # ./trading-db.mv.db 파일이 생성된다. .gitignore에 반드시 추가할 것.

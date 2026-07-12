@@ -18,11 +18,13 @@ public class FilterProperties {
     private final VolumeConfirm volumeConfirm = new VolumeConfirm();
     private final TrailingStop trailingStop = new TrailingStop();
     private final IndexRegime indexRegime = new IndexRegime();
+    private final DisclosureCooldown disclosureCooldown = new DisclosureCooldown();
 
     public EntryWindow getEntryWindow()     { return entryWindow; }
     public VolumeConfirm getVolumeConfirm() { return volumeConfirm; }
     public TrailingStop getTrailingStop()   { return trailingStop; }
     public IndexRegime getIndexRegime()     { return indexRegime; }
+    public DisclosureCooldown getDisclosureCooldown() { return disclosureCooldown; }
 
     /** 장초반 휩소성 가짜 돌파 회피 — notBefore 이전 신규 진입 금지 */
     public static class EntryWindow {
@@ -66,5 +68,20 @@ public class FilterProperties {
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    }
+
+    /**
+     * 공시 쿨다운 — 이벤트성 공시 후 N일(달력일)간 해당 종목 신규 진입 금지.
+     * 근거: B-4 통계에서 전 유형의 공시 직후 D+5 초과수익이 일관되게 음(-)
+     * (BACKTEST-DESIGN §8). 정례 공시(지분보고 등)는 판정에서 제외한다.
+     */
+    public static class DisclosureCooldown {
+        private boolean enabled = false;
+        private int cooldownDays = 5;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getCooldownDays() { return cooldownDays; }
+        public void setCooldownDays(int cooldownDays) { this.cooldownDays = cooldownDays; }
     }
 }

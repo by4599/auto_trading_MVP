@@ -132,6 +132,21 @@ public class BacktestOrchestrator implements CommandLineRunner {
         variants.add(runFilterVariant("지수 레짐 (KOSPI 갭다운 진입 금지)", baseline,
                 () -> filters.getIndexRegime().setEnabled(true),
                 symbols, from, to, chosenKs));
+        variants.add(runFilterVariant("공시 쿨다운 5일 (이벤트성 공시 후 진입 금지)", baseline, () -> {
+            filters.getDisclosureCooldown().setEnabled(true);
+            filters.getDisclosureCooldown().setCooldownDays(5);
+        }, symbols, from, to, chosenKs));
+        variants.add(runFilterVariant("공시 쿨다운 3일", baseline, () -> {
+            filters.getDisclosureCooldown().setEnabled(true);
+            filters.getDisclosureCooldown().setCooldownDays(3);
+        }, symbols, from, to, chosenKs));
+        // §3.3: 조합 탐색은 상위 2개까지만 (조합 폭발 = 과최적화 지름길)
+        variants.add(runFilterVariant("조합: 트레일링 1% + 공시 쿨다운 5일", baseline, () -> {
+            filters.getTrailingStop().setEnabled(true);
+            filters.getTrailingStop().setTrailPct(0.01);
+            filters.getDisclosureCooldown().setEnabled(true);
+            filters.getDisclosureCooldown().setCooldownDays(5);
+        }, symbols, from, to, chosenKs));
         allFiltersOff();
 
         // ④ 리포트 + 기준선
@@ -173,5 +188,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         filters.getTrailingStop().setEnabled(false);
         filters.getTrailingStop().setArmProfitPct(0.03);
         filters.getIndexRegime().setEnabled(false);
+        filters.getDisclosureCooldown().setEnabled(false);
+        filters.getDisclosureCooldown().setCooldownDays(5);
     }
 }

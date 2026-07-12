@@ -104,7 +104,8 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   왕복 비용 0.41%, `MutableClock` @Primary, 전용 `backtest-db`) + B-3 검증
   (`WalkForwardEngine` 6/3/3 + K 민감도 + 필터 A/B → `logs/backtest/REPORT-*.md`,
   합격 시 `docs/BACKTEST-BASELINE.yml`). 실행: `--spring.profiles.active=backtest`.
-  K는 `StrategyParameters`(기본 0.5), 필터 4종은 `FilterProperties`(기본 전부 OFF —
+  K는 `StrategyParameters`(기본 0.5), 필터 5종은 `FilterProperties`(기본 OFF —
+  단, **paper는 A/B 채택으로 트레일링 1% + 공시 쿨다운 5일 ON**, BACKTEST-DESIGN §9.
   시간창·거래량 필터는 분봉 축적 후 검증). 상세: BACKTEST-DESIGN.md §6 v1 구현 노트.
   ⚠️ `@EnableScheduling`은 `SchedulingConfig`(@Profile("!backtest"))에 있다 —
   백테스트 결정성 때문에 애플리케이션 클래스로 되돌리지 말 것

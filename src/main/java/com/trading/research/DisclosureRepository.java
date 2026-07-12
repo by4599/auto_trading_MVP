@@ -15,4 +15,8 @@ public interface DisclosureRepository extends JpaRepository<DisclosureItem, Long
 
     /** 크기 보강 대상 — 원문 미조회 공시 (B-4 크기 조건화) */
     List<DisclosureItem> findByEventTypeAndSizeRatioIsNull(String eventType);
+
+    /** 공시 쿨다운 판정 — 최근 N일 내 해당 종목 공시 (DisclosureCooldownRule) */
+    List<DisclosureItem> findByStockCodeAndDisclosedAtBetween(
+            String stockCode, java.time.LocalDate from, java.time.LocalDate to);
 }
