@@ -23,6 +23,22 @@ public class BacktestDataProperties {
             "068270"  // 셀트리온
     );
 
+    /**
+     * B-4 이벤트 통계 전용 추가 표본 (targetSymbols와 합집합).
+     * B-3 전략 백테스트 유니버스에는 포함되지 않는다 — 통계 표본만 넓히는 용도.
+     * 기본값: 대형주는 공시 반응이 약하다는 1차 결과에 따라 KOSDAQ 유동성 상위 후보.
+     */
+    private List<String> eventSymbols = List.of(
+            "247540", // 에코프로비엠
+            "086520", // 에코프로
+            "196170", // 알테오젠
+            "028300", // HLB
+            "277810", // 레인보우로보틱스
+            "263750", // 펄어비스
+            "293490", // 카카오게임즈
+            "112040"  // 위메이드
+    );
+
     /** 적재/재생 기간 (년) — 설계 문서 §2.2 최소 3년 */
     private int years = 3;
 
@@ -43,6 +59,9 @@ public class BacktestDataProperties {
 
     public List<String> getSymbols() { return symbols; }
     public void setSymbols(List<String> symbols) { this.symbols = symbols; }
+
+    public List<String> getEventSymbols() { return eventSymbols; }
+    public void setEventSymbols(List<String> eventSymbols) { this.eventSymbols = eventSymbols; }
 
     public int getYears() { return years; }
     public void setYears(int years) { this.years = years; }

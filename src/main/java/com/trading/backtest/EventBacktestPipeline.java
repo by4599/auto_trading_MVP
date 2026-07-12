@@ -67,7 +67,17 @@ public class EventBacktestPipeline {
     }
 
     public void run() {
-        List<String> symbols = candleBackfill.targetSymbols();
+        // 표본 = 전략 백테스트 대상 ∪ 이벤트 통계 전용 추가 종목 (B-3 유니버스에는 무영향)
+        List<String> symbols = new java.util.ArrayList<>(candleBackfill.targetSymbols());
+        List<String> extras = properties.getEventSymbols().stream()
+                .filter(s -> !symbols.contains(s)).toList();
+        symbols.addAll(extras);
+
+        if (!extras.isEmpty()) {
+            int extraCandles = candleBackfill.backfillExtra(extras);
+            log.info("[EventBacktest] 추가 표본 {}종목 캔들 백필: 신규 {}건", extras.size(), extraCandles);
+        }
+
         LocalDate to = candleBackfill.rangeTo();
         LocalDate from = LocalDate.now(clock).minusYears(properties.getYears());
 
@@ -148,6 +158,9 @@ public class EventBacktestPipeline {
         sb.append("- 기간: ").append(from).append(" ~ ").append(to).append('\n');
         sb.append("- 종목: ").append(String.join(", ", symbols)).append('\n');
         sb.append("- 진입 관례: 공시일 **다음 거래일 시가** (공시 시각 불명 — 선견 편향 차단)\n");
+        sb.append("- v2 통계 교정: 수익률은 **KOSPI 대비 초과수익**, 같은 종목·유형 ")
+          .append(EventStatsBacktester.CLUSTER_WINDOW_TRADING_DAYS)
+          .append("거래일 내 클러스터는 첫 건만 채택\n");
         sb.append("- CANDIDATE 조건: 표본 ≥ ").append(MIN_SAMPLES_FOR_CANDIDATE)
           .append("건 AND D+5 p25 > 왕복 비용 ")
           .append(String.format("%.2f%%", BacktestCosts.ROUND_TRIP_COST * 100)).append('\n');

@@ -37,7 +37,9 @@ class EventStatsBacktesterTest {
     void setUp() {
         disclosureRepository = mock(DisclosureRepository.class);
         candleHistoryRepository = mock(CandleHistoryRepository.class);
-        sut = new EventStatsBacktester(disclosureRepository, candleHistoryRepository);
+        // KOSPI 캔들 미스텁 시 빈 리스트 → 원수익률 폴백 (기존 단순 시나리오 유지)
+        sut = new EventStatsBacktester(disclosureRepository, candleHistoryRepository,
+                new BacktestDataProperties());
     }
 
     /** BASE부터 연속 거래일 캔들 — 시가 100, 종가는 지정된 배열 */
@@ -150,5 +152,60 @@ class EventStatsBacktesterTest {
         assertThat(s.at(1).n()).isEqualTo(5);
         assertThat(s.at(1).median()).isCloseTo(0.02, within(1e-9)); // 정렬 3번째 (ceil(0.5×5)=3)
         assertThat(s.at(1).p25()).isCloseTo(0.0, within(1e-9));     // 정렬 2번째 (ceil(0.25×5)=2)
+    }
+
+    // ── v2: 벤치마크 조정 + 클러스터 병합 ────────────────────────────────────
+
+    @Test
+    @DisplayName("KOSPI 캔들 존재 → 초과수익 = 종목 +10% − 지수 +4% = +6%")
+    void benchmark_adjusted_excess_return() {
+        double[] stockCloses = new double[25];
+        java.util.Arrays.fill(stockCloses, 110.0);   // 종목 +10%
+        givenCandles("005930", 100.0, stockCloses);
+        double[] kospiCloses = new double[25];
+        java.util.Arrays.fill(kospiCloses, 104.0);   // KOSPI +4% (시가 100)
+        givenCandles("KOSPI", 100.0, kospiCloses);
+        when(disclosureRepository.findAll())
+                .thenReturn(List.of(event("005930", "SUPPLY_CONTRACT", BASE)));
+
+        EventStatsBacktester.EventStat s =
+                sut.compute(List.of("005930"), BASE.minusDays(10), BASE.plusDays(30)).get(0);
+
+        assertThat(s.at(1).median()).isCloseTo(0.06, within(1e-9));
+        assertThat(s.at(5).median()).isCloseTo(0.06, within(1e-9));
+    }
+
+    @Test
+    @DisplayName("같은 종목·유형 5거래일 내 연속 이벤트 → 첫 건만 표본 (클러스터 병합)")
+    void clusters_merged_within_window() {
+        double[] closes = new double[30];
+        java.util.Arrays.fill(closes, 105.0);
+        givenCandles("005930", 100.0, closes);
+        when(disclosureRepository.findAll()).thenReturn(List.of(
+                event("005930", "INSIDER_OWNERSHIP", BASE),              // 진입 idx 1 — 채택
+                event("005930", "INSIDER_OWNERSHIP", BASE.plusDays(2)),  // 진입 idx 3 — 병합 제외
+                event("005930", "INSIDER_OWNERSHIP", BASE.plusDays(9))));// 진입 idx 10 — 채택
+
+        EventStatsBacktester.EventStat s =
+                sut.compute(List.of("005930"), BASE.minusDays(10), BASE.plusDays(40)).get(0);
+
+        assertThat(s.at(1).n()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("다른 종목의 동시 이벤트는 병합하지 않는다")
+    void different_stocks_not_merged() {
+        double[] closes = new double[30];
+        java.util.Arrays.fill(closes, 105.0);
+        givenCandles("005930", 100.0, closes);
+        givenCandles("000660", 100.0, closes);
+        when(disclosureRepository.findAll()).thenReturn(List.of(
+                event("005930", "DIVIDEND", BASE),
+                event("000660", "DIVIDEND", BASE)));
+
+        EventStatsBacktester.EventStat s =
+                sut.compute(List.of("005930", "000660"), BASE.minusDays(10), BASE.plusDays(40)).get(0);
+
+        assertThat(s.at(1).n()).isEqualTo(2);
     }
 }

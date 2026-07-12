@@ -85,6 +85,22 @@ public class CandleBackfillService {
         return saved;
     }
 
+    /** 추가 표본 종목 백필 (B-4 이벤트 통계 등 — targetSymbols 밖의 종목) */
+    public int backfillExtra(List<String> symbols) {
+        LocalDate from = rangeFrom();
+        LocalDate to   = rangeTo();
+        int saved = 0;
+        for (String stockCode : symbols) {
+            try {
+                saved += backfillSymbol(stockCode, from, to, false);
+            } catch (Exception e) {
+                // 잘못된 코드·상장폐지 등 한 종목의 실패가 전체를 멈추지 않는다
+                log.warn("[Backfill] 추가 표본 실패 — 건너뜀: {} — {}", stockCode, e.getMessage());
+            }
+        }
+        return saved;
+    }
+
     private int backfillSymbol(String storageCode, LocalDate from, LocalDate to, boolean index) {
         List<DateRange> gaps = missingRanges(storageCode, from, to);
         if (gaps.isEmpty()) {
