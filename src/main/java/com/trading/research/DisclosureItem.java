@@ -49,6 +49,13 @@ public class DisclosureItem {
     @Column(name = "event_type", length = 30)
     private String eventType;
 
+    /**
+     * 공시 크기 — 공급계약이면 "최근 매출액 대비 계약금액 %" (원문 파싱, B-4 크기 조건화).
+     * null = 미조회/파싱 실패. "발생 여부"가 아니라 "크기"가 신호일 가능성 검증용.
+     */
+    @Column(name = "size_ratio")
+    private Double sizeRatio;
+
     protected DisclosureItem() {}
 
     public static DisclosureItem of(String stockCode, String corpName, String receiptNo,
@@ -72,6 +79,11 @@ public class DisclosureItem {
         this.sentiment = sentiment;
     }
 
+    /** 원문 파싱으로 얻은 크기 지표 기록 (EventBacktestPipeline 보강 단계) */
+    public void assignSizeRatio(double sizeRatio) {
+        this.sizeRatio = sizeRatio;
+    }
+
     /** DART 원문 열람 URL */
     public String dartUrl() {
         return "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + receiptNo;
@@ -86,4 +98,5 @@ public class DisclosureItem {
     public LocalDateTime getFetchedAt() { return fetchedAt; }
     public String getSentiment()      { return sentiment; }
     public String getEventType()      { return eventType; }
+    public Double getSizeRatio()      { return sizeRatio; }
 }

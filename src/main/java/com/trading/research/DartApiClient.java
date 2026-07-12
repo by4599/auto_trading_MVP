@@ -21,6 +21,12 @@ public interface DartApiClient {
     /** 기간 내 전체 공시 (페이지네이션 순회) — 소급 백필(B-4)용. 없으면 빈 리스트. */
     List<DartDisclosure> fetchAllDisclosures(String corpCode, LocalDate from, LocalDate to);
 
+    /**
+     * 공급계약 공시 원문에서 "최근 매출액 대비 계약금액 %" 추출 (B-4 크기 조건화).
+     * 미설정/다운로드 실패/파싱 실패 시 empty.
+     */
+    java.util.OptionalDouble fetchContractSalesRatio(String receiptNo);
+
     record CorpInfo(String corpCode, String corpName) {}
 
     record DartDisclosure(String receiptNo, String reportName, String corpName, LocalDate disclosedAt) {}

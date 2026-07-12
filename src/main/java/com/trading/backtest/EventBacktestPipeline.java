@@ -84,6 +84,9 @@ public class EventBacktestPipeline {
         int backfilled = backfillDisclosures(symbols, from, to);
         log.info("[EventBacktest] 공시 백필 완료: 신규 {}건", backfilled);
 
+        int enriched = enrichContractSizes();
+        log.info("[EventBacktest] 공급계약 크기 보강: {}건", enriched);
+
         List<EventStatsBacktester.EventStat> stats = statsBacktester.compute(symbols, from, to);
         if (stats.isEmpty()) {
             log.warn("[EventBacktest] 이벤트 표본 없음 — DART 키/공시 백필 확인");
@@ -126,6 +129,31 @@ public class EventBacktestPipeline {
         return saved;
     }
 
+    // ── ①-b 공급계약 크기 보강 (원문 파싱 — "발생"이 아니라 "크기"가 신호인지 검증) ──
+
+    private static final int ENRICH_CAP_PER_RUN = 300;
+    private static final double PARSE_FAILED_SENTINEL = -1.0; // 재다운로드 방지 마커
+
+    private int enrichContractSizes() {
+        if (!dartApiClient.isConfigured()) return 0;
+        List<DisclosureItem> targets =
+                disclosureRepository.findByEventTypeAndSizeRatioIsNull("SUPPLY_CONTRACT");
+        int enriched = 0, processed = 0;
+        for (DisclosureItem d : targets) {
+            if (processed >= ENRICH_CAP_PER_RUN) break;
+            processed++;
+            java.util.OptionalDouble ratio = dartApiClient.fetchContractSalesRatio(d.getReceiptNo());
+            if (ratio.isPresent()) {
+                d.assignSizeRatio(ratio.getAsDouble());
+                enriched++;
+            } else {
+                d.assignSizeRatio(PARSE_FAILED_SENTINEL); // 파싱 실패 — 크기 표본에서 제외
+            }
+            disclosureRepository.save(d);
+        }
+        return enriched;
+    }
+
     // ── ③ 레지스트리 갱신 (status 보존, 승격은 사람만) ───────────────────────
 
     private void updateRegistry(List<EventStatsBacktester.EventStat> stats) {
@@ -158,9 +186,13 @@ public class EventBacktestPipeline {
         sb.append("- 기간: ").append(from).append(" ~ ").append(to).append('\n');
         sb.append("- 종목: ").append(String.join(", ", symbols)).append('\n');
         sb.append("- 진입 관례: 공시일 **다음 거래일 시가** (공시 시각 불명 — 선견 편향 차단)\n");
-        sb.append("- v2 통계 교정: 수익률은 **KOSPI 대비 초과수익**, 같은 종목·유형 ")
+        sb.append("- v2 통계 교정: 수익률은 **시장별 지수(KOSPI/KOSDAQ) 대비 초과수익**, 같은 종목·유형 ")
           .append(EventStatsBacktester.CLUSTER_WINDOW_TRADING_DAYS)
           .append("거래일 내 클러스터는 첫 건만 채택\n");
+        sb.append("- 크기 조건화: ").append(EventStatsBacktester.BIG_CONTRACT_TYPE)
+          .append(" = 계약금액이 최근 매출액의 ")
+          .append(String.format("%.0f%%", EventStatsBacktester.BIG_CONTRACT_MIN_SALES_RATIO_PCT))
+          .append(" 이상인 공급계약 (원문 파싱)\n");
         sb.append("- CANDIDATE 조건: 표본 ≥ ").append(MIN_SAMPLES_FOR_CANDIDATE)
           .append("건 AND D+5 p25 > 왕복 비용 ")
           .append(String.format("%.2f%%", BacktestCosts.ROUND_TRIP_COST * 100)).append('\n');

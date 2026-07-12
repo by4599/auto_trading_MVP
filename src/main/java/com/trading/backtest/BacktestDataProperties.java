@@ -51,6 +51,18 @@ public class BacktestDataProperties {
     /** candle_history에 지수를 저장할 때 쓰는 식별자 */
     private String kospiStorageCode = "KOSPI";
 
+    /** KIS 업종 코드 — KOSDAQ 종합 = 1001 */
+    private String kosdaqCode = "1001";
+
+    private String kosdaqStorageCode = "KOSDAQ";
+
+    /**
+     * KOSDAQ 소속 종목 — B-4 벤치마크를 KOSDAQ 지수로 분리하기 위한 명시 목록.
+     * (KIS/DART 응답에 시장 구분이 없어 v1은 설정으로 관리 — eventSymbols 기본값과 일치)
+     */
+    private List<String> kosdaqSymbols = List.of(
+            "247540", "086520", "196170", "028300", "277810", "263750", "293490", "112040");
+
     /** 시뮬 계좌 초기 현금 (원) */
     private double initialCash = 10_000_000;
 
@@ -74,6 +86,15 @@ public class BacktestDataProperties {
 
     public String getKospiStorageCode() { return kospiStorageCode; }
     public void setKospiStorageCode(String kospiStorageCode) { this.kospiStorageCode = kospiStorageCode; }
+
+    public String getKosdaqCode() { return kosdaqCode; }
+    public void setKosdaqCode(String kosdaqCode) { this.kosdaqCode = kosdaqCode; }
+
+    public String getKosdaqStorageCode() { return kosdaqStorageCode; }
+    public void setKosdaqStorageCode(String kosdaqStorageCode) { this.kosdaqStorageCode = kosdaqStorageCode; }
+
+    public List<String> getKosdaqSymbols() { return kosdaqSymbols; }
+    public void setKosdaqSymbols(List<String> kosdaqSymbols) { this.kosdaqSymbols = kosdaqSymbols; }
 
     public double getInitialCash() { return initialCash; }
     public void setInitialCash(double initialCash) { this.initialCash = initialCash; }

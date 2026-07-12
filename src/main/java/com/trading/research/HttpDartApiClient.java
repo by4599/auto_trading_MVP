@@ -134,6 +134,42 @@ public class HttpDartApiClient implements DartApiClient {
         static final Page EMPTY = new Page(List.of(), 1);
     }
 
+    /** 공시 원문(document.xml ZIP) 다운로드 → 텍스트에서 매출액 대비 % 파싱 */
+    @Override
+    public java.util.OptionalDouble fetchContractSalesRatio(String receiptNo) {
+        if (!isConfigured()) return java.util.OptionalDouble.empty();
+        try {
+            byte[] zip = httpClient.get()
+                    .uri(b -> b.path("/api/document.xml")
+                            .queryParam("crtfc_key", dartProperties.getApiKey())
+                            .queryParam("rcept_no",  receiptNo)
+                            .build())
+                    .retrieve()
+                    .body(byte[].class);
+            if (zip == null || zip.length == 0) return java.util.OptionalDouble.empty();
+
+            try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    byte[] raw = zis.readAllBytes();
+                    // DART 원문은 EUC-KR이 기본, 일부 UTF-8 — 같은 바이트를 두 인코딩으로 시도
+                    java.util.OptionalDouble ratio = ContractSizeParser.parseSalesRatioPercent(
+                            new String(raw, java.nio.charset.Charset.forName("EUC-KR")));
+                    if (ratio.isEmpty()) {
+                        ratio = ContractSizeParser.parseSalesRatioPercent(
+                                new String(raw, java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                    if (ratio.isPresent()) return ratio;
+                }
+            }
+            return java.util.OptionalDouble.empty();
+        } catch (Exception e) {
+            log.debug("[DART] 원문 크기 파싱 실패 (rcept_no={}): {}", receiptNo, e.getMessage());
+            return java.util.OptionalDouble.empty();
+        }
+    }
+
     // ── corpCode.xml ZIP 파싱 ─────────────────────────────────────────────────
 
     private static Map<String, CorpInfo> parseCorpCodeZip(byte[] zipBytes) throws Exception {

@@ -41,6 +41,10 @@ public class EventStatsBacktester {
     /** 같은 종목·유형 이벤트의 최소 간격 (거래일) — D+5 주력 윈도우와 일치 */
     static final int CLUSTER_WINDOW_TRADING_DAYS = 5;
 
+    /** 크기 조건 버킷: 공급계약 금액이 최근 매출액의 이 % 이상이면 "대형" (§8 크기 조건화) */
+    static final double BIG_CONTRACT_MIN_SALES_RATIO_PCT = 10.0;
+    static final String BIG_CONTRACT_TYPE = "SUPPLY_CONTRACT_BIG10";
+
     private final DisclosureRepository disclosureRepository;
     private final CandleHistoryRepository candleHistoryRepository;
     private final BacktestDataProperties properties;
@@ -60,14 +64,14 @@ public class EventStatsBacktester {
             candlesBySymbol.put(symbol, loadDaily(symbol, from, to));
         }
 
-        // KOSPI 벤치마크 — 날짜 → 인덱스 정렬 (KRX 지수·종목의 거래일은 동일)
-        List<CandleHistory> kospi = loadDaily(properties.getKospiStorageCode(), from, to);
-        Map<LocalDate, Integer> kospiIdxByDate = new HashMap<>();
-        for (int i = 0; i < kospi.size(); i++) {
-            kospiIdxByDate.put(kospi.get(i).getCandleDate(), i);
-        }
-        if (kospi.isEmpty()) {
+        // 시장별 벤치마크 — KOSDAQ 종목은 KOSDAQ 지수로 (시장 불일치 편향 제거, §8)
+        Benchmark kospi  = Benchmark.of(loadDaily(properties.getKospiStorageCode(), from, to));
+        Benchmark kosdaq = Benchmark.of(loadDaily(properties.getKosdaqStorageCode(), from, to));
+        if (kospi.candles().isEmpty()) {
             log.warn("[EventStats] KOSPI 캔들 없음 — 벤치마크 조정 없이 원수익률로 폴백");
+        }
+        if (kosdaq.candles().isEmpty() && !properties.getKosdaqSymbols().isEmpty()) {
+            log.warn("[EventStats] KOSDAQ 캔들 없음 — KOSDAQ 종목은 KOSPI로 폴백");
         }
 
         // ② 클러스터 병합: (종목, 유형)별 시간순 정렬 후 5거래일 내 후속 이벤트 제외
@@ -97,12 +101,23 @@ public class EventStatsBacktester {
                 double entryPrice = candles.get(entryIdx).getOpen();
                 if (entryPrice <= 0) { skipped++; continue; }
 
-                // ① 벤치마크 정렬 — 종목 진입일과 같은 날짜의 KOSPI 캔들
-                Integer kospiEntryIdx = kospiIdxByDate.get(candles.get(entryIdx).getCandleDate());
-                double kospiEntry = kospiEntryIdx != null ? kospi.get(kospiEntryIdx).getOpen() : 0;
+                // ① 시장별 벤치마크 정렬 — 종목 진입일과 같은 날짜의 지수 캔들
+                Benchmark bench = properties.getKosdaqSymbols().contains(d.getStockCode())
+                        && !kosdaq.candles().isEmpty() ? kosdaq : kospi;
+                Integer benchEntryIdx = bench.idxByDate().get(candles.get(entryIdx).getCandleDate());
+                double benchEntry = benchEntryIdx != null
+                        ? bench.candles().get(benchEntryIdx).getOpen() : 0;
+
+                // 크기 조건 버킷 — 대형 공급계약은 별도 유형으로도 집계
+                boolean bigContract = "SUPPLY_CONTRACT".equals(d.getEventType())
+                        && d.getSizeRatio() != null
+                        && d.getSizeRatio() >= BIG_CONTRACT_MIN_SALES_RATIO_PCT;
 
                 Map<Integer, List<Double>> horizons = returnsByType
                         .computeIfAbsent(d.getEventType(), k -> new LinkedHashMap<>());
+                Map<Integer, List<Double>> bigHorizons = bigContract
+                        ? returnsByType.computeIfAbsent(BIG_CONTRACT_TYPE, k -> new LinkedHashMap<>())
+                        : null;
                 boolean counted = false;
                 for (int h : HORIZONS) {
                     int exitIdx = entryIdx + h;
@@ -110,13 +125,17 @@ public class EventStatsBacktester {
                     double stockRet = candles.get(exitIdx).getClose() / entryPrice - 1.0;
 
                     double excess = stockRet;
-                    if (kospiEntryIdx != null && kospiEntryIdx + h < kospi.size() && kospiEntry > 0) {
+                    if (benchEntryIdx != null && benchEntryIdx + h < bench.candles().size()
+                            && benchEntry > 0) {
                         excess = stockRet
-                                - (kospi.get(kospiEntryIdx + h).getClose() / kospiEntry - 1.0);
+                                - (bench.candles().get(benchEntryIdx + h).getClose() / benchEntry - 1.0);
                     } else {
                         rawFallback++;
                     }
                     horizons.computeIfAbsent(h, k -> new ArrayList<>()).add(excess);
+                    if (bigHorizons != null) {
+                        bigHorizons.computeIfAbsent(h, k -> new ArrayList<>()).add(excess);
+                    }
                     counted = true;
                 }
                 if (counted) {
@@ -157,6 +176,17 @@ public class EventStatsBacktester {
             if (candles.get(i).getCandleDate().isAfter(disclosedAt)) return i;
         }
         return -1;
+    }
+
+    /** 지수 캔들 시계열 + 날짜→인덱스 맵 */
+    private record Benchmark(List<CandleHistory> candles, Map<LocalDate, Integer> idxByDate) {
+        static Benchmark of(List<CandleHistory> candles) {
+            Map<LocalDate, Integer> idx = new HashMap<>();
+            for (int i = 0; i < candles.size(); i++) {
+                idx.put(candles.get(i).getCandleDate(), i);
+            }
+            return new Benchmark(candles, idx);
+        }
     }
 
     // ── 결과 타입 ─────────────────────────────────────────────────────────────

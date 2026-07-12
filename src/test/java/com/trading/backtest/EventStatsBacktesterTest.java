@@ -193,6 +193,30 @@ class EventStatsBacktesterTest {
     }
 
     @Test
+    @DisplayName("대형 공급계약(매출 대비 ≥10%)은 SUPPLY_CONTRACT_BIG10 버킷에도 집계")
+    void big_contracts_bucketed_separately() {
+        double[] closes = new double[30];
+        java.util.Arrays.fill(closes, 108.0);
+        givenCandles("005930", 100.0, closes);
+        DisclosureItem big = event("005930", "SUPPLY_CONTRACT", BASE);
+        big.assignSizeRatio(15.0);                                    // 매출 대비 15% — 대형
+        DisclosureItem small = event("005930", "SUPPLY_CONTRACT", BASE.plusDays(10));
+        small.assignSizeRatio(2.0);                                   // 2% — 소형
+        when(disclosureRepository.findAll()).thenReturn(List.of(big, small));
+
+        List<EventStatsBacktester.EventStat> stats =
+                sut.compute(List.of("005930"), BASE.minusDays(10), BASE.plusDays(40));
+
+        EventStatsBacktester.EventStat base = stats.stream()
+                .filter(s -> s.eventType().equals("SUPPLY_CONTRACT")).findFirst().orElseThrow();
+        EventStatsBacktester.EventStat bigBucket = stats.stream()
+                .filter(s -> s.eventType().equals(EventStatsBacktester.BIG_CONTRACT_TYPE))
+                .findFirst().orElseThrow();
+        assertThat(base.at(1).n()).isEqualTo(2);      // 대형+소형 모두 기본 유형에 포함
+        assertThat(bigBucket.at(1).n()).isEqualTo(1); // 대형만 버킷에
+    }
+
+    @Test
     @DisplayName("다른 종목의 동시 이벤트는 병합하지 않는다")
     void different_stocks_not_merged() {
         double[] closes = new double[30];

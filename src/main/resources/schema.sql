@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS disclosure_item (
     fetched_at   TIMESTAMP    NOT NULL,
     sentiment    VARCHAR(10),
     event_type   VARCHAR(30),             -- 이벤트 택소노미 (B-4 통계 그룹 키)
+    size_ratio   DOUBLE,                  -- 공급계약: 매출액 대비 % (원문 파싱, -1=파싱 실패)
     PRIMARY KEY (id)
 );
 

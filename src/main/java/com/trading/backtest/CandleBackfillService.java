@@ -76,10 +76,11 @@ public class CandleBackfillService {
         int saved = 0;
 
         for (String stockCode : targetSymbols()) {
-            saved += backfillSymbol(stockCode, from, to, false);
+            saved += backfillSymbol(stockCode, from, to, null);
         }
         if (properties.isIncludeKospi()) {
-            saved += backfillSymbol(properties.getKospiStorageCode(), from, to, true);
+            saved += backfillSymbol(properties.getKospiStorageCode(), from, to, properties.getKospiCode());
+            saved += backfillSymbol(properties.getKosdaqStorageCode(), from, to, properties.getKosdaqCode());
         }
         log.info("[Backfill] 완료: 기간 {}~{}, 신규 저장 {}건", from, to, saved);
         return saved;
@@ -92,7 +93,7 @@ public class CandleBackfillService {
         int saved = 0;
         for (String stockCode : symbols) {
             try {
-                saved += backfillSymbol(stockCode, from, to, false);
+                saved += backfillSymbol(stockCode, from, to, null);
             } catch (Exception e) {
                 // 잘못된 코드·상장폐지 등 한 종목의 실패가 전체를 멈추지 않는다
                 log.warn("[Backfill] 추가 표본 실패 — 건너뜀: {} — {}", stockCode, e.getMessage());
@@ -101,7 +102,8 @@ public class CandleBackfillService {
         return saved;
     }
 
-    private int backfillSymbol(String storageCode, LocalDate from, LocalDate to, boolean index) {
+    /** @param indexCode null이면 개별 종목, 값이 있으면 해당 KIS 업종 코드의 지수 */
+    private int backfillSymbol(String storageCode, LocalDate from, LocalDate to, String indexCode) {
         List<DateRange> gaps = missingRanges(storageCode, from, to);
         if (gaps.isEmpty()) {
             log.info("[Backfill] {} 커버리지 충족 — 스킵", storageCode);
@@ -110,8 +112,8 @@ public class CandleBackfillService {
 
         int saved = 0;
         for (DateRange gap : gaps) {
-            List<Candle> fetched = index
-                    ? candleClient.fetchIndexDailyCandles(properties.getKospiCode(), gap.from(), gap.to())
+            List<Candle> fetched = indexCode != null
+                    ? candleClient.fetchIndexDailyCandles(indexCode, gap.from(), gap.to())
                     : candleClient.fetchDailyCandles(storageCode, gap.from(), gap.to());
             List<CandleHistory> rows = new ArrayList<>(fetched.size());
             for (Candle c : fetched) {
