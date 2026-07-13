@@ -98,6 +98,11 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   (공시 택소노미 13유형) + `EventBacktestPipeline`(`--backtest.mode=events`:
   공시 3년 소급 백필 → 유형별 D+1/5/10/20 통계 → `event_type_registry` CANDIDATE 표기).
   **PROMOTED 승격은 사람만 (게이트 G2)**. 실행은 DART_API_KEY 발급 대기
+- 테마 파급 통계 (2026-07-14, B-4 확장) — `SpilloverStatsBacktester`: 앵커 대형주
+  공시 → 같은 테마 밸류체인 종목들의 D+N 초과수익 (표본 단위 = 앵커 이벤트 1건,
+  체인 횡단면 중앙값으로 접어 교차 상관 부풀림 차단). 테마는 `backtest.event-themes`의
+  `-anchor`/`-chain` 키 쌍(파일럿: 반도체), 레지스트리 키 `SPILL:테마:유형`.
+  상세: BACKTEST-DESIGN.md §10
 - 백테스트 인프라 B-1~B-3 (2026-07-10, `com.trading.backtest`) — `candle_history` 적재
   (`CandleBackfillService` 3년 일봉+KOSPI, `MinuteCandleCollector` 15:40 당일 분봉 전방 축적)
   + 일봉 근사 엔진(`BacktestRunner`/`DailyBarSimulator` — 이분탐색 진입가, 비관적 손절,

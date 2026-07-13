@@ -171,15 +171,15 @@ public class EventStatsBacktester {
     }
 
     /** 공시일 이후 첫 거래일 캔들 인덱스 (다음 거래일 시가 진입 — 선견 편향 차단) */
-    private static int firstIndexAfter(List<CandleHistory> candles, LocalDate disclosedAt) {
+    static int firstIndexAfter(List<CandleHistory> candles, LocalDate disclosedAt) {
         for (int i = 0; i < candles.size(); i++) {
             if (candles.get(i).getCandleDate().isAfter(disclosedAt)) return i;
         }
         return -1;
     }
 
-    /** 지수 캔들 시계열 + 날짜→인덱스 맵 */
-    private record Benchmark(List<CandleHistory> candles, Map<LocalDate, Integer> idxByDate) {
+    /** 지수 캔들 시계열 + 날짜→인덱스 맵 (SpilloverStatsBacktester와 공유) */
+    record Benchmark(List<CandleHistory> candles, Map<LocalDate, Integer> idxByDate) {
         static Benchmark of(List<CandleHistory> candles) {
             Map<LocalDate, Integer> idx = new HashMap<>();
             for (int i = 0; i < candles.size(); i++) {

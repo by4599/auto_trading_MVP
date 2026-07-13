@@ -25,6 +25,7 @@ import java.util.Map;
  * B-4 이벤트 백테스트 파이프라인 (--backtest.mode=events):
  *   ① DART 공시 3년 소급 백필 (뉴스와 달리 공시는 과거 조회가 가능 — 표본 즉시 확보)
  *   ② 유형별 D+1/5/10/20 반응 통계 (EventStatsBacktester)
+ *      + 테마 파급 통계 (SpilloverStatsBacktester — 앵커 공시 → 밸류체인 초과수익)
  *   ③ event_type_registry 갱신 — 통계 조건 충족 유형은 CANDIDATE 표기,
  *      PROMOTED 승격은 사람만 (게이트 G2 — 여기서는 절대 하지 않는다)
  *   ④ 리포트 (logs/backtest/EVENT-REPORT-*.md)
@@ -44,6 +45,7 @@ public class EventBacktestPipeline {
     private final DisclosureRepository disclosureRepository;
     private final EventTypeStatRepository registryRepository;
     private final EventStatsBacktester statsBacktester;
+    private final SpilloverStatsBacktester spilloverBacktester;
     private final CandleBackfillService candleBackfill;
     private final BacktestDataProperties properties;
     private final Clock clock;
@@ -53,6 +55,7 @@ public class EventBacktestPipeline {
                                  DisclosureRepository disclosureRepository,
                                  EventTypeStatRepository registryRepository,
                                  EventStatsBacktester statsBacktester,
+                                 SpilloverStatsBacktester spilloverBacktester,
                                  CandleBackfillService candleBackfill,
                                  BacktestDataProperties properties,
                                  Clock clock) {
@@ -61,6 +64,7 @@ public class EventBacktestPipeline {
         this.disclosureRepository = disclosureRepository;
         this.registryRepository = registryRepository;
         this.statsBacktester = statsBacktester;
+        this.spilloverBacktester = spilloverBacktester;
         this.candleBackfill = candleBackfill;
         this.properties = properties;
         this.clock = clock;
@@ -93,8 +97,13 @@ public class EventBacktestPipeline {
             return;
         }
 
+        // 테마 파급 통계 — 앵커 공시 → 밸류체인 D+N 초과수익 (방법론 파일럿)
+        List<SpilloverStatsBacktester.SpilloverStat> spillover =
+                spilloverBacktester.compute(from, to);
+
         updateRegistry(stats);
-        writeReport(symbols, from, to, stats);
+        updateSpilloverRegistry(spillover);
+        writeReport(symbols, from, to, stats, spillover);
     }
 
     // ── ① 공시 소급 백필 ─────────────────────────────────────────────────────
@@ -172,14 +181,41 @@ public class EventBacktestPipeline {
     }
 
     private static boolean meetsCandidateBar(EventStatsBacktester.EventStat s) {
-        return s.samples() >= MIN_SAMPLES_FOR_CANDIDATE
-                && s.at(5).p25() > BacktestCosts.ROUND_TRIP_COST;
+        return meetsCandidateBar(s.samples(), s.at(5));
+    }
+
+    private static boolean meetsCandidateBar(int samples, EventStatsBacktester.Quantiles d5) {
+        return samples >= MIN_SAMPLES_FOR_CANDIDATE && d5.p25() > BacktestCosts.ROUND_TRIP_COST;
+    }
+
+    /** 파급 통계도 레지스트리에 기록 — 키 "SPILL:테마:유형" (승격은 동일하게 사람만, 게이트 G2) */
+    private void updateSpilloverRegistry(List<SpilloverStatsBacktester.SpilloverStat> stats) {
+        for (SpilloverStatsBacktester.SpilloverStat s : stats) {
+            String key = s.registryKey();
+            if (key.length() > 30) { // event_type 컬럼 길이 — 긴 테마명 방어 (리포트에는 남는다)
+                log.warn("[EventBacktest] 레지스트리 키 30자 초과 — 저장 건너뜀: {}", key);
+                continue;
+            }
+            EventTypeStat row = registryRepository.findById(key)
+                    .orElseGet(() -> EventTypeStat.recorded(key));
+            row.updateStats(s.samples(), s.winRateD5(),
+                    s.at(1).median(), s.at(5).median(), s.at(10).median(), s.at(20).median(),
+                    s.at(5).p25(), s.at(20).p25());
+            if (meetsCandidateBar(s.samples(), s.at(5))) {
+                row.markCandidate();
+            }
+            registryRepository.save(row);
+        }
+        if (!stats.isEmpty()) {
+            log.info("[EventBacktest] 파급 통계 {}개(테마×유형) 레지스트리 갱신", stats.size());
+        }
     }
 
     // ── ④ 리포트 ─────────────────────────────────────────────────────────────
 
     private void writeReport(List<String> symbols, LocalDate from, LocalDate to,
-                             List<EventStatsBacktester.EventStat> stats) {
+                             List<EventStatsBacktester.EventStat> stats,
+                             List<SpilloverStatsBacktester.SpilloverStat> spillover) {
         StringBuilder sb = new StringBuilder();
         sb.append("# 이벤트 백테스트 리포트 (B-4) — 공시 유형별 주가 반응 통계\n\n");
         sb.append("- 실행: ").append(LocalDateTime.now(clock)).append('\n');
@@ -207,6 +243,25 @@ public class EventBacktestPipeline {
                     meetsCandidateBar(s) ? "🟡 CANDIDATE" : "RECORDED"));
         }
         sb.append("\n※ 표본이 작은 유형(<30)은 통계가 노이즈다 — 수집이 쌓일수록 신뢰도가 오른다.\n");
+
+        if (!spillover.isEmpty()) {
+            sb.append("\n## 테마 파급(Spillover) — 앵커 공시 → 밸류체인 D+N 초과수익\n\n");
+            sb.append("- 가설: 앵커 대형주의 호재가 같은 테마 중소형주에 시차를 두고 파급된다 (방법론 파일럿)\n");
+            sb.append("- 표본 단위: **앵커 이벤트 1건** — 체인 종목 초과수익의 횡단면 중앙값으로 접음 ")
+              .append("(교차 상관 부풀림 차단, 이벤트당 최소 커버리지 ")
+              .append(SpilloverStatsBacktester.MIN_CHAIN_COVERAGE).append("종목)\n");
+            sb.append("- 해석: D+5/D+10 중앙값이 양(+)이고 D+1이 작으면 \"천천히 스며드는\" ")
+              .append("파급 — 진입 시차 여지가 있다는 뜻\n\n");
+            sb.append("| 테마 | 앵커 이벤트 유형 | 체인 | 표본 | D+5 승률 | D+1 중앙값 | D+5 중앙값 | D+5 p25 | D+10 중앙값 | D+20 중앙값 | 판정 |\n");
+            sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+            for (SpilloverStatsBacktester.SpilloverStat s : spillover) {
+                sb.append(String.format("| %s | %s | %d | %d | %.1f%% | %s | %s | %s | %s | %s | %s |%n",
+                        s.theme(), s.eventType(), s.chainSize(), s.samples(), s.winRateD5() * 100,
+                        pct(s.at(1).median()), pct(s.at(5).median()), pct(s.at(5).p25()),
+                        pct(s.at(10).median()), pct(s.at(20).median()),
+                        meetsCandidateBar(s.samples(), s.at(5)) ? "🟡 CANDIDATE" : "RECORDED"));
+            }
+        }
 
         try {
             Path dir = Path.of("logs", "backtest");
