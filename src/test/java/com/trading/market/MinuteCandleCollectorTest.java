@@ -28,6 +28,7 @@ class MinuteCandleCollectorTest {
     private CandleHistoryClient candleClient;
     private CandleHistoryRepository repository;
     private TradingUniverseRepository universeRepository;
+    private com.trading.backtest.BacktestDataProperties backtestProperties;
     private MinuteCandleCollector sut;
 
     @BeforeEach
@@ -38,9 +39,13 @@ class MinuteCandleCollectorTest {
         // 실객체 + 리포지토리(인터페이스) 목으로 구성한다
         universeRepository = mock(TradingUniverseRepository.class);
         TradingUniverseService universeService = new TradingUniverseService(universeRepository);
+        backtestProperties = new com.trading.backtest.BacktestDataProperties();
+        backtestProperties.setSymbols(List.of());        // 기존 테스트는 유니버스만으로 구성
+        backtestProperties.setEventSymbols(List.of());
         Clock fixed = Clock.fixed(
                 ZonedDateTime.of(TODAY.atTime(15, 40), KST).toInstant(), KST);
-        sut = new MinuteCandleCollector(candleClient, repository, universeService, fixed);
+        sut = new MinuteCandleCollector(candleClient, repository, universeService,
+                backtestProperties, fixed);
     }
 
     private void stubUniverse(String... codes) {
@@ -81,6 +86,16 @@ class MinuteCandleCollectorTest {
         sut.collectToday();
 
         verify(candleClient, never()).fetchTodayMinuteCandles(any());
+    }
+
+    @Test
+    @DisplayName("수집 대상 = 유니버스 ∪ 백테스트 표본 ∪ 이벤트 표본 (중복 제거)")
+    void collection_targets_merge_universe_and_backtest_samples() {
+        stubUniverse("005930");
+        backtestProperties.setSymbols(List.of("005930", "000660"));   // 005930 중복
+        backtestProperties.setEventSymbols(List.of("247540"));
+
+        assertThat(sut.collectionTargets()).containsExactly("005930", "000660", "247540");
     }
 
     @Test
