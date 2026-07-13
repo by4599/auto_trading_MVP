@@ -103,6 +103,10 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   체인 횡단면 중앙값으로 접어 교차 상관 부풀림 차단). 테마는 `backtest.event-themes`의
   `-anchor`/`-chain` 키 쌍(파일럿: 반도체), 레지스트리 키 `SPILL:테마:유형`.
   상세: BACKTEST-DESIGN.md §10
+- 진입 트리거 실험 (2026-07-14, B-4 확장) — `EntryTriggerBacktester`: 같은 파급
+  이벤트 표본에서 즉시/눌림반등/돌파 진입을 격리 비교 (청산 D+10 종가 고정,
+  발동 기한 D+5, 발동률 별도 집계). v1 일봉 근사 — 분봉 정밀 재검증 전제,
+  리포트 전용(레지스트리 미기록). 상세: BACKTEST-DESIGN.md §11
 - 백테스트 인프라 B-1~B-3 (2026-07-10, `com.trading.backtest`) — `candle_history` 적재
   (`CandleBackfillService` 3년 일봉+KOSPI, `MinuteCandleCollector` 15:40 당일 분봉 전방 축적)
   + 일봉 근사 엔진(`BacktestRunner`/`DailyBarSimulator` — 이분탐색 진입가, 비관적 손절,

@@ -26,6 +26,7 @@ import java.util.Map;
  *   ① DART 공시 3년 소급 백필 (뉴스와 달리 공시는 과거 조회가 가능 — 표본 즉시 확보)
  *   ② 유형별 D+1/5/10/20 반응 통계 (EventStatsBacktester)
  *      + 테마 파급 통계 (SpilloverStatsBacktester — 앵커 공시 → 밸류체인 초과수익)
+ *      + 진입 트리거 실험 (EntryTriggerBacktester — 즉시/눌림반등/돌파 격리 비교)
  *   ③ event_type_registry 갱신 — 통계 조건 충족 유형은 CANDIDATE 표기,
  *      PROMOTED 승격은 사람만 (게이트 G2 — 여기서는 절대 하지 않는다)
  *   ④ 리포트 (logs/backtest/EVENT-REPORT-*.md)
@@ -46,6 +47,7 @@ public class EventBacktestPipeline {
     private final EventTypeStatRepository registryRepository;
     private final EventStatsBacktester statsBacktester;
     private final SpilloverStatsBacktester spilloverBacktester;
+    private final EntryTriggerBacktester entryTriggerBacktester;
     private final CandleBackfillService candleBackfill;
     private final BacktestDataProperties properties;
     private final Clock clock;
@@ -56,6 +58,7 @@ public class EventBacktestPipeline {
                                  EventTypeStatRepository registryRepository,
                                  EventStatsBacktester statsBacktester,
                                  SpilloverStatsBacktester spilloverBacktester,
+                                 EntryTriggerBacktester entryTriggerBacktester,
                                  CandleBackfillService candleBackfill,
                                  BacktestDataProperties properties,
                                  Clock clock) {
@@ -65,6 +68,7 @@ public class EventBacktestPipeline {
         this.registryRepository = registryRepository;
         this.statsBacktester = statsBacktester;
         this.spilloverBacktester = spilloverBacktester;
+        this.entryTriggerBacktester = entryTriggerBacktester;
         this.candleBackfill = candleBackfill;
         this.properties = properties;
         this.clock = clock;
@@ -101,9 +105,13 @@ public class EventBacktestPipeline {
         List<SpilloverStatsBacktester.SpilloverStat> spillover =
                 spilloverBacktester.compute(from, to);
 
+        // 진입 트리거 실험 — 같은 이벤트 표본에서 진입 방식 3종 격리 비교 (리포트 전용)
+        List<EntryTriggerBacktester.TriggerStat> triggers =
+                entryTriggerBacktester.compute(from, to);
+
         updateRegistry(stats);
         updateSpilloverRegistry(spillover);
-        writeReport(symbols, from, to, stats, spillover);
+        writeReport(symbols, from, to, stats, spillover, triggers);
     }
 
     // ── ① 공시 소급 백필 ─────────────────────────────────────────────────────
@@ -215,7 +223,8 @@ public class EventBacktestPipeline {
 
     private void writeReport(List<String> symbols, LocalDate from, LocalDate to,
                              List<EventStatsBacktester.EventStat> stats,
-                             List<SpilloverStatsBacktester.SpilloverStat> spillover) {
+                             List<SpilloverStatsBacktester.SpilloverStat> spillover,
+                             List<EntryTriggerBacktester.TriggerStat> triggers) {
         StringBuilder sb = new StringBuilder();
         sb.append("# 이벤트 백테스트 리포트 (B-4) — 공시 유형별 주가 반응 통계\n\n");
         sb.append("- 실행: ").append(LocalDateTime.now(clock)).append('\n');
@@ -260,6 +269,29 @@ public class EventBacktestPipeline {
                         pct(s.at(1).median()), pct(s.at(5).median()), pct(s.at(5).p25()),
                         pct(s.at(10).median()), pct(s.at(20).median()),
                         meetsCandidateBar(s.samples(), s.at(5)) ? "🟡 CANDIDATE" : "RECORDED"));
+            }
+        }
+
+        if (!triggers.isEmpty()) {
+            sb.append("\n## 진입 트리거 실험 (v1 일봉 근사) — 파급 이벤트에서 언제 타는가\n\n");
+            sb.append("- 같은 이벤트 표본에 진입 방식 3종 적용, 청산은 전 트리거 공통 **이벤트 D+")
+              .append(EntryTriggerBacktester.EXIT_HORIZON_TRADING_DAYS)
+              .append(" 종가** 고정 (진입 타이밍만 격리 비교)\n");
+            sb.append("- IMMEDIATE = 공시 다음날 시가 (파급 통계와 동일 기준선) / ")
+              .append("PULLBACK_REBOUND = 눌림 후 눌림일 고가 돌파 (상승 반등 확인) / ")
+              .append("BREAKOUT = 이벤트일 고가 돌파 (모멘텀 확인)\n");
+            sb.append("- 트리거 완성 기한 D+").append(EntryTriggerBacktester.FIRE_WINDOW_TRADING_DAYS)
+              .append(", 돌파 진입가는 max(시가, 기준가)로 보수 추정. ")
+              .append("발동률 = 적격 체인 멤버 중 트리거 완성 비율 (낮으면 기회 자체가 드묾)\n");
+            sb.append("- 비교 기준: 트리거 중앙값이 IMMEDIATE보다 높고 발동률이 지나치게 낮지 ")
+              .append("않아야 실전 후보 — 최종 채택은 분봉 정밀 검증 후\n\n");
+            sb.append("| 테마 | 앵커 이벤트 유형 | 트리거 | 표본 | 발동률 | 승률 | 중앙값 | p25 |\n");
+            sb.append("|---|---|---|---|---|---|---|---|\n");
+            for (EntryTriggerBacktester.TriggerStat t : triggers) {
+                sb.append(String.format("| %s | %s | %s | %d | %.0f%% | %.1f%% | %s | %s |%n",
+                        t.theme(), t.eventType(), t.trigger(), t.samples(),
+                        t.fireRate() * 100, t.winRate() * 100,
+                        pct(t.quantiles().median()), pct(t.quantiles().p25())));
             }
         }
 
