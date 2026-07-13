@@ -2,7 +2,9 @@ package com.trading.backtest;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 백테스트 설정 (B-1/B-2).
@@ -24,20 +26,13 @@ public class BacktestDataProperties {
     );
 
     /**
-     * B-4 이벤트 통계 전용 추가 표본 (targetSymbols와 합집합).
+     * B-4 이벤트 통계 전용 추가 표본 — 테마(밸류체인) → 종목 매핑 (targetSymbols와 합집합).
      * B-3 전략 백테스트 유니버스에는 포함되지 않는다 — 통계 표본만 넓히는 용도.
-     * 기본값: 대형주는 공시 반응이 약하다는 1차 결과에 따라 KOSDAQ 유동성 상위 후보.
+     * 테마 키는 "앵커 대형주 호재 → 동일 테마 관련주 파급(spillover)" 통계의 그룹 축으로
+     * 쓸 예정이며, 평면 목록이 필요한 기존 소비처는 getEventSymbols() 평면화를 그대로 쓴다.
+     * 원본은 application.yml의 backtest.event-themes.
      */
-    private List<String> eventSymbols = List.of(
-            "247540", // 에코프로비엠
-            "086520", // 에코프로
-            "196170", // 알테오젠
-            "028300", // HLB
-            "277810", // 레인보우로보틱스
-            "263750", // 펄어비스
-            "293490", // 카카오게임즈
-            "112040"  // 위메이드
-    );
+    private Map<String, List<String>> eventThemes = new LinkedHashMap<>();
 
     /** 적재/재생 기간 (년) — 설계 문서 §2.2 최소 3년 */
     private int years = 3;
@@ -58,7 +53,7 @@ public class BacktestDataProperties {
 
     /**
      * KOSDAQ 소속 종목 — B-4 벤치마크를 KOSDAQ 지수로 분리하기 위한 명시 목록.
-     * (KIS/DART 응답에 시장 구분이 없어 v1은 설정으로 관리 — eventSymbols 기본값과 일치)
+     * (KIS/DART 응답에 시장 구분이 없어 v1은 설정으로 관리 — 원본은 application.yml)
      */
     private List<String> kosdaqSymbols = List.of(
             "247540", "086520", "196170", "028300", "277810", "263750", "293490", "112040");
@@ -72,8 +67,13 @@ public class BacktestDataProperties {
     public List<String> getSymbols() { return symbols; }
     public void setSymbols(List<String> symbols) { this.symbols = symbols; }
 
-    public List<String> getEventSymbols() { return eventSymbols; }
-    public void setEventSymbols(List<String> eventSymbols) { this.eventSymbols = eventSymbols; }
+    public Map<String, List<String>> getEventThemes() { return eventThemes; }
+    public void setEventThemes(Map<String, List<String>> eventThemes) { this.eventThemes = new LinkedHashMap<>(eventThemes); }
+
+    /** 테마 맵 평면화 (선언 순서 보존·중복 제거) — 백필·분봉 수집·B-4 등 기존 소비처 호환 */
+    public List<String> getEventSymbols() {
+        return eventThemes.values().stream().flatMap(List::stream).distinct().toList();
+    }
 
     public int getYears() { return years; }
     public void setYears(int years) { this.years = years; }

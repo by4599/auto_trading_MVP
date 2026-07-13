@@ -14,6 +14,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,7 +42,7 @@ class MinuteCandleCollectorTest {
         TradingUniverseService universeService = new TradingUniverseService(universeRepository);
         backtestProperties = new com.trading.backtest.BacktestDataProperties();
         backtestProperties.setSymbols(List.of());        // 기존 테스트는 유니버스만으로 구성
-        backtestProperties.setEventSymbols(List.of());
+        backtestProperties.setEventThemes(Map.of());
         Clock fixed = Clock.fixed(
                 ZonedDateTime.of(TODAY.atTime(15, 40), KST).toInstant(), KST);
         sut = new MinuteCandleCollector(candleClient, repository, universeService,
@@ -93,7 +94,7 @@ class MinuteCandleCollectorTest {
     void collection_targets_merge_universe_and_backtest_samples() {
         stubUniverse("005930");
         backtestProperties.setSymbols(List.of("005930", "000660"));   // 005930 중복
-        backtestProperties.setEventSymbols(List.of("247540"));
+        backtestProperties.setEventThemes(Map.of("battery", List.of("247540")));
 
         assertThat(sut.collectionTargets()).containsExactly("005930", "000660", "247540");
     }
