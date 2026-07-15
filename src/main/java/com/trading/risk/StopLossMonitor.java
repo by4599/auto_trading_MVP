@@ -68,7 +68,8 @@ public class StopLossMonitor {
 
     void checkStops() {
         if (!kisProperties.isConfigured()) return;
-        if (statusManager.getCurrentMode() != TradingMode.RUNNING) return;
+        TradingMode mode = statusManager.getCurrentMode();
+        if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) return;
 
         Account account;
         try {

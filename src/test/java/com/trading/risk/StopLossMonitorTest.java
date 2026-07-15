@@ -142,4 +142,15 @@ class StopLossMonitorTest {
 
         verify(orderClient, never()).sell(anyString(), anyInt());
     }
+
+    @Test
+    @DisplayName("SAFE_MODE → 손절 감시는 유지 (신규 매수만 금지되는 모드)")
+    void still_monitors_in_safe_mode() {
+        givenArmedPosition(69_500.0, 69_000.0);
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+
+        sut.checkStops();
+
+        verify(orderClient).sell("005930", 33);
+    }
 }

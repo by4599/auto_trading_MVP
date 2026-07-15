@@ -151,6 +151,17 @@ class TimeCutSchedulerTest {
     }
 
     @Test
+    @DisplayName("SAFE_MODE 모드 → 타임컷은 방어 로직이므로 계속 동작")
+    void still_runs_in_safe_mode() {
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+        givenHoldings(holding("005930", 1, 72500.0));
+
+        scheduler(List.of()).executeTimeCut();
+
+        verify(orderClient).sell("005930", 1);
+    }
+
+    @Test
     @DisplayName("KIS 자격증명 미설정 → 매도 없음")
     void skips_when_not_configured() {
         kisProperties.setAppkey("");

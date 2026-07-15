@@ -63,7 +63,8 @@ public class RiskMonitor {
     @Scheduled(fixedDelay = 1000)
     public void monitor() {
         if (!kisProperties.isConfigured()) return;
-        if (statusManager.getCurrentMode() != TradingMode.RUNNING) return;
+        TradingMode mode = statusManager.getCurrentMode();
+        if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) return;
         if (liquidationService.isAnyLiquidationInProgress()) return;
 
         Account account;

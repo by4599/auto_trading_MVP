@@ -65,6 +65,13 @@ public class Position {
         this.updatedAt = LocalDateTime.now();
     }
 
+    /** 기동 재동기화(Reconciler) 전용 — 브로커 실잔고 값으로 그대로 덮어쓴다 (델타 누적 아님) */
+    public void reconcileTo(int quantity, double averagePrice) {
+        this.quantity     = quantity;
+        this.averagePrice = averagePrice;
+        this.updatedAt    = LocalDateTime.now();
+    }
+
     /** 매도 체결 반영 — 수량 감소, 평균단가 유지 */
     public void applySell(int filledQty) {
         if (filledQty > this.quantity) {

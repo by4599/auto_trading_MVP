@@ -121,4 +121,19 @@ class OrderEngineTest {
         verify(orderClient, never()).buy(anyString(), anyInt());
         verify(orderClient, never()).sell(anyString(), anyInt());
     }
+
+    @Test
+    @DisplayName("SAFE_MODE → 매수는 차단, 매도(방어 로직)는 통과")
+    void safe_mode_blocks_buy_but_allows_sell() {
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+        Position pos = Position.empty("005930");
+        pos.applyBuy(33, 72_500.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.execute(Signal.buy("005930", "test"));
+        sut.execute(Signal.sell("005930", "test"));
+
+        verify(orderClient, never()).buy(anyString(), anyInt());
+        verify(orderClient).sell("005930", 33);
+    }
 }

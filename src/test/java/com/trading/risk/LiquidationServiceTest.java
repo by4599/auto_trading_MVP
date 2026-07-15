@@ -193,4 +193,27 @@ class LiquidationServiceTest {
         // phase는 여전히 FULL_LIQUIDATING — TRIMMING으로 변하지 않았음
         assertThat(sut.currentPhase()).isEqualTo(LiquidationPhase.FULL_LIQUIDATING);
     }
+
+    // ── Test 5 (재가동 게이트): resetAfterManualReview ──────────────────────────
+    @Test
+    void resetAfterManualReview_clears_lock_after_full_liquidation() {
+        when(brokerageClient.getActualAccountAsset())
+                .thenReturn(new ActualAccountInfo(List.of()));
+
+        sut.triggerForceLiquidation();
+        assertThat(sut.currentPhase()).isEqualTo(LiquidationPhase.FULL_LIQUIDATING);
+
+        sut.resetAfterManualReview();
+
+        assertThat(sut.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+    }
+
+    @Test
+    void resetAfterManualReview_is_noop_when_already_idle() {
+        assertThat(sut.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+
+        sut.resetAfterManualReview();
+
+        assertThat(sut.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+    }
 }

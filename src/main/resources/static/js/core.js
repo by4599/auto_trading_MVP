@@ -140,9 +140,29 @@ async function tradingStop() {
   }
 }
 
+// 재가동 게이트 (OPERATIONS §6) — EMERGENCY_STOPPED에서 /start로 직접 못 돌아가므로
+// 원인 진단을 reason으로 남기고 /resume을 호출해 SAFE_MODE로 전환한다.
+// SAFE_MODE 도달 후에는 기존 "시작" 버튼(/start)으로 RUNNING을 눌러야 한다.
+async function tradingResume() {
+  const reason = prompt('재가동 사유를 입력하세요 (원인 진단 기록 — PERFORMANCE-GOVERNANCE §6)');
+  if (reason == null || reason.trim() === '') { showToast('재가동을 취소했습니다', 'err'); return; }
+
+  setCtrlBusy(true);
+  try {
+    const data = await post('/api/trading/resume', { confirm: 'CONFIRM_RESUME', reason: reason.trim() });
+    showToast(data.message, data.success ? 'ok' : 'err');
+    if (data.success) await loadStatus();
+  } catch (e) {
+    showToast('재가동 실패: ' + e.message, 'err');
+  } finally {
+    setCtrlBusy(false);
+  }
+}
+
 function setCtrlBusy(busy) {
-  document.getElementById('btnStart').disabled = busy;
-  document.getElementById('btnStop').disabled  = busy;
+  document.getElementById('btnStart').disabled  = busy;
+  document.getElementById('btnStop').disabled   = busy;
+  document.getElementById('btnResume').disabled = busy;
 }
 
 // ── 상태 (상단 바 배지 — 전 탭 공통 폴링) ────────────────────────────────
@@ -165,8 +185,9 @@ function updateModeBadge(configured, mode) {
   if (!configured) { setModeBadge('warning', '설정 필요'); return; }
   const map = {
     RUNNING:           ['running', '거래 중'],
+    SAFE_MODE:         ['warning', 'SAFE MODE (신규매수 금지)'],
     FORCE_LIQUIDATING: ['stopped', '강제 청산 중'],
-    EMERGENCY_STOPPED: ['stopped', '정지됨'],
+    EMERGENCY_STOPPED: ['stopped', '정지됨 — 재가동 필요'],
   };
   const [cls, label] = map[mode] ?? ['unknown', mode];
   setModeBadge(cls, label);
@@ -178,17 +199,22 @@ function setModeBadge(cls, label) {
   el.textContent = label;
 }
 
+// 재가동 게이트(OPERATIONS §6): EMERGENCY_STOPPED는 "재개" 버튼(/resume)만 보이고
+// "시작"(/start)은 EMERGENCY_STOPPED에서 서버가 거부하므로 노출하지 않는다.
+// FORCE_LIQUIDATING은 청산 상태머신이 소유한 구간이라 어떤 버튼도 보이지 않는다.
 function updateCtrlButtons(configured, mode) {
-  const btnStart = document.getElementById('btnStart');
-  const btnStop  = document.getElementById('btnStop');
+  const btnStart  = document.getElementById('btnStart');
+  const btnStop   = document.getElementById('btnStop');
+  const btnResume = document.getElementById('btnResume');
   if (!configured) {
-    btnStart.style.display = 'none';
-    btnStop.style.display  = 'none';
+    btnStart.style.display  = 'none';
+    btnStop.style.display   = 'none';
+    btnResume.style.display = 'none';
     return;
   }
-  const isRunning = mode === 'RUNNING';
-  btnStart.style.display = isRunning ? 'none' : '';
-  btnStop.style.display  = isRunning ? '' : 'none';
+  btnResume.style.display = mode === 'EMERGENCY_STOPPED' ? '' : 'none';
+  btnStart.style.display  = mode === 'SAFE_MODE' ? '' : 'none';
+  btnStop.style.display   = (mode === 'RUNNING' || mode === 'SAFE_MODE') ? '' : 'none';
 }
 
 // ── 설정 모달 ─────────────────────────────────────────────────────────────

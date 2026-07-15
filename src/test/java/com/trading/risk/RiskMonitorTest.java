@@ -136,6 +136,16 @@ class RiskMonitorTest {
     }
 
     @Test
+    void safe_mode_still_monitors_and_can_trigger_liquidation() {
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+        when(monitorPm.snapshotAccount()).thenReturn(account(47_500_000, -0.05));
+
+        sut.monitor();
+
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.FULL_LIQUIDATING);
+    }
+
+    @Test
     void skips_when_credentials_not_configured() {
         RiskMonitor unconfigured = new RiskMonitor(monitorPm, shadowPortfolio,
                 liquidationService, statusManager, new KisProperties(), notifier, new RiskLimitsProperties());

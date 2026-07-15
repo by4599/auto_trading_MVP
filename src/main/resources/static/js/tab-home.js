@@ -175,9 +175,10 @@ async function loadRisk() {
     const d = await get('/api/risk/status');
 
     const modeMap = {
-      RUNNING:           ['거래 중',      'up'],
-      FORCE_LIQUIDATING: ['강제 청산 중', 'down'],
-      EMERGENCY_STOPPED: ['긴급 정지',   'down'],
+      RUNNING:           ['거래 중',              'up'],
+      SAFE_MODE:         ['SAFE MODE(신규매수 금지)', 'flat'],
+      FORCE_LIQUIDATING: ['강제 청산 중',          'down'],
+      EMERGENCY_STOPPED: ['긴급 정지 — 재가동 필요', 'down'],
     };
     const [modeLabel, modeCls] = modeMap[d.tradingMode] ?? [d.tradingMode, 'flat'];
 

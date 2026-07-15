@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoTrading MVP</title>
-  <link rel="stylesheet" href="css/app.css?v=4">
-  <script defer src="js/core.js?v=4"></script>
-  <script defer src="js/tab-home.js?v=4"></script>
-  <script defer src="js/tab-performance.js?v=4"></script>
-  <script defer src="js/tab-positions.js?v=4"></script>
-  <script defer src="js/tab-review.js?v=4"></script>
+  <link rel="stylesheet" href="css/app.css?v=5">
+  <script defer src="js/core.js?v=5"></script>
+  <script defer src="js/tab-home.js?v=5"></script>
+  <script defer src="js/tab-performance.js?v=5"></script>
+  <script defer src="js/tab-positions.js?v=5"></script>
+  <script defer src="js/tab-review.js?v=5"></script>
 </head>
 <body>
 
@@ -18,6 +18,7 @@
   <div class="topbar-title">⚡ AutoTrading MVP</div>
   <div class="topbar-right">
     <span class="badge unknown" id="modeBadge">연결 중...</span>
+    <button class="btn-start" id="btnResume" onclick="tradingResume()" style="display:none">🔓 재개(재가동)</button>
     <button class="btn-start" id="btnStart" onclick="tradingStart()" style="display:none">▶ 시작</button>
     <button class="btn-stop"  id="btnStop"  onclick="tradingStop()"  style="display:none">⏸ 중지</button>
     <button class="btn-icon"  onclick="openSettings()">⚙ 설정</button>

@@ -74,7 +74,7 @@ public class TimeCutScheduler {
             return;
         }
         TradingMode mode = statusManager.getCurrentMode();
-        if (mode != TradingMode.RUNNING) {
+        if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) {
             log.warn("[타임컷] 건너뜀 — 현재 mode={} (청산 상태머신이 포지션 소유)", mode);
             return;
         }

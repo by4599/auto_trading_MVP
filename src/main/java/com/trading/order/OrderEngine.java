@@ -39,7 +39,12 @@ public class OrderEngine {
 
     public void execute(Signal signal) {
         TradingMode mode = statusManager.getCurrentMode();
-        if (mode != TradingMode.RUNNING) {
+        // SAFE_MODE: 신규 매수만 금지, 손절·타임컷 등 평시 매도 경로는 유지
+        if (mode == TradingMode.SAFE_MODE && signal.isBuy()) {
+            log.warn("[OrderEngine] 매수 차단 — SAFE_MODE: {}", signal.getStockCode());
+            return;
+        }
+        if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) {
             log.warn("[OrderEngine] 주문 차단 — 현재 mode={}, signal={}", mode, signal.getStockCode());
             return;
         }

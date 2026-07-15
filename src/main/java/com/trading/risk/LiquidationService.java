@@ -135,6 +135,20 @@ public class LiquidationService {
         return phase.get() != LiquidationPhase.IDLE;
     }
 
+    // ── 재가동 게이트 (OPERATIONS §6) ────────────────────────────────────────
+    /**
+     * 재가동 전까지 걸려있던 잠금을 해제한다. 관리자 액션(TradingController의
+     * 확인 문자열 요구 엔드포인트)에서만 호출해야 한다 — 청산 진행 여부와
+     * 무관하게 즉시 IDLE로 되돌리므로, 청산이 실제로 끝났는지(브로커 실잔고
+     * 재확인)는 호출 측 책임이다.
+     */
+    public void resetAfterManualReview() {
+        LiquidationPhase previous = phase.getAndSet(LiquidationPhase.IDLE);
+        if (previous != LiquidationPhase.IDLE) {
+            log.warn("[LiquidationService] 관리자 액션으로 phase 리셋: {} → IDLE", previous);
+        }
+    }
+
     // 테스트 전용: 현재 phase 조회
     LiquidationPhase currentPhase() {
         return phase.get();
