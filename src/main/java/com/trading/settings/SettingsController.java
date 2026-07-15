@@ -1,5 +1,6 @@
 package com.trading.settings;
 
+import com.trading.HeartbeatProperties;
 import com.trading.market.KisApiClient;
 import com.trading.market.KisProperties;
 import com.trading.research.DartProperties;
@@ -22,7 +23,8 @@ public class SettingsController {
     private static final List<String> KEY_ORDER = List.of(
             "KIS_APPKEY", "KIS_SECRETKEY", "KIS_ACCOUNT_NO",
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-            "DART_API_KEY"
+            "DART_API_KEY",
+            "HEARTBEAT_URL"
     );
 
     private static final Set<String> ALLOWED_KEYS = new HashSet<>(KEY_ORDER);
@@ -31,15 +33,18 @@ public class SettingsController {
     private final KisApiClient kisApiClient;
     private final TradingStatusManager statusManager;
     private final DartProperties dartProperties;
+    private final HeartbeatProperties heartbeatProperties;
 
     public SettingsController(KisProperties kisProperties,
                                KisApiClient kisApiClient,
                                TradingStatusManager statusManager,
-                               DartProperties dartProperties) {
+                               DartProperties dartProperties,
+                               HeartbeatProperties heartbeatProperties) {
         this.kisProperties = kisProperties;
         this.kisApiClient  = kisApiClient;
         this.statusManager = statusManager;
         this.dartProperties = dartProperties;
+        this.heartbeatProperties = heartbeatProperties;
     }
 
     @GetMapping("/status")
@@ -105,6 +110,7 @@ public class SettingsController {
             case "KIS_SECRETKEY"       -> kisProperties.setSecretkey(value);
             case "KIS_ACCOUNT_NO"      -> kisProperties.setAccountNo(value);
             case "DART_API_KEY"        -> dartProperties.setApiKey(value);
+            case "HEARTBEAT_URL"       -> heartbeatProperties.setUrl(value);
             // TELEGRAM_* 는 별도 컴포넌트가 직접 env 읽음 — 여기선 setx만으로 충분
         }
     }

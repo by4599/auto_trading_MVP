@@ -469,6 +469,12 @@ async function saveDart() {
   }, 'dartMsg');
 }
 
+async function saveHeartbeat() {
+  await doSave({
+    HEARTBEAT_URL: document.getElementById('heartbeat_url').value,
+  }, 'heartbeatMsg');
+}
+
 async function doSave(body, msgId) {
   const msg = document.getElementById(msgId);
   try {

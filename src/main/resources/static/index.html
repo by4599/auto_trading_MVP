@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoTrading MVP</title>
-  <link rel="stylesheet" href="css/app.css?v=5">
-  <script defer src="js/core.js?v=5"></script>
-  <script defer src="js/tab-home.js?v=5"></script>
-  <script defer src="js/tab-performance.js?v=5"></script>
-  <script defer src="js/tab-positions.js?v=5"></script>
-  <script defer src="js/tab-review.js?v=5"></script>
+  <link rel="stylesheet" href="css/app.css?v=6">
+  <script defer src="js/core.js?v=6"></script>
+  <script defer src="js/tab-home.js?v=6"></script>
+  <script defer src="js/tab-performance.js?v=6"></script>
+  <script defer src="js/tab-positions.js?v=6"></script>
+  <script defer src="js/tab-review.js?v=6"></script>
 </head>
 <body>
 
@@ -241,6 +241,21 @@
     </div>
     <button class="btn-save ghost" onclick="saveDart()">DART 저장</button>
     <div class="msg" id="dartMsg"></div>
+
+    <hr class="divider">
+
+    <div class="section-hdr">💓 데드맨 스위치 <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
+    <p class="hint">
+      <a href="https://healthchecks.io" target="_blank">healthchecks.io</a> 등에서 만든 ping URL.
+      5분마다 현재 모드·보유 종목 수를 전송합니다 — 앱이 죽으면 이 신호도 끊기므로
+      외부 서비스 쪽에서 무응답 경고를 설정해야 완성됩니다. 비워두면 전송하지 않습니다.
+    </p>
+    <div class="field">
+      <label>HEARTBEAT_URL</label>
+      <input type="text" id="heartbeat_url" placeholder="https://hc-ping.com/xxxxxxxx-xxxx-...">
+    </div>
+    <button class="btn-save ghost" onclick="saveHeartbeat()">데드맨 스위치 저장</button>
+    <div class="msg" id="heartbeatMsg"></div>
     </div><!-- /modalTabApi -->
 
     <div id="modalTabParams" style="display:none">
