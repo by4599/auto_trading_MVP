@@ -14,9 +14,11 @@ import org.springframework.stereotype.Component;
 public class GlobalEquityStopRule implements RiskRule {
 
     private final ShadowPortfolio shadowPortfolio;
+    private final RiskLimitsProperties limits;
 
-    public GlobalEquityStopRule(ShadowPortfolio shadowPortfolio) {
+    public GlobalEquityStopRule(ShadowPortfolio shadowPortfolio, RiskLimitsProperties limits) {
         this.shadowPortfolio = shadowPortfolio;
+        this.limits = limits;
     }
 
     @Override
@@ -28,7 +30,7 @@ public class GlobalEquityStopRule implements RiskRule {
         if (current <= 0) return RiskResult.pass(); // 잔고 폴백 등 비정상 스냅샷 — 오탐 방지
 
         double drawdown = (peak - current) / peak;
-        if (drawdown > RiskLimits.MDD_LIMIT) {
+        if (drawdown > limits.getMddLimit()) {
             return RiskResult.reject(String.format(
                     "전고점 대비 MDD %.2f%% 초과 — 신규 매수 금지", drawdown * 100));
         }

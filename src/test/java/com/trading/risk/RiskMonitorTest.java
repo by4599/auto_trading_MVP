@@ -47,7 +47,7 @@ class RiskMonitorTest {
         liquidationService = new LiquidationService(brokerageClient, statusManager, notifier);
 
         sut = new RiskMonitor(monitorPm, shadowPortfolio, liquidationService,
-                statusManager, configuredProps(), notifier);
+                statusManager, configuredProps(), notifier, new RiskLimitsProperties());
     }
 
     private static KisProperties configuredProps() {
@@ -138,7 +138,7 @@ class RiskMonitorTest {
     @Test
     void skips_when_credentials_not_configured() {
         RiskMonitor unconfigured = new RiskMonitor(monitorPm, shadowPortfolio,
-                liquidationService, statusManager, new KisProperties(), notifier);
+                liquidationService, statusManager, new KisProperties(), notifier, new RiskLimitsProperties());
 
         unconfigured.monitor();
 

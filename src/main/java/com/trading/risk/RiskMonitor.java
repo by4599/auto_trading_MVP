@@ -36,25 +36,28 @@ public class RiskMonitor {
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
     private final NotificationService notifier;
+    private final RiskLimitsProperties limits;
 
     public RiskMonitor(PositionManager positionManager,
                        ShadowPortfolio shadowPortfolio,
                        LiquidationService liquidationService,
                        TradingStatusManager statusManager,
                        KisProperties kisProperties,
-                       NotificationService notifier) {
+                       NotificationService notifier,
+                       RiskLimitsProperties limits) {
         this.positionManager = positionManager;
         this.shadowPortfolio = shadowPortfolio;
         this.liquidationService = liquidationService;
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.notifier = notifier;
+        this.limits = limits;
     }
 
     @PostConstruct
     void logStart() {
         log.info("[RiskMonitor] 계좌 감시 시작 — 일일손실 청산 {}%, MDD 한도 {}%",
-                RiskLimits.DAILY_LOSS_LIQUIDATE * 100, RiskLimits.MDD_LIMIT * 100);
+                limits.getDailyLossLiquidate() * 100, limits.getMddLimit() * 100);
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -75,27 +78,27 @@ public class RiskMonitor {
         double current = account.getTotalAssetValue();
         if (current <= 0) return;
 
-        // 1) 일일 손실 -5% → 강제청산
+        // 1) 일일 손실 한도(기본 -5%) → 강제청산
         double pnl = account.getDailyPnlPercent();
-        if (pnl <= RiskLimits.DAILY_LOSS_LIQUIDATE) {
+        if (pnl <= limits.getDailyLossLiquidate()) {
             log.error("[RiskMonitor] 일일 손실 {}% — 강제청산 트리거", String.format("%.2f", pnl * 100));
             notifier.sendCritical(String.format(
                     "🚨 [RiskMonitor] 일일 손실 %.2f%% (한도 %.0f%%) — 강제청산을 개시합니다",
-                    pnl * 100, RiskLimits.DAILY_LOSS_LIQUIDATE * 100));
+                    pnl * 100, limits.getDailyLossLiquidate() * 100));
             liquidationService.triggerForceLiquidation();
             return;
         }
 
-        // 2) 전고점 대비 MDD 10% 초과 → 강제청산
+        // 2) 전고점 대비 MDD 한도(기본 10%) 초과 → 강제청산
         double peak = shadowPortfolio.getPeakEquity();
         if (peak > 0) {
             double drawdown = (peak - current) / peak;
-            if (drawdown > RiskLimits.MDD_LIMIT) {
+            if (drawdown > limits.getMddLimit()) {
                 log.error("[RiskMonitor] MDD {}% 초과 (peak={}, current={}) — 강제청산 트리거",
                         String.format("%.2f", drawdown * 100), peak, current);
                 notifier.sendCritical(String.format(
                         "🚨 [RiskMonitor] 전고점 대비 MDD %.2f%% (한도 %.0f%%) — 강제청산을 개시합니다",
-                        drawdown * 100, RiskLimits.MDD_LIMIT * 100));
+                        drawdown * 100, limits.getMddLimit() * 100));
                 liquidationService.triggerForceLiquidation();
             }
         }

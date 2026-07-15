@@ -56,7 +56,7 @@ class StopLossMonitorTest {
         kisProperties.setAccountNo("50000000-01");
 
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator()),
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,

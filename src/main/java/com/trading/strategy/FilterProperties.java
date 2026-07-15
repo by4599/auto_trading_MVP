@@ -28,8 +28,8 @@ public class FilterProperties {
 
     /** 장초반 휩소성 가짜 돌파 회피 — notBefore 이전 신규 진입 금지 */
     public static class EntryWindow {
-        private boolean enabled = false;
-        private LocalTime notBefore = LocalTime.of(9, 15);
+        private volatile boolean enabled = false;
+        private volatile LocalTime notBefore = LocalTime.of(9, 15);
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -39,8 +39,8 @@ public class FilterProperties {
 
     /** 거래량 동반 돌파만 신뢰 — 당일 누적 거래량 ≥ 전일 총량 × ratio */
     public static class VolumeConfirm {
-        private boolean enabled = false;
-        private double ratio = 1.5;
+        private volatile boolean enabled = false;
+        private volatile double ratio = 1.5;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -50,9 +50,9 @@ public class FilterProperties {
 
     /** +armProfit 도달 후 고점 대비 trail 하락 시 청산 (타임컷 보완) */
     public static class TrailingStop {
-        private boolean enabled = false;
-        private double armProfitPct = 0.03;
-        private double trailPct = 0.02;
+        private volatile boolean enabled = false;
+        private volatile double armProfitPct = 0.03;
+        private volatile double trailPct = 0.02;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -64,7 +64,7 @@ public class FilterProperties {
 
     /** 지수 약세일의 개별 돌파 불신 — KOSPI 갭다운 시 신규 진입 금지 (일봉 변형) */
     public static class IndexRegime {
-        private boolean enabled = false;
+        private volatile boolean enabled = false;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -76,8 +76,8 @@ public class FilterProperties {
      * (BACKTEST-DESIGN §8). 정례 공시(지분보고 등)는 판정에서 제외한다.
      */
     public static class DisclosureCooldown {
-        private boolean enabled = false;
-        private int cooldownDays = 5;
+        private volatile boolean enabled = false;
+        private volatile int cooldownDays = 5;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }

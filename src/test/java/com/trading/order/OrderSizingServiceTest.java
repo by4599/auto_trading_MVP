@@ -1,5 +1,6 @@
 package com.trading.order;
 
+import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.MarketDataService;
@@ -35,7 +36,7 @@ class OrderSizingServiceTest {
     void setUp() {
         marketDataService = mock(MarketDataService.class);
         positionManager = mock(PositionManager.class);
-        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator());
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties());
     }
 
     private void givenAtr(double atr) {

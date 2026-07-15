@@ -35,13 +35,16 @@ public class StopLossArmer {
     private final MarketDataService marketDataService;
     private final AtrCalculator atrCalculator;
     private final PositionRepository positionRepository;
+    private final RiskLimitsProperties limits;
 
     public StopLossArmer(MarketDataService marketDataService,
                          AtrCalculator atrCalculator,
-                         PositionRepository positionRepository) {
+                         PositionRepository positionRepository,
+                         RiskLimitsProperties limits) {
         this.marketDataService = marketDataService;
         this.atrCalculator = atrCalculator;
         this.positionRepository = positionRepository;
+        this.limits = limits;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -60,7 +63,7 @@ public class StopLossArmer {
                 return;
             }
 
-            double stopPrice = fillPrice - atrOpt.getAsDouble() * RiskLimits.ATR_STOP_MULTIPLIER;
+            double stopPrice = fillPrice - atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
             positionRepository.findByStockCode(stockCode).ifPresentOrElse(pos -> {
                 pos.armStopLoss(stopPrice);
                 positionRepository.save(pos);

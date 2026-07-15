@@ -99,3 +99,14 @@ CREATE TABLE IF NOT EXISTS portfolio_state (
     state_value DECIMAL(16, 2) NOT NULL,
     PRIMARY KEY (state_key)
 );
+
+-- ──────────────────────────────────────────────────────────────────────────────
+
+-- 사용자 조정 투자 파라미터 (설정 UI). 행이 있는 키만 코드 기본값을 덮어쓴다.
+CREATE TABLE IF NOT EXISTS app_setting (
+    param_key   VARCHAR(64) NOT NULL,
+    param_value VARCHAR(32) NOT NULL,
+    updated_at  TIMESTAMP   NOT NULL,
+    PRIMARY KEY (param_key)
+);
+

@@ -43,8 +43,7 @@ public class VolatilityBreakoutStrategy implements Strategy {
             return List.of();
         }
 
-        double range = yesterday.getHigh() - yesterday.getLow();
-        double breakoutPrice = today.getOpen() + range * parameters.getK();
+        double breakoutPrice = BreakoutCalculator.targetPrice(yesterday, today, parameters.getK());
 
         if (today.getClose() > breakoutPrice) {
             return List.of(Signal.buy(stockCode, getName()));

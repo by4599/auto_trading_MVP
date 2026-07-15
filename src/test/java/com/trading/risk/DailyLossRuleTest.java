@@ -15,7 +15,7 @@ class DailyLossRuleTest {
 
     @BeforeEach
     void setUp() {
-        sut = new DailyLossRule();
+        sut = new DailyLossRule(new RiskLimitsProperties());
     }
 
     private static Account accountWithPnl(double dailyPnlPercent) {

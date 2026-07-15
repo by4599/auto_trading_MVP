@@ -1,5 +1,6 @@
 package com.trading.scheduler;
 
+import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.KisProperties;
@@ -74,7 +75,7 @@ class TradingSchedulerTest {
                 new Candle(LocalDate.now(), 100, 105, 95, 100, 1000)));
 
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(marketDataService, positionManager, new AtrCalculator()),
+                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
                 positionRepository);
         sut = new TradingScheduler(marketDataService,
                 new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),

@@ -12,6 +12,7 @@ import com.trading.position.BalanceClient.BalanceSnapshot;
 import com.trading.position.BalanceClient.Holding;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResultRepository;
 import com.trading.position.TradeResultTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,8 @@ class KisBrokerageApiClientTest {
         FillStateUpdater fillStateUpdater = new FillStateUpdater(
                 orderHistoryRepository, mock(PositionRepository.class),
                 mock(ApplicationEventPublisher.class),
-                new TradeResultTracker(mock(PortfolioStateRepository.class)));
+                new TradeResultTracker(mock(PortfolioStateRepository.class)),
+                mock(TradeResultRepository.class));
         sut = new KisBrokerageApiClient(balanceClient, orderClient, cancelClient,
                 orderHistoryRepository, fillStateUpdater);
     }

@@ -1,5 +1,6 @@
 package com.trading.scheduler;
 
+import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
 import com.trading.market.MarketDataService;
@@ -71,7 +72,7 @@ class TimeCutSchedulerTest {
 
     private TimeCutScheduler scheduler(List<RiskRule> rules) {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator()),
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties()),
                 positionRepository);
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,

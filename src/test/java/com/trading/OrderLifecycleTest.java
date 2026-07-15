@@ -345,6 +345,8 @@ class OrderLifecycleUnitTest {
         @Override public boolean existsByStockCodeAndSideAndStatus(String code, OrderSide side, OrderStatus status) {
             return store.values().stream().anyMatch(o ->
                     o.getStockCode().equals(code) && o.getSide() == side && o.getStatus() == status); }
+        @Override public java.util.List<OrderHistory> findByFilledQuantityGreaterThan(int filledQuantity) {
+            return store.values().stream().filter(o -> o.getFilledQuantity() > filledQuantity).toList(); }
         @Override public java.util.Optional<OrderHistory> findById(Long id) { return java.util.Optional.ofNullable(store.get(id)); }
         @Override public java.util.List<OrderHistory> findAll() { return new java.util.ArrayList<>(store.values()); }
         @Override public void delete(OrderHistory e) { store.values().remove(e); }

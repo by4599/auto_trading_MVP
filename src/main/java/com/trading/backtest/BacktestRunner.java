@@ -3,7 +3,7 @@ package com.trading.backtest;
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
 import com.trading.position.ShadowPortfolio;
-import com.trading.risk.RiskLimits;
+import com.trading.risk.RiskLimitsProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -44,6 +44,7 @@ public class BacktestRunner {
     private final TradeRecorder tradeRecorder;
     private final BacktestDataProperties properties;
     private final MutableClock clock;
+    private final RiskLimitsProperties limits;
 
     public BacktestRunner(BacktestMarketDataService market,
                           DailyBarSimulator simulator,
@@ -54,7 +55,8 @@ public class BacktestRunner {
                           BacktestStateReset stateReset,
                           TradeRecorder tradeRecorder,
                           BacktestDataProperties properties,
-                          MutableClock clock) {
+                          MutableClock clock,
+                          RiskLimitsProperties limits) {
         this.market = market;
         this.simulator = simulator;
         this.orderClient = orderClient;
@@ -65,6 +67,7 @@ public class BacktestRunner {
         this.tradeRecorder = tradeRecorder;
         this.properties = properties;
         this.clock = clock;
+        this.limits = limits;
     }
 
     public RunResult run(RunConfig config) {
@@ -112,10 +115,10 @@ public class BacktestRunner {
         var account = positionManager.snapshotAccount();
         shadowPortfolio.tick();
 
-        boolean dailyLossBreach = account.getDailyPnlPercent() <= RiskLimits.DAILY_LOSS_LIQUIDATE;
+        boolean dailyLossBreach = account.getDailyPnlPercent() <= limits.getDailyLossLiquidate();
         double peak = shadowPortfolio.getPeakEquity();
         boolean mddBreach = peak > 0
-                && (peak - account.getTotalAssetValue()) / peak > RiskLimits.MDD_LIMIT;
+                && (peak - account.getTotalAssetValue()) / peak > limits.getMddLimit();
 
         if ((dailyLossBreach || mddBreach) && !heldPositions().isEmpty()) {
             log.warn("[Backtest] {} 강제청산 모델 발동 (dailyLoss={} mdd={})",

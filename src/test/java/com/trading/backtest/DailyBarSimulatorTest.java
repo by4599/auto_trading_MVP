@@ -1,5 +1,6 @@
 package com.trading.backtest;
 
+import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.CandleHistory;
@@ -95,7 +96,7 @@ class DailyBarSimulatorTest {
                 tradeRecorder, clock);
 
         OrderEngine orderEngine = new OrderEngine(orderClient, new TradingStatusManager(),
-                new OrderSizingService(market, positionManager, new AtrCalculator()),
+                new OrderSizingService(market, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
                 positionRepository);
         FilterProperties filters = new FilterProperties();
         SignalDispatcher dispatcher = new SignalDispatcher(

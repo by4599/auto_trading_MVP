@@ -1,5 +1,6 @@
 package com.trading.order;
 
+import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.MarketDataService;
@@ -48,7 +49,7 @@ class OrderEngineTest {
         positionManager = mock(PositionManager.class);
         positionRepository = mock(PositionRepository.class);
         sut = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(marketDataService, positionManager, new AtrCalculator()),
+                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
                 positionRepository);
     }
 

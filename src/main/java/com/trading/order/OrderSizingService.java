@@ -3,7 +3,7 @@ package com.trading.order;
 import com.trading.market.AtrCalculator;
 import com.trading.market.MarketDataService;
 import com.trading.position.PositionManager;
-import com.trading.risk.RiskLimits;
+import com.trading.risk.RiskLimitsProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -28,13 +28,16 @@ public class OrderSizingService {
     private final MarketDataService marketDataService;
     private final PositionManager positionManager;
     private final AtrCalculator atrCalculator;
+    private final RiskLimitsProperties limits;
 
     public OrderSizingService(MarketDataService marketDataService,
                               PositionManager positionManager,
-                              AtrCalculator atrCalculator) {
+                              AtrCalculator atrCalculator,
+                              RiskLimitsProperties limits) {
         this.marketDataService = marketDataService;
         this.positionManager = positionManager;
         this.atrCalculator = atrCalculator;
+        this.limits = limits;
     }
 
     public SizingResult sizeBuy(String stockCode) {
@@ -54,8 +57,8 @@ public class OrderSizingService {
             return SizingResult.skip("총자산 조회 불가 (equity<=0) — 사이징 불성립");
         }
 
-        double stopDistance = atrOpt.getAsDouble() * RiskLimits.ATR_STOP_MULTIPLIER;
-        double oneR = equity * RiskLimits.RISK_FRACTION_PER_TRADE;
+        double stopDistance = atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
+        double oneR = equity * limits.getRiskFractionPerTrade();
 
         int quantity = (int) Math.floor(oneR / stopDistance);
         if (quantity < 1) {
@@ -65,10 +68,10 @@ public class OrderSizingService {
 
         double actualRisk = quantity * stopDistance;
         double distortion = Math.abs(actualRisk - oneR) / oneR;
-        if (distortion > RiskLimits.SIZING_MAX_DISTORTION) {
+        if (distortion > limits.getSizingMaxDistortion()) {
             return SizingResult.skip(String.format(
                     "단주 내림 왜곡 %.0f%% > 한도 %.0f%% — 스킵",
-                    distortion * 100, RiskLimits.SIZING_MAX_DISTORTION * 100));
+                    distortion * 100, limits.getSizingMaxDistortion() * 100));
         }
 
         log.info("[Sizing] {} 수량={} (1R={}, 손절폭={}, 실제리스크={})",

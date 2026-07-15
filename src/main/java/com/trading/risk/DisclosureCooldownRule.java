@@ -24,8 +24,9 @@ import java.util.Set;
 @Component
 public class DisclosureCooldownRule implements RiskRule {
 
-    /** 판정에서 제외할 정례 공시 유형 (DisclosureEventClassifier의 노이즈 유형) */
-    private static final Set<String> ROUTINE_TYPES = Set.of(
+    /** 판정에서 제외할 정례 공시 유형 (DisclosureEventClassifier의 노이즈 유형).
+     *  ReviewService(검토종목 대시보드)가 쿨다운 상태 표시에 같은 기준을 공유한다. */
+    public static final Set<String> ROUTINE_TYPES = Set.of(
             "INSIDER_OWNERSHIP", "LARGE_HOLDING", "IR_EVENT", "RELATED_PARTY", "REGULAR_FILING");
 
     private final FilterProperties filters;

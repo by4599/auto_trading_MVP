@@ -27,5 +27,13 @@ public final class RiskLimits {
     /** 단주 내림으로 실제 리스크가 1R 대비 이 비율을 벗어나면 진입 스킵 (방법론 §4.3) */
     public static final double SIZING_MAX_DISTORTION = 0.20;
 
+    // ── 포지션 한도 (CLAUDE.md 7대 리스크 룰) ────────────────────────────────
+
+    /** 종목당 최대 비중 10% (PositionLimitRule) */
+    public static final double MAX_POSITION_WEIGHT = 0.10;
+
+    /** 최대 보유 종목 수 5개 (MaxPositionCountRule) */
+    public static final int MAX_POSITION_COUNT = 5;
+
     private RiskLimits() {}
 }
