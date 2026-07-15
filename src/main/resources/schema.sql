@@ -110,3 +110,21 @@ CREATE TABLE IF NOT EXISTS app_setting (
     PRIMARY KEY (param_key)
 );
 
+-- 매도 체결 실현손익 (실적 대시보드). 저장 지점은 FillStateUpdater(라이브)뿐 —
+-- 백테스트는 이 테이블을 쓰지 않는다. BACKFILL은 order_history 소급 재생 레코드.
+CREATE TABLE IF NOT EXISTS trade_result (
+    id                BIGINT       NOT NULL AUTO_INCREMENT,
+    stock_code        VARCHAR(20)  NOT NULL,
+    quantity          INT          NOT NULL,
+    buy_avg_price     DOUBLE       NOT NULL,
+    sell_price        DOUBLE       NOT NULL,
+    realized_pnl      DOUBLE       NOT NULL,
+    realized_pnl_rate DOUBLE       NOT NULL,
+    trade_date        DATE         NOT NULL,
+    sold_at           TIMESTAMP    NOT NULL,
+    source            VARCHAR(10)  NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_result_date ON trade_result (trade_date);
+

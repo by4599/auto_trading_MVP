@@ -1,7 +1,5 @@
 package com.trading.dashboard;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.trading.market.KisApiClient;
 import com.trading.market.KisProperties;
 import com.trading.order.OrderHistory;
 import com.trading.order.OrderHistoryRepository;
@@ -10,6 +8,8 @@ import com.trading.position.Account;
 import com.trading.position.Position;
 import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResult;
+import com.trading.position.TradeResultRepository;
 import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,11 +19,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 대시보드용 읽기 전용 API.
  * 모든 쓰기는 OrderEngine을 통하며, 이 컨트롤러는 조회만 담당한다.
+ * KIS 현재가 조회는 QuoteCacheService(2초 캐시 공유)를 경유한다.
  */
 @RestController
 @RequestMapping("/api")
@@ -31,32 +31,30 @@ public class DashboardController {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardController.class);
 
-    private static final String TR_CURRENT_PRICE   = "FHKST01010100";
-    private static final String MARKET_CODE        = "J";
-    private static final int    MAX_ORDERS         = 20;
-    // KIS rate limit 대응: 2초 이내 동일 종목 요청은 캐시된 값 반환
-    private static final long   QUOTE_CACHE_TTL_MS = 2_000L;
+    private static final int MAX_ORDERS = 20;
 
-    private final KisApiClient           kisApiClient;
+    private final QuoteCacheService      quoteCache;
     private final KisProperties          kisProperties;
     private final PositionRepository     positionRepository;
     private final OrderHistoryRepository orderHistoryRepository;
     private final TradingStatusManager   tradingStatusManager;
     private final PositionManager        positionManager;
-    private final ConcurrentHashMap<String, CachedQuote> quoteCache = new ConcurrentHashMap<>();
+    private final TradeResultRepository  tradeResultRepository;
 
-    public DashboardController(KisApiClient           kisApiClient,
+    public DashboardController(QuoteCacheService      quoteCache,
                                 KisProperties          kisProperties,
                                 PositionRepository     positionRepository,
                                 OrderHistoryRepository orderHistoryRepository,
                                 TradingStatusManager   tradingStatusManager,
-                                PositionManager        positionManager) {
-        this.kisApiClient           = kisApiClient;
+                                PositionManager        positionManager,
+                                TradeResultRepository  tradeResultRepository) {
+        this.quoteCache             = quoteCache;
         this.kisProperties          = kisProperties;
         this.positionRepository     = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.tradingStatusManager   = tradingStatusManager;
         this.positionManager        = positionManager;
+        this.tradeResultRepository  = tradeResultRepository;
     }
 
     // ── 1. 현재가 ─────────────────────────────────────────────────────────────
@@ -69,12 +67,12 @@ public class DashboardController {
         if (!kisProperties.isConfigured()) return result;
 
         try {
-            PriceOutput o = fetchPrice(stockCode);
-            result.put("stockName",    o.stockName());
-            result.put("currentPrice", parseLong(o.current()));
-            result.put("changeAmount", parseLong(o.changeAmount()));
-            result.put("changeRate",   parseDouble(o.changeRate()));
-            result.put("volume",       parseLong(o.volume()));
+            QuoteCacheService.Quote q = quoteCache.fetch(stockCode);
+            result.put("stockName",    q.stockName());
+            result.put("currentPrice", q.currentPrice());
+            result.put("changeAmount", q.changeAmount());
+            result.put("changeRate",   q.changeRate());
+            result.put("volume",       q.volume());
         } catch (Exception e) {
             log.warn("현재가 조회 실패: {} — {}", stockCode, e.getMessage());
             result.put("error", e.getMessage());
@@ -92,11 +90,11 @@ public class DashboardController {
 
         if (positions.isEmpty()) return Collections.emptyList();
 
-        Map<String, Long> currentPrices = new HashMap<>();
+        Map<String, QuoteCacheService.Quote> quotes = new HashMap<>();
         if (kisProperties.isConfigured()) {
             for (Position p : positions) {
                 try {
-                    currentPrices.put(p.getStockCode(), parseLong(fetchPrice(p.getStockCode()).current()));
+                    quotes.put(p.getStockCode(), quoteCache.fetch(p.getStockCode()));
                 } catch (Exception e) {
                     log.warn("포지션 현재가 실패: {}", p.getStockCode());
                 }
@@ -106,12 +104,17 @@ public class DashboardController {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Position p : positions) {
             Map<String, Object> item = new LinkedHashMap<>();
+            QuoteCacheService.Quote q = quotes.get(p.getStockCode());
+
             item.put("stockCode",    p.getStockCode());
+            item.put("stockName",    q != null ? q.stockName() : null);
             item.put("quantity",     p.getQuantity());
             item.put("averagePrice", Math.round(p.getAveragePrice()));
 
-            Long cp = currentPrices.get(p.getStockCode());
+            Long cp = q != null ? q.currentPrice() : null;
             item.put("currentPrice", cp);
+            item.put("changeAmount", q != null ? q.changeAmount() : null);
+            item.put("changeRate",   q != null ? q.changeRate() : null);
 
             if (cp != null) {
                 long unrealizedPnl  = (cp - Math.round(p.getAveragePrice())) * (long) p.getQuantity();
@@ -123,6 +126,15 @@ public class DashboardController {
             } else {
                 item.put("unrealizedPnl",     null);
                 item.put("unrealizedPnlRate", null);
+            }
+
+            // ATR 손절선 — 미장착(부분 체결 매수 등)이면 null
+            item.put("stopPrice", p.getStopPrice() != null ? Math.round(p.getStopPrice()) : null);
+            if (p.getStopPrice() != null && cp != null && cp > 0) {
+                double stopDistancePct = (cp - p.getStopPrice()) / cp * 100.0;
+                item.put("stopDistancePct", Math.round(stopDistancePct * 100.0) / 100.0);
+            } else {
+                item.put("stopDistancePct", null);
             }
             result.add(item);
         }
@@ -149,7 +161,7 @@ public class DashboardController {
             try {
                 for (Position p : positionRepository.findAll()) {
                     if (p.getQuantity() <= 0) continue;
-                    long cp = parseLong(fetchPrice(p.getStockCode()).current());
+                    long cp = quoteCache.fetch(p.getStockCode()).currentPrice();
                     totalUnrealized += (cp - Math.round(p.getAveragePrice())) * (long) p.getQuantity();
                 }
             } catch (Exception e) {
@@ -160,8 +172,9 @@ public class DashboardController {
             result.put("unrealizedPnl", null);
         }
 
-        result.put("realizedPnl", null);
-        result.put("note", "실현손익은 Sprint 3 예정");
+        long realized = Math.round(tradeResultRepository.findByTradeDate(LocalDate.now()).stream()
+                .mapToDouble(TradeResult::getRealizedPnl).sum());
+        result.put("realizedPnl", realized);
         return result;
     }
 
@@ -217,57 +230,4 @@ public class DashboardController {
         result.put("consecutiveLossCount", consecutiveLosses);
         return result;
     }
-
-    // ── KIS API 공통 ─────────────────────────────────────────────────────────
-
-    private PriceOutput fetchPrice(String stockCode) {
-        CachedQuote cached = quoteCache.get(stockCode);
-        if (cached != null && !cached.isStale()) return cached.output();
-
-        PriceResponse resp = kisApiClient.getClient().get()
-                .uri(b -> b.path("/uapi/domestic-stock/v1/quotations/inquire-price")
-                        .queryParam("FID_COND_MRKT_DIV_CODE", MARKET_CODE)
-                        .queryParam("FID_INPUT_ISCD",         stockCode)
-                        .build())
-                .header("tr_id",    TR_CURRENT_PRICE)
-                .header("custtype", "P")
-                .retrieve()
-                .body(PriceResponse.class);
-
-        if (resp == null || resp.output() == null) {
-            throw new IllegalStateException("현재가 응답 없음: stockCode=" + stockCode);
-        }
-        quoteCache.put(stockCode, new CachedQuote(resp.output(), System.currentTimeMillis()));
-        return resp.output();
-    }
-
-    private record CachedQuote(PriceOutput output, long timestamp) {
-        boolean isStale() { return System.currentTimeMillis() - timestamp > QUOTE_CACHE_TTL_MS; }
-    }
-
-    private static long parseLong(String s) {
-        if (s == null || s.isBlank()) return 0L;
-        try { return Long.parseLong(s.trim()); }
-        catch (NumberFormatException e) { return 0L; }
-    }
-
-    private static double parseDouble(String s) {
-        if (s == null || s.isBlank()) return 0.0;
-        try { return Double.parseDouble(s.trim()); }
-        catch (NumberFormatException e) { return 0.0; }
-    }
-
-    // ── KIS 응답 DTO ─────────────────────────────────────────────────────────
-
-    private record PriceResponse(
-            @JsonProperty("output") PriceOutput output
-    ) {}
-
-    private record PriceOutput(
-            @JsonProperty("stck_prpr")      String current,       // 현재가
-            @JsonProperty("stck_prdy_vrss") String changeAmount,  // 전일대비
-            @JsonProperty("prdy_ctrt")      String changeRate,     // 등락률 %
-            @JsonProperty("acml_vol")       String volume,         // 누적 거래량
-            @JsonProperty("hts_kor_isnm")   String stockName       // 종목명
-    ) {}
 }

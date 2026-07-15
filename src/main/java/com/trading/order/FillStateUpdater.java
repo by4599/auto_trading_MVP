@@ -2,6 +2,8 @@ package com.trading.order;
 
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
+import com.trading.position.TradeResult;
+import com.trading.position.TradeResultRepository;
 import com.trading.position.TradeResultTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,15 +49,18 @@ public class FillStateUpdater {
     private final PositionRepository positionRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final TradeResultTracker tradeResultTracker;
+    private final TradeResultRepository tradeResultRepository;
 
     public FillStateUpdater(OrderHistoryRepository orderHistoryRepository,
                             PositionRepository positionRepository,
                             ApplicationEventPublisher eventPublisher,
-                            TradeResultTracker tradeResultTracker) {
+                            TradeResultTracker tradeResultTracker,
+                            TradeResultRepository tradeResultRepository) {
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionRepository = positionRepository;
         this.eventPublisher = eventPublisher;
         this.tradeResultTracker = tradeResultTracker;
+        this.tradeResultRepository = tradeResultRepository;
     }
 
     /**
@@ -226,6 +231,9 @@ public class FillStateUpdater {
             // applySell 전에 기록 — 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
             tradeResultTracker.recordSellFill(
                     order.getStockCode(), newlyFilled, fillPrice, pos.getAveragePrice());
+            // 실현손익 영속화 (실적 대시보드) — 라이브 경로 전용, 같은 트랜잭션에서 커밋
+            tradeResultRepository.save(TradeResult.live(
+                    order.getStockCode(), newlyFilled, pos.getAveragePrice(), fillPrice));
             pos.applySell(newlyFilled);
             if (pos.getQuantity() == 0) positionRepository.delete(pos);
             else                        positionRepository.save(pos);
