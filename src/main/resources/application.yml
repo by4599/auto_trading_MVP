@@ -1,6 +1,11 @@
 spring:
   application:
     name: auto-trading-mvp
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true   # 대시보드 정적 파일 갱신이 브라우저 캐시에 막히지 않게 매 요청 재검증 (로컬 도구라 비용 무시 가능)
 
 # ─── 데이터 수집·통계 표본 (매매 대상 아님 — 유니버스는 별도, 게이트 G1) ────────
 # event-themes: 분봉 전방 축적(MinuteCandleCollector) + 이벤트 통계(B-4) 표본을
