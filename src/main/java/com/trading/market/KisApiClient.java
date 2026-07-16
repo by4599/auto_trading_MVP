@@ -22,6 +22,7 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -44,6 +45,7 @@ public class KisApiClient {
     private static final int READ_TIMEOUT_MS = 10_000;
     private static final int TOKEN_REFRESH_MAX_ATTEMPTS = 3;
     private static final int CONSECUTIVE_FAILURE_THRESHOLD = 3;
+    private static final int RESUME_SUCCESS_THRESHOLD = 2;
 
     private final KisProperties props;
     private final TradingStatusManager statusManager;
@@ -54,6 +56,10 @@ public class KisApiClient {
     private volatile RestClient apiClient;
     private final AtomicReference<TokenHolder> tokenRef = new AtomicReference<>();
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
+    private final AtomicInteger consecutiveSuccesses = new AtomicInteger(0);
+    // 이 클라이언트가 "연결 끊김"으로 SAFE_MODE를 걸었을 때만 true — 연결 회복 시 자동복귀 대상 판별용.
+    // (앱 재시작·사람 조작으로 들어간 SAFE_MODE는 자동복귀시키지 않는다)
+    private final AtomicBoolean pausedByConnectionLoss = new AtomicBoolean(false);
 
     @Autowired
     public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier) {
@@ -225,13 +231,20 @@ public class KisApiClient {
 
     private void recordOutcome(int status) {
         if (status / 100 == 2) {
-            consecutiveFailures.set(0);
+            recordSuccess();
         } else {
             recordFailure();
         }
     }
 
+    private void recordSuccess() {
+        consecutiveFailures.set(0);
+        int successes = consecutiveSuccesses.incrementAndGet();
+        maybeAutoResume(successes);
+    }
+
     private void recordFailure() {
+        consecutiveSuccesses.set(0);
         int failures = consecutiveFailures.incrementAndGet();
         if (failures >= CONSECUTIVE_FAILURE_THRESHOLD) {
             triggerSafeModeIfRunning(String.format(
@@ -239,10 +252,30 @@ public class KisApiClient {
         }
     }
 
+    /** 연결 끊김으로 스스로 멈춘다. 연결 회복 시 자동복귀 대상으로 표시(pausedByConnectionLoss). */
     private void triggerSafeModeIfRunning(String reason) {
         if (statusManager.getCurrentMode() == TradingMode.RUNNING) {
             statusManager.changeMode(TradingMode.SAFE_MODE);
-            notifier.sendCritical("🚨 [KisApiClient] SAFE_MODE 전환 — " + reason);
+            pausedByConnectionLoss.set(true);
+            notifier.sendCritical("🚨 [자동정지] 증권사 연결이 끊겨 매매를 멈춥니다(신규 매수 중지) — " + reason);
+        }
+    }
+
+    /**
+     * 연결이 회복되면(연속 성공 {@value #RESUME_SUCCESS_THRESHOLD}회) 스스로 멈춰 있던 경우에 한해
+     * 자동으로 RUNNING 복귀 + 알림. 앱 재시작·사람 조작으로 들어간 SAFE_MODE는 대상이 아니다.
+     */
+    private void maybeAutoResume(int consecutiveSuccessCount) {
+        if (!pausedByConnectionLoss.get()) return;
+        if (statusManager.getCurrentMode() != TradingMode.SAFE_MODE) {
+            // 그 사이 사람이 다른 상태로 바꿨으면 자동복귀 권한을 내려놓는다
+            pausedByConnectionLoss.set(false);
+            return;
+        }
+        if (consecutiveSuccessCount >= RESUME_SUCCESS_THRESHOLD
+                && pausedByConnectionLoss.compareAndSet(true, false)) {
+            statusManager.changeMode(TradingMode.RUNNING);
+            notifier.sendCritical("✅ [자동재개] 증권사 연결이 회복돼 매매를 다시 시작합니다");
         }
     }
 

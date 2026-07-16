@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -154,6 +155,58 @@ class KisApiClientTest {
         }
 
         assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.RUNNING);
+        verify(notifier, never()).sendCritical(anyString());
+        apiMock.verify();
+    }
+
+    // ── 연결 회복 시 자동 재개 ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("연결 끊김으로 SAFE_MODE가 된 뒤, 다시 연결되면 자동으로 RUNNING 복귀 + 알림")
+    void auto_resumes_to_running_after_connection_recovers() {
+        tokenMock.expect(ExpectedCount.once(), requestTo("/oauth2/tokenP"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withSuccess(TOKEN_JSON, MediaType.APPLICATION_JSON));
+        // 3회 실패 → SAFE_MODE
+        apiMock.expect(ExpectedCount.times(3), requestTo("/test"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+        // 2회 성공 → 자동 RUNNING 복귀
+        apiMock.expect(ExpectedCount.times(2), requestTo("/test"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess());
+
+        KisApiClient sut = sut();
+        for (int i = 0; i < 5; i++) {
+            try {
+                sut.getClient().get().uri("/test").retrieve().toBodilessEntity();
+            } catch (Exception ignored) {
+            }
+        }
+
+        assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.RUNNING);
+        // 멈춤 알림 1회 + 재개 알림 1회 = 정확히 2회
+        verify(notifier, times(2)).sendCritical(anyString());
+        apiMock.verify();
+    }
+
+    @Test
+    @DisplayName("연결 끊김이 아닌(사람/재시작) SAFE_MODE는 연결이 살아있어도 자동복귀하지 않는다")
+    void does_not_auto_resume_when_safe_mode_not_from_connection_loss() {
+        statusManager.changeMode(TradingMode.SAFE_MODE); // 재시작/사람 조작으로 진입한 SAFE_MODE 시뮬레이션
+        tokenMock.expect(ExpectedCount.once(), requestTo("/oauth2/tokenP"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withSuccess(TOKEN_JSON, MediaType.APPLICATION_JSON));
+        apiMock.expect(ExpectedCount.times(3), requestTo("/test"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess());
+
+        KisApiClient sut = sut();
+        for (int i = 0; i < 3; i++) {
+            sut.getClient().get().uri("/test").retrieve().toBodilessEntity();
+        }
+
+        assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.SAFE_MODE); // 그대로 유지
         verify(notifier, never()).sendCritical(anyString());
         apiMock.verify();
     }
