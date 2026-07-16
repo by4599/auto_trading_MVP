@@ -2,6 +2,8 @@ package com.trading.control;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.BalanceClient;
 import com.trading.position.PositionRepository;
 import com.trading.position.ShadowPortfolioReconciler;
@@ -62,7 +64,8 @@ class TradingControllerTest {
         BrokerageApiClient reconcilerBrokerClient = mock(BrokerageApiClient.class);
         reconciler = new ShadowPortfolioReconciler(statusManager, liquidationService, balanceClient,
                 positionRepository, reconcilerBrokerClient,
-                mock(NotificationService.class), Clock.system(ZoneId.of("Asia/Seoul")));
+                mock(NotificationService.class),
+                new MarketCalendarService(new MarketCalendarProperties(), Clock.system(ZoneId.of("Asia/Seoul"))));
 
         sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier);
     }

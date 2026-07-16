@@ -3,6 +3,8 @@ package com.trading.scheduler;
 import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.market.MarketDataService;
 import com.trading.order.KisOrderClient;
 import com.trading.order.OrderEngine;
@@ -23,6 +25,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,12 +52,15 @@ import static org.mockito.Mockito.when;
 @DisplayName("TimeCutScheduler — 15:15 보유분 전량 정리")
 class TimeCutSchedulerTest {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private PositionRepository positionRepository;
     private OrderHistoryRepository orderHistoryRepository;
     private PositionManager positionManager;
     private KisOrderClient orderClient;
     private TradingStatusManager statusManager;
     private KisProperties kisProperties;
+    private MarketCalendarService marketCalendarService;
 
     @BeforeEach
     void setUp() {
@@ -59,6 +69,7 @@ class TimeCutSchedulerTest {
         positionManager = mock(PositionManager.class);
         orderClient = mock(KisOrderClient.class);
         statusManager = new TradingStatusManager();
+        marketCalendarService = marketCalendarAt(LocalDate.of(2026, 7, 15)); // 수요일, 평일
 
         kisProperties = new KisProperties();
         kisProperties.setBaseUrl("https://openapivts.koreainvestment.com:29443");
@@ -70,6 +81,11 @@ class TimeCutSchedulerTest {
                 .thenReturn(new Account(1_000_000.0, 0.0, 0, List.of()));
     }
 
+    private static MarketCalendarService marketCalendarAt(LocalDate date) {
+        Clock fixed = Clock.fixed(LocalDateTime.of(date, LocalTime.NOON).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+
     private TimeCutScheduler scheduler(List<RiskRule> rules) {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties()),
@@ -77,7 +93,7 @@ class TimeCutSchedulerTest {
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(rules), orderEngine,
-                statusManager, kisProperties);
+                statusManager, kisProperties, marketCalendarService);
     }
 
     private static Position holding(String stockCode, int quantity, double price) {
@@ -159,6 +175,17 @@ class TimeCutSchedulerTest {
         scheduler(List.of()).executeTimeCut();
 
         verify(orderClient).sell("005930", 1);
+    }
+
+    @Test
+    @DisplayName("KRX 휴장일 → 매도 없음 (cron은 MON-FRI까지만 알므로 방어 가드)")
+    void skips_on_holiday() {
+        marketCalendarService = marketCalendarAt(LocalDate.of(2026, 7, 18)); // 토요일
+        givenHoldings(holding("005930", 1, 72500.0));
+
+        scheduler(List.of()).executeTimeCut();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.trading.scheduler;
 
 import com.trading.market.Candle;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.market.MarketDataService;
 import com.trading.order.OrderEngine;
 import com.trading.position.Account;
@@ -44,6 +45,7 @@ public class TradingScheduler {
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
     private final TradingUniverseService universeService;
+    private final MarketCalendarService marketCalendarService;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger roundRobinCursor = new AtomicInteger(0);
@@ -55,7 +57,8 @@ public class TradingScheduler {
                              PositionManager positionManager,
                              TradingStatusManager statusManager,
                              KisProperties kisProperties,
-                             TradingUniverseService universeService) {
+                             TradingUniverseService universeService,
+                             MarketCalendarService marketCalendarService) {
         this.marketDataService = marketDataService;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -64,12 +67,16 @@ public class TradingScheduler {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.universeService = universeService;
+        this.marketCalendarService = marketCalendarService;
     }
 
     @Scheduled(fixedDelay = 1000)
     public void run() {
         if (!kisProperties.isConfigured()) {
             return; // 자격증명 미설정 — 설정 페이지(localhost:8080)에서 입력 후 재시작
+        }
+        if (marketCalendarService.isHolidayToday()) {
+            return; // KRX 휴장일 — 루프 자체를 돌리지 않는다 (OPERATIONS §5.1)
         }
         if (statusManager.getCurrentMode() != TradingMode.RUNNING) {
             return; // FORCE_LIQUIDATING / EMERGENCY_STOPPED 상태에서 신규 매매 루프 진입 금지

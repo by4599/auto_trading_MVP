@@ -4,6 +4,8 @@ import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.market.MarketDataService;
 import com.trading.order.KisOrderClient;
 import com.trading.order.OrderEngine;
@@ -23,7 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyString;
@@ -38,6 +43,8 @@ import static org.mockito.Mockito.when;
  */
 @DisplayName("TradingScheduler — 유니버스 라운드로빈")
 class TradingSchedulerTest {
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private MarketDataService marketDataService;
     private PositionManager positionManager;
@@ -81,7 +88,16 @@ class TradingSchedulerTest {
                 new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
                 new RiskEngine(List.of()), orderEngine, positionManager,
                 statusManager, kisProperties,
-                new TradingUniverseService(universeRepository));
+                new TradingUniverseService(universeRepository),
+                marketCalendarAt(weekday()));
+    }
+
+    /** 2026-07-15(수) — 캘린더에 휴장일로 등록되지 않은 평일 */
+    private static LocalDate weekday() { return LocalDate.of(2026, 7, 15); }
+
+    private static MarketCalendarService marketCalendarAt(LocalDate date) {
+        Clock fixed = Clock.fixed(LocalDateTime.of(date, java.time.LocalTime.NOON).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
     }
 
     private void givenUniverse(String... codes) {
@@ -120,6 +136,25 @@ class TradingSchedulerTest {
         kisProperties.setAppkey("");
 
         sut.run();
+
+        verify(marketDataService, never()).getRecentCandles(anyString());
+    }
+
+    @Test
+    @DisplayName("KRX 휴장일(토요일) → 루프 자체를 돌리지 않는다 (OPERATIONS §5.1)")
+    void skips_loop_on_holiday() {
+        givenUniverse("005930");
+        TradingScheduler holidayScheduler = new TradingScheduler(marketDataService,
+                new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
+                new RiskEngine(List.of()),
+                new OrderEngine(mock(KisOrderClient.class), new TradingStatusManager(),
+                        new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                        mock(PositionRepository.class)),
+                positionManager, new TradingStatusManager(), kisProperties,
+                new TradingUniverseService(universeRepository),
+                marketCalendarAt(LocalDate.of(2026, 7, 18))); // 토요일
+
+        holidayScheduler.run();
 
         verify(marketDataService, never()).getRecentCandles(anyString());
     }

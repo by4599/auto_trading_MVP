@@ -1,15 +1,19 @@
 package com.trading.market;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.trading.NotificationService;
+import com.trading.risk.TradingMode;
+import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.client.ClientHttpRequestExecution;
 import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -18,13 +22,16 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 한국투자증권 Open API 공통 클라이언트.
  *
- * - 토큰 발급/캐싱: POST /oauth2/tokenP, 만료 5분 전 자동 갱신
+ * - 토큰 발급/캐싱: POST /oauth2/tokenP, 만료 5분 전 자동 갱신 —
+ *   실패 시 3회 재시도(1s→2s→4s), 모두 실패하면 SAFE_MODE 전환 (OPERATIONS §4)
  * - 401 수신 시 토큰 재발급 후 1회 자동 재시도
+ * - 429/5xx·타임아웃은 최대 3회 재시도, 연속 실패가 임계치를 넘으면 SAFE_MODE 전환
  * - getClient()가 반환하는 RestClient에 인터셉터가 붙어있어
  *   호출 측은 .get() / .post() 를 그대로 쓰면 된다
  */
@@ -33,26 +40,43 @@ public class KisApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(KisApiClient.class);
     private static final long TOKEN_BUFFER_SECONDS = 300;
+    private static final int CONNECT_TIMEOUT_MS = 5_000;
+    private static final int READ_TIMEOUT_MS = 10_000;
+    private static final int TOKEN_REFRESH_MAX_ATTEMPTS = 3;
+    private static final int CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
     private final KisProperties props;
+    private final TradingStatusManager statusManager;
+    private final NotificationService notifier;
     // 토큰 발급 전용 — 인터셉터 없음 (순환 참조 방지)
     private volatile RestClient tokenClient;
     // 모든 API 호출용 — 인터셉터(인증 주입 + 401 재시도)가 붙어있음
     private volatile RestClient apiClient;
     private final AtomicReference<TokenHolder> tokenRef = new AtomicReference<>();
+    private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
 
-    public KisApiClient(KisProperties props) {
+    @Autowired
+    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier) {
         this.props = props;
+        this.statusManager = statusManager;
+        this.notifier = notifier;
         // 자격증명 미설정 시 placeholder — 실제 요청 시 getBearerToken()에서 명시적 오류 발생
-        String base = props.isConfigured() ? props.getBaseUrl() : "https://placeholder.invalid";
-        this.tokenClient = RestClient.builder()
-                .baseUrl(base)
-                .defaultHeader("content-type", MediaType.APPLICATION_JSON_VALUE)
-                .build();
-        this.apiClient = RestClient.builder()
-                .baseUrl(base)
-                .requestInterceptor(this::intercept)
-                .build();
+        buildClients(props.isConfigured() ? props.getBaseUrl() : "https://placeholder.invalid");
+    }
+
+    /**
+     * 테스트 전용 — MockRestServiceServer로 바인딩한 RestClient.Builder를 직접 주입한다.
+     * apiBuilder에는 프로덕션과 동일하게 이 인스턴스의 intercept()를 붙여야 401/429/5xx
+     * 재시도·연속실패 집계 로직이 실제로 검증된다 (완성된 RestClient를 그냥 넘기면
+     * 인터셉터가 빠진 채로 조립돼 아무 것도 검증하지 못한다).
+     */
+    KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
+                 RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
+        this.props = props;
+        this.statusManager = statusManager;
+        this.notifier = notifier;
+        this.tokenClient = tokenBuilder.build();
+        this.apiClient = apiBuilder.requestInterceptor(this::intercept).build();
     }
 
     /**
@@ -70,17 +94,27 @@ public class KisApiClient {
     /** 자격증명 변경 후 RestClient·토큰 캐시를 즉시 재초기화한다. 재시작 불필요. */
     public synchronized void reconfigure() {
         if (!props.isConfigured()) return;
-        String base = props.getBaseUrl();
+        buildClients(props.getBaseUrl());
+        this.tokenRef.set(null);
+        log.info("KisApiClient 재설정 완료 — baseUrl={}", props.getBaseUrl());
+    }
+
+    private void buildClients(String base) {
+        // 네트워크 장애 시 빠른 실패: 응답 지연이 1초 루프를 계속 붙잡지 않도록 타임아웃 명시 (OPERATIONS §4)
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(READ_TIMEOUT_MS);
+
         this.tokenClient = RestClient.builder()
                 .baseUrl(base)
+                .requestFactory(factory)
                 .defaultHeader("content-type", MediaType.APPLICATION_JSON_VALUE)
                 .build();
         this.apiClient = RestClient.builder()
                 .baseUrl(base)
+                .requestFactory(factory)
                 .requestInterceptor(this::intercept)
                 .build();
-        this.tokenRef.set(null);
-        log.info("KisApiClient 재설정 완료 — baseUrl={}", base);
     }
 
     // ── 토큰 관리 ─────────────────────────────────────────────────────────────
@@ -101,27 +135,43 @@ public class KisApiClient {
         if (current != null && !current.isExpiredSoon()) {
             return current.token();
         }
-        log.info("KIS OAuth 토큰 발급 요청");
 
-        TokenResponse resp = tokenClient.post()
-                .uri("/oauth2/tokenP")
-                .body(Map.of(
-                        "grant_type", "client_credentials",
-                        "appkey",     props.getAppkey(),
-                        "appsecret",  props.getSecretkey()
-                ))
-                .retrieve()
-                .body(TokenResponse.class);
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= TOKEN_REFRESH_MAX_ATTEMPTS; attempt++) {
+            try {
+                log.info("KIS OAuth 토큰 발급 요청 ({}/{}차 시도)", attempt, TOKEN_REFRESH_MAX_ATTEMPTS);
+                TokenResponse resp = tokenClient.post()
+                        .uri("/oauth2/tokenP")
+                        .body(Map.of(
+                                "grant_type", "client_credentials",
+                                "appkey",     props.getAppkey(),
+                                "appsecret",  props.getSecretkey()
+                        ))
+                        .retrieve()
+                        .body(TokenResponse.class);
 
-        if (resp == null || resp.accessToken() == null) {
-            throw new IllegalStateException("KIS 토큰 발급 실패: 응답이 비어있습니다");
+                if (resp == null || resp.accessToken() == null) {
+                    throw new IllegalStateException("KIS 토큰 발급 실패: 응답이 비어있습니다");
+                }
+
+                Instant expiresAt = Instant.now().plusSeconds(resp.expiresIn());
+                TokenHolder next = new TokenHolder(resp.accessToken(), expiresAt);
+                tokenRef.set(next);
+                consecutiveFailures.set(0);
+                log.info("KIS OAuth 토큰 발급 완료, 만료: {}", expiresAt);
+                return next.token();
+            } catch (RuntimeException e) {
+                lastError = e;
+                log.warn("KIS 토큰 발급 실패 ({}/{}차 시도) — {}", attempt, TOKEN_REFRESH_MAX_ATTEMPTS, e.getMessage());
+                if (attempt < TOKEN_REFRESH_MAX_ATTEMPTS) {
+                    sleepQuietly((1L << (attempt - 1)) * 1_000L);
+                }
+            }
         }
 
-        Instant expiresAt = Instant.now().plusSeconds(resp.expiresIn());
-        TokenHolder next = new TokenHolder(resp.accessToken(), expiresAt);
-        tokenRef.set(next);
-        log.info("KIS OAuth 토큰 발급 완료, 만료: {}", expiresAt);
-        return next.token();
+        triggerSafeModeIfRunning("KIS 토큰 발급 " + TOKEN_REFRESH_MAX_ATTEMPTS + "회 연속 실패 — 시세를 못 보는 채로 매매하지 않습니다");
+        throw new IllegalStateException(
+                "KIS 토큰 발급 실패 (" + TOKEN_REFRESH_MAX_ATTEMPTS + "회 재시도 소진)", lastError);
     }
 
     // ── 인터셉터 ──────────────────────────────────────────────────────────────
@@ -130,11 +180,13 @@ public class KisApiClient {
      * 모든 API 요청에 인증 헤더를 주입하고, 오류 유형에 따라 재시도한다.
      *   401 → 토큰 재발급 후 1회 재시도
      *   429/5xx → 지수 백오프 최대 3회 재시도 (1s → 2s → 4s)
+     *   위 재시도를 모두 소진하고도 실패(타임아웃 포함)면 연속 실패로 집계 —
+     *   임계치를 넘으면 SAFE_MODE 전환 (OPERATIONS §4)
      */
     private ClientHttpResponse intercept(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
 
-        ClientHttpResponse response = execution.execute(withAuth(request), body);
+        ClientHttpResponse response = executeTracked(request, body, execution);
         int status = response.getStatusCode().value();
 
         // 401: 토큰 만료 → 재발급 후 1회만 재시도
@@ -142,7 +194,9 @@ public class KisApiClient {
             response.close();
             log.warn("401 수신 — 토큰 강제 재발급 후 재시도");
             tokenRef.set(null);
-            return execution.execute(withAuth(request), body);
+            response = executeTracked(request, body, execution);
+            recordOutcome(response.getStatusCode().value());
+            return response;
         }
 
         // 429 / 5xx: 한투 서버 과부하, 장 시작 직후 응답 지연 등
@@ -151,10 +205,45 @@ public class KisApiClient {
             long waitMs = (1L << (attempt - 1)) * 1_000L; // 1s, 2s, 4s
             log.warn("HTTP {} 수신 — {}ms 후 재시도 ({}/3)", status, waitMs, attempt);
             sleepQuietly(waitMs);
-            response = execution.execute(withAuth(request), body);
+            response = executeTracked(request, body, execution);
             status  = response.getStatusCode().value();
         }
+        recordOutcome(status);
         return response;
+    }
+
+    private ClientHttpResponse executeTracked(
+            HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
+        try {
+            return execution.execute(withAuth(request), body);
+        } catch (IOException e) {
+            // 연결/읽기 타임아웃 등 — 응답 자체를 못 받은 경우도 실패로 집계
+            recordFailure();
+            throw e;
+        }
+    }
+
+    private void recordOutcome(int status) {
+        if (status / 100 == 2) {
+            consecutiveFailures.set(0);
+        } else {
+            recordFailure();
+        }
+    }
+
+    private void recordFailure() {
+        int failures = consecutiveFailures.incrementAndGet();
+        if (failures >= CONSECUTIVE_FAILURE_THRESHOLD) {
+            triggerSafeModeIfRunning(String.format(
+                    "KIS API 연속 %d회 호출 실패 — 시세를 못 보는 채로 매매하지 않습니다", failures));
+        }
+    }
+
+    private void triggerSafeModeIfRunning(String reason) {
+        if (statusManager.getCurrentMode() == TradingMode.RUNNING) {
+            statusManager.changeMode(TradingMode.SAFE_MODE);
+            notifier.sendCritical("🚨 [KisApiClient] SAFE_MODE 전환 — " + reason);
+        }
     }
 
     private static void sleepQuietly(long ms) {

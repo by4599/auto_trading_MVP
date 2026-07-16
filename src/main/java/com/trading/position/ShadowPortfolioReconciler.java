@@ -1,6 +1,7 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
+import com.trading.market.MarketCalendarService;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
 import com.trading.risk.TradingMode;
@@ -13,10 +14,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Clock;
-import java.time.DayOfWeek;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,17 +32,13 @@ public class ShadowPortfolioReconciler {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowPortfolioReconciler.class);
 
-    // v1 근사 — 공휴일·수능일 1시간 지연개장 등 거래일 캘린더 미도입 (OPERATIONS §5.1 후속 작업)
-    private static final LocalTime MARKET_OPEN_APPROX  = LocalTime.of(9, 0);
-    private static final LocalTime MARKET_CLOSE_APPROX = LocalTime.of(15, 30);
-
     private final TradingStatusManager statusManager;
     private final LiquidationService liquidationService;
     private final BalanceClient balanceClient;
     private final PositionRepository positionRepository;
     private final BrokerageApiClient brokerageClient;
     private final NotificationService notifier;
-    private final Clock clock;
+    private final MarketCalendarService marketCalendarService;
 
     public ShadowPortfolioReconciler(TradingStatusManager statusManager,
                                       LiquidationService liquidationService,
@@ -53,14 +46,14 @@ public class ShadowPortfolioReconciler {
                                       PositionRepository positionRepository,
                                       BrokerageApiClient brokerageClient,
                                       NotificationService notifier,
-                                      Clock clock) {
+                                      MarketCalendarService marketCalendarService) {
         this.statusManager = statusManager;
         this.liquidationService = liquidationService;
         this.balanceClient = balanceClient;
         this.positionRepository = positionRepository;
         this.brokerageClient = brokerageClient;
         this.notifier = notifier;
-        this.clock = clock;
+        this.marketCalendarService = marketCalendarService;
     }
 
     /** 평시 10분 주기 감시 — 불일치를 발견해도 자동 보정하지 않는다 (§5.3: 코퍼레이트 액션 가능성). */
@@ -96,7 +89,7 @@ public class ShadowPortfolioReconciler {
             log.info("[Reconciler] 기동 시 EMERGENCY_STOPPED — 재동기화만 수행, 재가동 게이트 대기");
             return;
         }
-        if (isDuringMarketHoursApprox()) {
+        if (marketCalendarService.isDuringMarketHoursNow()) {
             statusManager.changeMode(TradingMode.SAFE_MODE);
             notifier.sendCritical("⚠️ [기동] 장중 재기동 감지 — SAFE_MODE로 대기합니다. "
                     + "잔고 확인 후 대시보드에서 거래 시작을 눌러주세요.");
@@ -198,14 +191,6 @@ public class ShadowPortfolioReconciler {
             log.warn("[Reconciler] 브로커 잔고 조회 실패 — 이번 회차 건너뜀: {}", e.getMessage());
             return null;
         }
-    }
-
-    private boolean isDuringMarketHoursApprox() {
-        LocalDateTime now = LocalDateTime.now(clock);
-        DayOfWeek day = now.getDayOfWeek();
-        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) return false;
-        LocalTime t = now.toLocalTime();
-        return !t.isBefore(MARKET_OPEN_APPROX) && !t.isAfter(MARKET_CLOSE_APPROX);
     }
 
     private static String describeAll(List<Mismatch> mismatches) {

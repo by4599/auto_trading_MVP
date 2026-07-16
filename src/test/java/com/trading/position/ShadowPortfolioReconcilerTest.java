@@ -1,6 +1,8 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.risk.ActualAccountInfo;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
@@ -53,8 +55,10 @@ class ShadowPortfolioReconcilerTest {
     }
 
     private ShadowPortfolioReconciler sut(Clock clock) {
+        MarketCalendarService marketCalendarService =
+                new MarketCalendarService(new MarketCalendarProperties(), clock);
         return new ShadowPortfolioReconciler(statusManager, liquidationService,
-                balanceClient, positionRepository, brokerageClient, notifier, clock);
+                balanceClient, positionRepository, brokerageClient, notifier, marketCalendarService);
     }
 
     private ShadowPortfolioReconciler sutAtNoon() {

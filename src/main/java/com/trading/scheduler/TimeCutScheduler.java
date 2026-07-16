@@ -1,6 +1,7 @@
 package com.trading.scheduler;
 
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.order.OrderEngine;
 import com.trading.order.OrderHistoryRepository;
 import com.trading.order.OrderSide;
@@ -46,6 +47,7 @@ public class TimeCutScheduler {
     private final OrderEngine orderEngine;
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
+    private final MarketCalendarService marketCalendarService;
 
     public TimeCutScheduler(PositionRepository positionRepository,
                             OrderHistoryRepository orderHistoryRepository,
@@ -53,7 +55,8 @@ public class TimeCutScheduler {
                             RiskEngine riskEngine,
                             OrderEngine orderEngine,
                             TradingStatusManager statusManager,
-                            KisProperties kisProperties) {
+                            KisProperties kisProperties,
+                            MarketCalendarService marketCalendarService) {
         this.positionRepository = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionManager = positionManager;
@@ -61,6 +64,7 @@ public class TimeCutScheduler {
         this.orderEngine = orderEngine;
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
+        this.marketCalendarService = marketCalendarService;
     }
 
     /** 평일 15:15 KST 1회 실행. 앱이 그 시각에 꺼져 있었으면 해당일 타임컷은 건너뛴다 (운영 문서화). */
@@ -71,6 +75,11 @@ public class TimeCutScheduler {
 
     void executeTimeCut() {
         if (!kisProperties.isConfigured()) {
+            return;
+        }
+        if (marketCalendarService.isHolidayToday()) {
+            // cron은 MON-FRI까지만 알고 KRX 특정 휴장일(설날 등)은 모른다 — 방어 가드
+            log.info("[타임컷] 건너뜀 — 오늘은 KRX 휴장일");
             return;
         }
         TradingMode mode = statusManager.getCurrentMode();

@@ -1,6 +1,8 @@
 spring:
   application:
     name: auto-trading-mvp
+  config:
+    import: "optional:classpath:market-calendar.yml"   # 없어도 빈 캘린더로 안전 폴백 (OPERATIONS §5.1)
   web:
     resources:
       cache:
