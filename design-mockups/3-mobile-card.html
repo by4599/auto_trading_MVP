@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>디자인 C — 휴대폰용 심플 카드</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#191c22; --card2:#212530; --line:#2a2f3a;
+    --text:#f2f4f8; --muted:#9aa4b2; --up:#ff6b6b; --down:#5b8cff; --accent:#3ddc97;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:#05060a; color:var(--text); font-family:"Pretendard","Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased; padding:24px 12px}
+  /* phone frame */
+  .phone{max-width:390px; margin:0 auto; background:var(--bg); border-radius:34px; padding:18px 16px 26px; border:1px solid #20242e; box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .notch{width:120px; height:6px; background:#2a2f3a; border-radius:3px; margin:2px auto 18px}
+  .head{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px}
+  .head .t{font-weight:800; font-size:1.05rem}
+  .head .t small{display:block; color:var(--muted); font-weight:500; font-size:.72rem; margin-top:1px}
+  .run{display:inline-flex; align-items:center; gap:6px; font-size:.74rem; font-weight:700; color:var(--accent); background:#0e2a20; padding:6px 11px; border-radius:999px}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  /* big balance card */
+  .bal{background:linear-gradient(150deg,#1c2740,#191c22); border:1px solid var(--line); border-radius:22px; padding:22px; margin-bottom:14px}
+  .bal .k{color:var(--muted); font-size:.82rem; margin-bottom:6px}
+  .bal .v{font-size:2.1rem; font-weight:800; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .bal .row{display:flex; gap:8px; margin-top:14px}
+  .bal .chip{flex:1; background:#00000030; border-radius:12px; padding:10px 12px}
+  .bal .chip .cl{color:var(--muted); font-size:.72rem} .bal .chip .cv{font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
+  .up{color:var(--up)} .down{color:var(--down)}
+  /* mini grid */
+  .mini{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px}
+  .m{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px}
+  .m .k{color:var(--muted); font-size:.78rem} .m .v{font-size:1.25rem; font-weight:800; margin-top:5px}
+  .m .n{color:var(--muted); font-size:.74rem; margin-top:2px}
+  /* holding */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-bottom:14px}
+  .card h3{font-size:.82rem; color:var(--muted); font-weight:700; margin-bottom:12px}
+  .stock{display:flex; align-items:center; justify-content:space-between}
+  .stock .nm{font-weight:800} .stock .nm small{display:block; color:var(--muted); font-weight:500; font-size:.76rem; margin-top:2px}
+  .stock .p{text-align:right; font-weight:800; font-variant-numeric:tabular-nums} .stock .p small{display:block;color:var(--muted);font-weight:600;font-size:.74rem;margin-top:2px}
+  .log{display:flex; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line)}
+  .log:first-of-type{border-top:none}
+  .log .c{font-size:.72rem;font-weight:800;padding:4px 9px;border-radius:8px}
+  .log .c.b{background:#301a1a;color:var(--up)} .log .c.s{background:#16223f;color:var(--down)}
+  .log .l{flex:1;font-size:.86rem} .log .l small{color:var(--muted);margin-left:5px}
+  .log .a{font-weight:700;font-variant-numeric:tabular-nums}
+  .btn{width:100%; padding:14px; border-radius:16px; border:none; background:var(--card2); color:var(--up); font-weight:800; font-size:.92rem; margin-top:2px}
+  .foot{color:var(--muted); font-size:.72rem; text-align:center; margin-top:16px}
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="notch"></div>
+
+    <div class="head">
+      <div class="t">내 자동매매<small>연습 계좌 · 삼성전자</small></div>
+      <span class="run"><span class="dot"></span>일하는 중</span>
+    </div>
+
+    <div class="bal">
+      <div class="k">내 전체 돈</div>
+      <div class="v">10,240,000<span style="font-size:1.1rem">원</span></div>
+      <div class="row">
+        <div class="chip"><div class="cl">오늘 번 돈</div><div class="cv up">+38,500원</div></div>
+        <div class="chip"><div class="cl">시작 대비</div><div class="cv up">+2.4%</div></div>
+      </div>
+    </div>
+
+    <div class="mini">
+      <div class="m"><div class="k">가진 주식</div><div class="v">삼성전자</div><div class="n">33주 보유</div></div>
+      <div class="m"><div class="k">이길 확률</div><div class="v">61%</div><div class="n">10번 중 6번</div></div>
+    </div>
+
+    <div class="card">
+      <h3>📦 지금 가진 주식</h3>
+      <div class="stock">
+        <div class="nm">삼성전자<small>산 값 72,500원</small></div>
+        <div class="p up">+39,600원<small>지금 73,700원</small></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>🧾 오늘 사고판 내역</h3>
+      <div class="log"><span class="c b">샀어요</span><div class="l">삼성전자 33주<small>9:32</small></div><div class="a">72,500</div></div>
+      <div class="log"><span class="c s">팔았어요</span><div class="l">삼성전자 10주<small>13:05</small></div><div class="a up">74,100</div></div>
+    </div>
+
+    <button class="btn">■ 잠깐 멈추기</button>
+    <div class="foot">디자인 C · 휴대폰용 심플 카드 (숫자는 예시)</div>
+  </div>
+</body>
+</html>

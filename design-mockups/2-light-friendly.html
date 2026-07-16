@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>디자인 B — 밝고 친근한 화면</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#ffffff; --line:#e7ebf2; --text:#1d2430; --muted:#7b8698;
+    --up:#e5484d; --down:#2f6fed; --accent:#12b886; --accent-bg:#e4f8f1;
+    --shadow:0 2px 10px rgba(30,40,60,.05), 0 1px 3px rgba(30,40,60,.06);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--text); font-family:"Pretendard","Segoe UI",system-ui,sans-serif; padding:22px; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px; margin:0 auto}
+  .top{display:flex; align-items:center; justify-content:space-between; margin-bottom:20px}
+  .brand{font-size:1.25rem; font-weight:800; letter-spacing:-.02em}
+  .brand span{color:var(--muted); font-weight:600; font-size:.8rem; display:block; margin-top:2px}
+  .status{display:flex; align-items:center; gap:10px}
+  .badge{display:inline-flex; align-items:center; gap:7px; padding:8px 15px; border-radius:999px; font-weight:700; font-size:.85rem; background:var(--accent-bg); color:var(--accent)}
+  .dot{width:8px; height:8px; border-radius:50%; background:currentColor}
+  .btn{padding:9px 18px; border-radius:12px; border:none; background:#fff; color:var(--up); font-weight:700; font-size:.85rem; box-shadow:var(--shadow); cursor:pointer}
+  /* hero: 오늘 손익 크게 */
+  .hero{background:var(--card); border-radius:20px; padding:26px 28px; box-shadow:var(--shadow); margin-bottom:16px; text-align:center}
+  .hero .lbl{color:var(--muted); font-size:.95rem; font-weight:600; margin-bottom:10px}
+  .hero .big{font-size:3rem; font-weight:800; letter-spacing:-.03em; font-variant-numeric:tabular-nums}
+  .hero .sub{margin-top:8px; font-size:.95rem; color:var(--muted)}
+  .up{color:var(--up)} .down{color:var(--down)}
+  /* 3 stat cards */
+  .row{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px}
+  .stat{background:var(--card); border-radius:18px; padding:20px; box-shadow:var(--shadow)}
+  .stat .ico{font-size:1.4rem; margin-bottom:10px}
+  .stat .k{color:var(--muted); font-size:.85rem; font-weight:600}
+  .stat .v{font-size:1.55rem; font-weight:800; margin-top:4px; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .stat .note{font-size:.8rem; color:var(--muted); margin-top:3px}
+  /* holdings + activity */
+  .card{background:var(--card); border-radius:18px; padding:22px; box-shadow:var(--shadow); margin-bottom:16px}
+  .card h3{font-size:1rem; font-weight:800; margin-bottom:16px; display:flex; align-items:center; gap:8px}
+  .hold{display:flex; align-items:center; justify-content:space-between; padding:14px; border-radius:14px; background:#f8fafd}
+  .hold .name{font-weight:700}
+  .hold .name small{display:block; color:var(--muted); font-weight:500; font-size:.8rem; margin-top:2px}
+  .hold .pnl{text-align:right; font-weight:800; font-variant-numeric:tabular-nums}
+  .hold .pnl small{display:block; color:var(--muted); font-weight:600; font-size:.78rem; margin-top:2px}
+  .act{display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line)}
+  .act:last-child{border-bottom:none}
+  .act .chip{font-size:.78rem; font-weight:800; padding:5px 11px; border-radius:9px}
+  .act .chip.buy{background:#fdeaea; color:var(--up)} .act .chip.sell{background:#e8f0fe; color:var(--down)}
+  .act .txt{flex:1; font-size:.9rem} .act .txt small{color:var(--muted); margin-left:6px}
+  .act .amt{font-weight:700; font-variant-numeric:tabular-nums}
+  .foot{color:var(--muted); font-size:.78rem; text-align:center; margin-top:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand">⚡ 내 자동매매 <span>연습 계좌 · 삼성전자</span></div>
+    <div class="status">
+      <span class="badge"><span class="dot"></span>일하는 중</span>
+      <button class="btn">■ 잠깐 멈추기</button>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="lbl">오늘 번 돈</div>
+    <div class="big up">+38,500원</div>
+    <div class="sub">오늘 2번 사고팔았어요 · 어제보다 잘하고 있어요 👍</div>
+  </div>
+
+  <div class="row">
+    <div class="stat"><div class="ico">💰</div><div class="k">내 전체 돈</div><div class="v">10,240,000원</div><div class="note up">시작보다 +2.4%</div></div>
+    <div class="stat"><div class="ico">📦</div><div class="k">지금 가진 주식</div><div class="v">삼성전자</div><div class="note">33주 보유 중</div></div>
+    <div class="stat"><div class="ico">🎯</div><div class="k">이길 확률</div><div class="v">61%</div><div class="note">10번 중 6번 이김</div></div>
+  </div>
+
+  <div class="card">
+    <h3>📦 지금 가진 주식</h3>
+    <div class="hold">
+      <div class="name">삼성전자<small>33주 · 산 값 72,500원</small></div>
+      <div class="pnl up">+39,600원<small>지금 73,700원 (+1.7%)</small></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🧾 오늘 사고판 내역</h3>
+    <div class="act"><span class="chip buy">샀어요</span><div class="txt">삼성전자 33주 <small>오전 9:32</small></div><div class="amt">72,500원</div></div>
+    <div class="act"><span class="chip sell">팔았어요</span><div class="txt">삼성전자 10주 <small>오후 1:05</small></div><div class="amt up">74,100원</div></div>
+  </div>
+
+  <div class="foot">디자인 B · 밝고 친근한 화면 — 큰 글씨, 쉬운 말, 한눈에 이해 (숫자는 예시)</div>
+</div>
+</body>
+</html>

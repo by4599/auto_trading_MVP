@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>디자인 A — 다크 트레이딩 터미널</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141922; --panel2:#1b212c; --line:#232b38;
+    --text:#e6edf3; --muted:#8b98a9; --up:#ff5b5b; --down:#4d8dff; --flat:#8b98a9;
+    --accent:#4dd0a7; --accent-dim:#12352c;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--text); font-family:"Pretendard","Segoe UI",system-ui,sans-serif; padding:20px; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px; margin:0 auto}
+  /* top bar */
+  .top{display:flex; align-items:center; justify-content:space-between; margin-bottom:20px}
+  .brand{font-size:1.15rem; font-weight:700; letter-spacing:-.02em}
+  .brand small{color:var(--muted); font-weight:500; font-size:.72rem; margin-left:8px}
+  .top-right{display:flex; align-items:center; gap:10px}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; font-size:.78rem; font-weight:600}
+  .pill.run{background:var(--accent-dim); color:var(--accent)}
+  .dot{width:7px; height:7px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor}
+  .btn{padding:6px 14px; border-radius:8px; border:1px solid var(--line); background:var(--panel2); color:var(--text); font-size:.8rem; font-weight:600; cursor:pointer}
+  .btn.stop{border-color:#3a2530; color:#ff8b8b; background:#241820}
+  /* KPI tiles */
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px}
+  .tile{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px}
+  .tile .lbl{color:var(--muted); font-size:.74rem; margin-bottom:8px}
+  .tile .val{font-size:1.5rem; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .tile .sub{font-size:.74rem; margin-top:4px}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+  /* two-col */
+  .grid{display:grid; grid-template-columns:1.55fr 1fr; gap:16px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px}
+  .card h3{font-size:.85rem; color:var(--muted); font-weight:600; margin-bottom:14px; display:flex; justify-content:space-between}
+  table{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums}
+  th{text-align:left; color:var(--muted); font-size:.7rem; font-weight:600; padding:0 0 10px}
+  td{padding:11px 0; border-top:1px solid var(--line); font-size:.86rem}
+  tr:first-child td{border-top:none}
+  .tk{font-weight:600} .tk small{color:var(--muted); font-weight:400; margin-left:6px}
+  .tag{font-size:.68rem; padding:3px 7px; border-radius:6px; font-weight:600}
+  .tag.buy{background:#2a1a1e; color:#ff8b8b} .tag.sell{background:#16283f; color:#7fb0ff}
+  /* equity mini chart */
+  .spark{height:64px; width:100%; margin-top:6px}
+  .empty{color:var(--muted); font-size:.82rem; text-align:center; padding:26px 0}
+  .foot{color:var(--muted); font-size:.72rem; text-align:center; margin-top:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand">⚡ AutoTrading <small>모의투자 · 삼성전자</small></div>
+    <div class="top-right">
+      <span class="pill run"><span class="dot"></span>가동 중</span>
+      <button class="btn stop">■ 정지</button>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="tile"><div class="lbl">내 총자산</div><div class="val">10,240,000</div><div class="sub up">▲ +240,000 (+2.4%)</div></div>
+    <div class="tile"><div class="lbl">오늘 손익</div><div class="val up">+38,500</div><div class="sub flat">2건 체결</div></div>
+    <div class="tile"><div class="lbl">보유 종목</div><div class="val">1<span style="font-size:.9rem;color:var(--muted)"> 종목</span></div><div class="sub flat">삼성전자 33주</div></div>
+    <div class="tile"><div class="lbl">승률 (최근 30일)</div><div class="val">61%</div><div class="sub flat">11승 · 7패</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>보유 포지션 <span class="flat" style="font-weight:400">실시간</span></h3>
+      <table>
+        <tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가손익</th></tr>
+        <tr>
+          <td class="tk">삼성전자<small>005930</small></td>
+          <td>33</td><td>72,500</td><td>73,700</td>
+          <td class="up">+39,600 (+1.7%)</td>
+        </tr>
+      </table>
+      <h3 style="margin-top:22px">오늘 체결 내역</h3>
+      <table>
+        <tr><th>시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th></tr>
+        <tr><td>09:32</td><td class="tk">삼성전자</td><td><span class="tag buy">매수</span></td><td>33</td><td>72,500</td></tr>
+        <tr><td>13:05</td><td class="tk">삼성전자</td><td><span class="tag sell">매도</span></td><td>10</td><td>74,100</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>자산 흐름 <span class="flat" style="font-weight:400">최근 20일</span></h3>
+      <svg class="spark" viewBox="0 0 300 64" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#4dd0a7" stroke-width="2"
+          points="0,48 20,44 40,46 60,38 80,40 100,32 120,34 140,26 160,30 180,22 200,24 220,18 240,20 260,14 280,12 300,8"/>
+        <polyline fill="url(#g)" stroke="none"
+          points="0,48 20,44 40,46 60,38 80,40 100,32 120,34 140,26 160,30 180,22 200,24 220,18 240,20 260,14 280,12 300,8 300,64 0,64"/>
+        <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#4dd0a7" stop-opacity=".25"/><stop offset="1" stop-color="#4dd0a7" stop-opacity="0"/>
+        </linearGradient></defs>
+      </svg>
+      <h3 style="margin-top:22px">리스크 상태</h3>
+      <table>
+        <tr><td>오늘 손실 한도</td><td style="text-align:right" class="flat">여유 (-0.4% / -3%)</td></tr>
+        <tr><td>연속 손실</td><td style="text-align:right" class="flat">0회</td></tr>
+        <tr><td>손절선(삼성전자)</td><td style="text-align:right" class="down">69,500</td></tr>
+        <tr><td>증권사 연결</td><td style="text-align:right up">정상</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="foot">디자인 A · 다크 트레이딩 터미널 — 정보가 빽빽하고 전문가 앱 느낌 (숫자는 예시)</div>
+</div>
+</body>
+</html>
