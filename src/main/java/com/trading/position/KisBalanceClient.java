@@ -56,11 +56,17 @@ public class KisBalanceClient implements BalanceClient {
                 .retrieve()
                 .body(BalanceResponse.class);
 
-        if (resp == null || resp.output2() == null || resp.output2().isEmpty()) {
-            throw new IllegalStateException("잔고조회 응답 비정상: output2 없음");
+        if (resp == null) {
+            throw new IllegalStateException("잔고조회 응답이 비어있습니다 (null)");
         }
+        // rt_cd(결과코드)를 먼저 확인해 KIS의 실제 오류 메시지(msg1)를 그대로 드러낸다.
+        // (output2 검사를 먼저 하면 "output2 없음"이 진짜 원인 메시지를 가려버린다)
         if (resp.rtCd() != null && !"0".equals(resp.rtCd())) {
             throw new IllegalStateException("잔고조회 실패: rt_cd=" + resp.rtCd() + " msg=" + resp.msg1());
+        }
+        if (resp.output2() == null || resp.output2().isEmpty()) {
+            throw new IllegalStateException(
+                    "잔고조회 응답 비정상: output2 없음 (rt_cd=" + resp.rtCd() + " msg=" + resp.msg1() + ")");
         }
 
         AccountSummary summary = resp.output2().get(0);
