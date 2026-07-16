@@ -1,7 +1,6 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
-import com.trading.market.MarketCalendarService;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
 import com.trading.risk.TradingMode;
@@ -38,22 +37,19 @@ public class ShadowPortfolioReconciler {
     private final PositionRepository positionRepository;
     private final BrokerageApiClient brokerageClient;
     private final NotificationService notifier;
-    private final MarketCalendarService marketCalendarService;
 
     public ShadowPortfolioReconciler(TradingStatusManager statusManager,
                                       LiquidationService liquidationService,
                                       BalanceClient balanceClient,
                                       PositionRepository positionRepository,
                                       BrokerageApiClient brokerageClient,
-                                      NotificationService notifier,
-                                      MarketCalendarService marketCalendarService) {
+                                      NotificationService notifier) {
         this.statusManager = statusManager;
         this.liquidationService = liquidationService;
         this.balanceClient = balanceClient;
         this.positionRepository = positionRepository;
         this.brokerageClient = brokerageClient;
         this.notifier = notifier;
-        this.marketCalendarService = marketCalendarService;
     }
 
     /** 평시 10분 주기 감시 — 불일치를 발견해도 자동 보정하지 않는다 (§5.3: 코퍼레이트 액션 가능성). */
@@ -72,31 +68,22 @@ public class ShadowPortfolioReconciler {
     }
 
     /**
-     * 기동 재동기화 (OPERATIONS §3 ①~⑤).
+     * 기동 재동기화 (OPERATIONS §3).
      * 앱이 죽어있던 동안 미체결로 남았던 주문을 전량 취소하고, 브로커 잔고를
-     * 유일한 진실로 삼아 DB를 즉시 보정한 뒤, 장중 재기동이면 SAFE_MODE로 대기시킨다.
-     * EMERGENCY_STOPPED로 죽어있던 경우는 재가동 게이트(§6)를 거쳐야 하므로
-     * SAFE_MODE 승격은 건너뛴다 — 재동기화 자체는 그대로 수행한다.
+     * 유일한 진실로 삼아 DB를 즉시 보정한 뒤, 곧바로 RUNNING(가동)으로 시작한다.
+     *
+     * 사용자 정책(2026-07-16): "앱이 실행되면 자동으로 가동 상태로 만든다."
+     * → 예전의 장중 재기동 SAFE_MODE 대기(사람이 수동 /start)를 없앴다. 대신
+     *   재동기화(잔고 대조·미체결 취소)를 먼저 끝내고 시작하므로 오래된 상태로
+     *   매매하지는 않는다. 런타임 중 증권사 연결이 끊기면 KisApiClient가 SAFE_MODE로
+     *   자동 정지하고 회복 시 자동 재개하는 안전장치는 그대로 유지된다.
      */
     @EventListener(ApplicationReadyEvent.class)
     public void onStartup() {
-        boolean wasEmergencyStopped = statusManager.getCurrentMode() == TradingMode.EMERGENCY_STOPPED;
-
         brokerageClient.cancelAllPendingOrders();
         correctFromBroker();
-
-        if (wasEmergencyStopped) {
-            log.info("[Reconciler] 기동 시 EMERGENCY_STOPPED — 재동기화만 수행, 재가동 게이트 대기");
-            return;
-        }
-        if (marketCalendarService.isDuringMarketHoursNow()) {
-            statusManager.changeMode(TradingMode.SAFE_MODE);
-            notifier.sendCritical("⚠️ [기동] 장중 재기동 감지 — SAFE_MODE로 대기합니다. "
-                    + "잔고 확인 후 대시보드에서 거래 시작을 눌러주세요.");
-            log.warn("[Reconciler] 장중 재기동 — SAFE_MODE 진입");
-        } else {
-            log.info("[Reconciler] 장외 재기동 — RUNNING 유지");
-        }
+        statusManager.changeMode(TradingMode.RUNNING);
+        log.info("[Reconciler] 기동 재동기화 완료 — 자동 가동(RUNNING)");
     }
 
     /** 재가동 게이트(TradingController /resume)에서도 재사용 — 브로커 기준 즉시 보정 */

@@ -1,8 +1,6 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
-import com.trading.market.MarketCalendarProperties;
-import com.trading.market.MarketCalendarService;
 import com.trading.risk.ActualAccountInfo;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
@@ -12,27 +10,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * OPERATIONS §3(기동 재동기화) + §5.3(평시 감시)는 서로 다른 보정 정책을 쓴다:
- * 기동 시엔 브로커 기준 자동 보정, 평시 10분 주기는 감지+알림만 (코퍼레이트 액션 가능성).
+ * 기동 재동기화(OPERATIONS §3)와 평시 감시(§5.3)는 서로 다른 보정 정책을 쓴다:
+ * 기동 시엔 브로커 기준 자동 보정 후 곧바로 RUNNING(자동 가동), 평시 10분 주기는
+ * 감지+알림만 (코퍼레이트 액션 가능성).
  */
 @DisplayName("ShadowPortfolioReconciler — 기동 재동기화 / 평시 감시")
 class ShadowPortfolioReconcilerTest {
-
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private TradingStatusManager statusManager;
     private LiquidationService liquidationService;
@@ -54,21 +47,9 @@ class ShadowPortfolioReconcilerTest {
         notifier = mock(NotificationService.class);
     }
 
-    private ShadowPortfolioReconciler sut(Clock clock) {
-        MarketCalendarService marketCalendarService =
-                new MarketCalendarService(new MarketCalendarProperties(), clock);
+    private ShadowPortfolioReconciler sut() {
         return new ShadowPortfolioReconciler(statusManager, liquidationService,
-                balanceClient, positionRepository, brokerageClient, notifier, marketCalendarService);
-    }
-
-    private ShadowPortfolioReconciler sutAtNoon() {
-        // 2026-07-08(수) 12:00 KST — 장중
-        return sut(Clock.fixed(LocalDateTime.of(2026, 7, 8, 12, 0).atZone(KST).toInstant(), KST));
-    }
-
-    private ShadowPortfolioReconciler sutAtNight() {
-        // 2026-07-08(수) 22:00 KST — 장외
-        return sut(Clock.fixed(LocalDateTime.of(2026, 7, 8, 22, 0).atZone(KST).toInstant(), KST));
+                balanceClient, positionRepository, brokerageClient, notifier);
     }
 
     private static Position dbHolding(String code, int qty, double avg) {
@@ -87,7 +68,7 @@ class ShadowPortfolioReconcilerTest {
                 new BalanceClient.BalanceSnapshot(1_000_000,
                         List.of(new BalanceClient.Holding("005930", 10, 70_000, 71_000))));
 
-        sutAtNoon().reconcile();
+        sut().reconcile();
 
         verify(notifier, never()).sendCritical(anyString());
         verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
@@ -102,7 +83,7 @@ class ShadowPortfolioReconcilerTest {
                 new BalanceClient.BalanceSnapshot(1_000_000,
                         List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))));
 
-        sutAtNoon().reconcile();
+        sut().reconcile();
 
         verify(notifier).sendCritical(anyString());
         verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
@@ -114,7 +95,7 @@ class ShadowPortfolioReconcilerTest {
     void reconcile_skips_when_emergency_stopped() {
         statusManager.changeMode(TradingMode.EMERGENCY_STOPPED);
 
-        sutAtNoon().reconcile();
+        sut().reconcile();
 
         verify(balanceClient, never()).fetchBalance();
     }
@@ -124,12 +105,12 @@ class ShadowPortfolioReconcilerTest {
     void reconcile_skips_during_liquidation() {
         liquidationService.triggerForceLiquidation();
 
-        sutAtNoon().reconcile();
+        sut().reconcile();
 
         verify(balanceClient, never()).fetchBalance();
     }
 
-    // ── 기동 재동기화 — 브로커 기준 자동 보정 ────────────────────────────────────
+    // ── 기동 재동기화 — 브로커 기준 자동 보정 후 자동 가동(RUNNING) ────────────────
 
     @Test
     @DisplayName("기동 시 미체결 주문 전량 취소를 항상 호출한다")
@@ -137,7 +118,7 @@ class ShadowPortfolioReconcilerTest {
         when(positionRepository.findAll()).thenReturn(List.of());
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
 
-        sutAtNoon().onStartup();
+        sut().onStartup();
 
         verify(brokerageClient).cancelAllPendingOrders();
     }
@@ -149,7 +130,7 @@ class ShadowPortfolioReconcilerTest {
         when(positionRepository.findAll()).thenReturn(List.of(stale));
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
 
-        sutAtNight().onStartup(); // 장외라 SAFE_MODE 알림과 섞이지 않게
+        sut().onStartup();
 
         verify(positionRepository).delete(stale);
         verify(notifier).sendCritical(anyString());
@@ -162,7 +143,7 @@ class ShadowPortfolioReconcilerTest {
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
                 List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
 
-        sutAtNight().onStartup();
+        sut().onStartup();
 
         verify(positionRepository).save(org.mockito.ArgumentMatchers.argThat(
                 p -> p.getStockCode().equals("005930") && p.getQuantity() == 7 && p.getAveragePrice() == 68_000));
@@ -177,7 +158,7 @@ class ShadowPortfolioReconcilerTest {
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
                 List.of(new BalanceClient.Holding("005930", 6, 70_000, 71_000))));
 
-        sutAtNight().onStartup();
+        sut().onStartup();
 
         assertThat(drifted.getQuantity()).isEqualTo(6);
         verify(positionRepository).save(drifted);
@@ -185,40 +166,14 @@ class ShadowPortfolioReconcilerTest {
     }
 
     @Test
-    @DisplayName("장중 재기동 + RUNNING → SAFE_MODE로 전환하고 알림")
-    void onStartup_during_market_hours_enters_safe_mode() {
+    @DisplayName("기동 후 자동 가동 — 항상 RUNNING으로 시작 (사용자 정책 2026-07-16)")
+    void onStartup_always_ends_running() {
         when(positionRepository.findAll()).thenReturn(List.of());
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
 
-        sutAtNoon().onStartup();
-
-        assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.SAFE_MODE);
-        verify(notifier, times(1)).sendCritical(anyString());
-    }
-
-    @Test
-    @DisplayName("장외 재기동 → RUNNING 유지 (SAFE_MODE로 승격하지 않음)")
-    void onStartup_outside_market_hours_stays_running() {
-        when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
-
-        sutAtNight().onStartup();
+        sut().onStartup();
 
         assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.RUNNING);
-    }
-
-    @Test
-    @DisplayName("EMERGENCY_STOPPED로 기동 → 재동기화는 수행하되 SAFE_MODE로 승격하지 않는다")
-    void onStartup_from_emergency_stopped_does_not_promote_to_safe_mode() {
-        statusManager.changeMode(TradingMode.EMERGENCY_STOPPED);
-        when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
-
-        sutAtNoon().onStartup();
-
-        assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.EMERGENCY_STOPPED);
-        verify(brokerageClient).cancelAllPendingOrders();
-        verify(balanceClient).fetchBalance();
     }
 
     // ── 재가동 게이트 재사용 대상 메서드 ─────────────────────────────────────────
@@ -230,7 +185,7 @@ class ShadowPortfolioReconcilerTest {
         when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
                 List.of(new BalanceClient.Holding("005930", 3, 60_000, 61_000))));
 
-        sutAtNoon().correctFromBroker();
+        sut().correctFromBroker();
 
         verify(positionRepository).save(org.mockito.ArgumentMatchers.any());
         verify(brokerageClient, never()).cancelAllPendingOrders(); // onStartup 경로가 아니므로 취소는 호출 안 됨

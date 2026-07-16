@@ -2,8 +2,6 @@ package com.trading.control;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
-import com.trading.market.MarketCalendarProperties;
-import com.trading.market.MarketCalendarService;
 import com.trading.position.BalanceClient;
 import com.trading.position.PositionRepository;
 import com.trading.position.ShadowPortfolioReconciler;
@@ -16,8 +14,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -63,9 +59,7 @@ class TradingControllerTest {
         when(positionRepository.findAll()).thenReturn(List.of());
         BrokerageApiClient reconcilerBrokerClient = mock(BrokerageApiClient.class);
         reconciler = new ShadowPortfolioReconciler(statusManager, liquidationService, balanceClient,
-                positionRepository, reconcilerBrokerClient,
-                mock(NotificationService.class),
-                new MarketCalendarService(new MarketCalendarProperties(), Clock.system(ZoneId.of("Asia/Seoul"))));
+                positionRepository, reconcilerBrokerClient, mock(NotificationService.class));
 
         sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier);
     }
