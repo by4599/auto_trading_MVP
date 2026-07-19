@@ -8,6 +8,7 @@ import com.trading.risk.TradingMode;
 import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -19,8 +20,11 @@ import java.util.Map;
  * 자동 전략 루프(TradingScheduler)는 TradingStatusManager.getCurrentMode()를
  * 매 틱마다 읽어 EMERGENCY_STOPPED면 진입 자체를 건너뛴다.
  */
+// ShadowPortfolioReconciler(@Profile("paper"))에 의존 — backtest 프로필(웹 서버 없음,
+// web-application-type: none)에는 애초에 필요 없는 빈이라 아예 제외한다.
 @RestController
 @RequestMapping("/api/trading")
+@Profile("!backtest")
 public class TradingController {
 
     private static final Logger log = LoggerFactory.getLogger(TradingController.class);
