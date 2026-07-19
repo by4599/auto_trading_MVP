@@ -1,5 +1,6 @@
 package com.trading.order;
 
+import com.trading.bucket.StrategyBucket;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -66,9 +67,19 @@ public class OrderHistory {
     @Column(name = "cancel_requested_at")
     private LocalDateTime cancelRequestedAt;
 
+    /** 지갑 칸 이름표 — null(칸 도입 이전 행·매도 주문)은 VB로 간주 (StrategyBucket.orDefault) */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bucket", length = 10)
+    private StrategyBucket bucket;
+
     protected OrderHistory() {}
 
     public static OrderHistory accepted(String stockCode, OrderSide side, int quantity, String orderNo) {
+        return accepted(stockCode, side, quantity, orderNo, null);
+    }
+
+    public static OrderHistory accepted(String stockCode, OrderSide side, int quantity,
+                                        String orderNo, StrategyBucket bucket) {
         OrderHistory h = new OrderHistory();
         h.stockCode   = stockCode;
         h.side        = side;
@@ -76,6 +87,7 @@ public class OrderHistory {
         h.orderNo     = orderNo;
         h.status      = OrderStatus.ACCEPTED;
         h.requestedAt = LocalDateTime.now();
+        h.bucket      = bucket;
         return h;
     }
 
@@ -175,4 +187,5 @@ public class OrderHistory {
     public LocalDateTime getRequestedAt()       { return requestedAt; }
     public LocalDateTime getFilledAt()          { return filledAt; }
     public LocalDateTime getCancelRequestedAt() { return cancelRequestedAt; }
+    public StrategyBucket getBucket()           { return bucket; }
 }

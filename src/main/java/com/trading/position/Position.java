@@ -1,5 +1,6 @@
 package com.trading.position;
 
+import com.trading.bucket.StrategyBucket;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -36,6 +37,11 @@ public class Position {
     @Column(name = "stop_price")
     private Double stopPrice;
 
+    /** 지갑 칸 귀속 — null(칸 도입 이전·Reconciler 생성 행)은 VB로 간주 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bucket", length = 10)
+    private StrategyBucket bucket;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -65,6 +71,13 @@ public class Position {
         this.updatedAt = LocalDateTime.now();
     }
 
+    /** 매수 체결 시 주문의 칸을 귀속 — 이미 귀속된 칸은 바꾸지 않는다 (첫 매수 칸 유지) */
+    public void assignBucketIfAbsent(StrategyBucket bucket) {
+        if (this.bucket == null) {
+            this.bucket = bucket;
+        }
+    }
+
     /** 기동 재동기화(Reconciler) 전용 — 브로커 실잔고 값으로 그대로 덮어쓴다 (델타 누적 아님) */
     public void reconcileTo(int quantity, double averagePrice) {
         this.quantity     = quantity;
@@ -91,5 +104,6 @@ public class Position {
     public int getQuantity()         { return quantity; }
     public double getAveragePrice()  { return averagePrice; }
     public Double getStopPrice()     { return stopPrice; }
+    public StrategyBucket getBucket() { return bucket; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

@@ -1,5 +1,6 @@
 package com.trading.position;
 
+import com.trading.bucket.StrategyBucket;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -52,11 +53,23 @@ public class TradeResult {
     @Column(name = "source", nullable = false, length = 10)
     private Source source;
 
+    /** 지갑 칸 귀속 — null(칸 도입 이전 행)은 VB로 간주 (StrategyBucket.orDefault) */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bucket", length = 10)
+    private StrategyBucket bucket;
+
     protected TradeResult() {}
 
     public static TradeResult live(String stockCode, int quantity,
                                    double buyAvgPrice, double sellPrice) {
-        return of(stockCode, quantity, buyAvgPrice, sellPrice, LocalDateTime.now(), Source.LIVE);
+        return live(stockCode, quantity, buyAvgPrice, sellPrice, null);
+    }
+
+    public static TradeResult live(String stockCode, int quantity,
+                                   double buyAvgPrice, double sellPrice, StrategyBucket bucket) {
+        TradeResult r = of(stockCode, quantity, buyAvgPrice, sellPrice, LocalDateTime.now(), Source.LIVE);
+        r.bucket = bucket;
+        return r;
     }
 
     public static TradeResult backfill(String stockCode, int quantity,
@@ -91,4 +104,5 @@ public class TradeResult {
     public LocalDate getTradeDate()   { return tradeDate; }
     public LocalDateTime getSoldAt()  { return soldAt; }
     public Source getSource()         { return source; }
+    public StrategyBucket getBucket() { return bucket; }
 }

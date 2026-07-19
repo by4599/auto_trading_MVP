@@ -88,7 +88,9 @@ class TimeCutSchedulerTest {
 
     private TimeCutScheduler scheduler(List<RiskRule> rules) {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
                 positionRepository);
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,

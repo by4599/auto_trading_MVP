@@ -1,5 +1,9 @@
 package com.trading.order;
 
+import com.trading.bucket.BucketAccountService;
+import com.trading.bucket.BucketProperties;
+import com.trading.bucket.StrategyBucket;
+import com.trading.position.TradeResultRepository;
 import com.trading.risk.RiskLimitsProperties;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
@@ -20,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -48,8 +53,14 @@ class OrderEngineTest {
         marketDataService = mock(MarketDataService.class);
         positionManager = mock(PositionManager.class);
         positionRepository = mock(PositionRepository.class);
+        // 칸 나누기 OFF — 기존 사이징 동작 유지 (칸 동작은 OrderSizingServiceTest에서 검증)
+        BucketProperties bucketProps = new BucketProperties(
+                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, false, false);
+        BucketAccountService bucketAccounts = new BucketAccountService(
+                bucketProps, positionRepository, mock(TradeResultRepository.class));
         sut = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
+                        new RiskLimitsProperties(), bucketProps, bucketAccounts),
                 positionRepository);
     }
 
@@ -72,7 +83,7 @@ class OrderEngineTest {
 
         sut.execute(Signal.buy("005930", "test"));
 
-        verify(orderClient).buy("005930", 33);
+        verify(orderClient).buy("005930", 33, StrategyBucket.VB);
     }
 
     @Test
@@ -84,6 +95,7 @@ class OrderEngineTest {
 
         sut.execute(Signal.buy("005930", "test"));
 
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
         verify(orderClient, never()).buy(anyString(), anyInt());
         verify(orderClient, never()).buy(anyString());
     }
@@ -118,6 +130,7 @@ class OrderEngineTest {
         sut.execute(Signal.buy("005930", "test"));
         sut.execute(Signal.sell("005930", "test"));
 
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
         verify(orderClient, never()).buy(anyString(), anyInt());
         verify(orderClient, never()).sell(anyString(), anyInt());
     }
@@ -133,6 +146,7 @@ class OrderEngineTest {
         sut.execute(Signal.buy("005930", "test"));
         sut.execute(Signal.sell("005930", "test"));
 
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
         verify(orderClient, never()).buy(anyString(), anyInt());
         verify(orderClient).sell("005930", 33);
     }

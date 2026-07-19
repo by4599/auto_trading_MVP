@@ -59,12 +59,13 @@ public class OrderEngine {
     }
 
     private void executeBuy(Signal signal) {
-        OrderSizingService.SizingResult sizing = sizingService.sizeBuy(signal.getStockCode());
+        OrderSizingService.SizingResult sizing =
+                sizingService.sizeBuy(signal.getStockCode(), signal.getBucket());
         if (!sizing.executable()) {
             log.warn("[OrderEngine] 매수 스킵 — {}: {}", signal.getStockCode(), sizing.skipReason());
             return;
         }
-        orderClient.buy(signal.getStockCode(), sizing.quantity());
+        orderClient.buy(signal.getStockCode(), sizing.quantity(), signal.getBucket());
     }
 
     private void executeSell(Signal signal) {

@@ -96,7 +96,9 @@ class DailyBarSimulatorTest {
                 tradeRecorder, clock);
 
         OrderEngine orderEngine = new OrderEngine(orderClient, new TradingStatusManager(),
-                new OrderSizingService(market, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                new OrderSizingService(market, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
                 positionRepository);
         FilterProperties filters = new FilterProperties();
         SignalDispatcher dispatcher = new SignalDispatcher(

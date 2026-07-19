@@ -1,6 +1,7 @@
 package com.trading.order;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.trading.bucket.StrategyBucket;
 import com.trading.market.KisApiClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,20 +42,25 @@ public class KisOrderClientImpl implements KisOrderClient {
 
     @Override
     public void buy(String stockCode) {
-        placeOrder(TR_BUY, stockCode, OrderSide.BUY, ORD_QTY);
+        placeOrder(TR_BUY, stockCode, OrderSide.BUY, ORD_QTY, null);
     }
 
     @Override
     public void buy(String stockCode, int quantity) {
+        buy(stockCode, quantity, null);
+    }
+
+    @Override
+    public void buy(String stockCode, int quantity, StrategyBucket bucket) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("매수 수량은 1 이상이어야 합니다: " + quantity);
         }
-        placeOrder(TR_BUY, stockCode, OrderSide.BUY, quantity);
+        placeOrder(TR_BUY, stockCode, OrderSide.BUY, quantity, bucket);
     }
 
     @Override
     public void sell(String stockCode) {
-        placeOrder(TR_SELL, stockCode, OrderSide.SELL, ORD_QTY);
+        placeOrder(TR_SELL, stockCode, OrderSide.SELL, ORD_QTY, null);
     }
 
     @Override
@@ -62,10 +68,11 @@ public class KisOrderClientImpl implements KisOrderClient {
         if (quantity <= 0) {
             throw new IllegalArgumentException("매도 수량은 1 이상이어야 합니다: " + quantity);
         }
-        placeOrder(TR_SELL, stockCode, OrderSide.SELL, quantity);
+        placeOrder(TR_SELL, stockCode, OrderSide.SELL, quantity, null);
     }
 
-    private void placeOrder(String trId, String stockCode, OrderSide side, int quantity) {
+    private void placeOrder(String trId, String stockCode, OrderSide side, int quantity,
+                            StrategyBucket bucket) {
         log.info("주문 요청: side={}, stockCode={}, qty={}", side, stockCode, quantity);
 
         String[] acnt = splitAccountNo(kisApiClient.getProps().getAccountNo());
@@ -96,8 +103,9 @@ public class KisOrderClientImpl implements KisOrderClient {
 
         // rt_cd==0 = 접수 성공. 체결 여부는 FillPoller가 확인한다.
         String ordNo = resp.ordNo();
-        orderHistoryRepository.save(OrderHistory.accepted(stockCode, side, quantity, ordNo));
-        log.info("주문 접수 완료 — 저장됨: side={} stockCode={} qty={} ordNo={}", side, stockCode, quantity, ordNo);
+        orderHistoryRepository.save(OrderHistory.accepted(stockCode, side, quantity, ordNo, bucket));
+        log.info("주문 접수 완료 — 저장됨: side={} stockCode={} qty={} ordNo={} bucket={}",
+                side, stockCode, quantity, ordNo, bucket);
     }
 
     /**

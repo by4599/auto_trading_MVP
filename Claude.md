@@ -38,12 +38,18 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
 - 주문: 시장가, 수량은 R 사이징(`OrderSizingService` — 1R=계좌 1% ÷ ATR 손절폭, 단주 내림).
   지정가 분할(Price Jitter)은 ADR-001 미결정 파라미터 해소 후
+- 지갑 칸 실험 (2026-07-19, `com.trading.bucket`): 방식별 자금 칸 분리 —
+  VB(방식1·돌파)/EVENT(방식2·이벤트)/MIX(방식3·혼합) 각 1,000만원 한도.
+  paper 전용(`trading.bucket.enabled` — **backtest에서 켜지 말 것**, B-3 결정성).
+  칸 ON이면 R 사이징의 "계좌"가 칸 자산(배분금+실현손익)으로 바뀌고 칸 가용 현금으로
+  수량 캡. 이름표 흐름: Signal→OrderHistory→Position→TradeResult (null=VB 레거시).
+  EVENT/MIX는 B-4 합격 재료 확보 후 사람이 yml에서 켠다 (게이트 G2)
 - 알림: 텔레그램 (체결/에러/청산)
 - 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
 - 공시(DART): 유니버스∪워치리스트 대상 30분 주기 수집·표시 전용.
   이벤트 백테스트(B-4) 표본이므로 **자동 삭제 금지**. DART_API_KEY 미설정 시 조용히 스킵
 
-## 7대 리스크 룰 (`com.trading.risk`, RiskEngine에 7개 주입됨)
+## 7대 리스크 룰 + 확장 (`com.trading.risk`, RiskEngine 자동 주입)
 
 | 룰 | 조건 | 실제 동작 상태 |
 |---|---|---|
@@ -54,6 +60,7 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭 연동) |
+| `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
 > 단, **모의계좌 청산 리허설 1회 성공 전까지 Gate 2 완료 판정 아님**

@@ -82,7 +82,9 @@ class TradingSchedulerTest {
                 new Candle(LocalDate.now(), 100, 105, 95, 100, 1000)));
 
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
-                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
                 positionRepository);
         sut = new TradingScheduler(marketDataService,
                 new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
@@ -148,7 +150,9 @@ class TradingSchedulerTest {
                 new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
                 new RiskEngine(List.of()),
                 new OrderEngine(mock(KisOrderClient.class), new TradingStatusManager(),
-                        new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties()),
+                        new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
                         mock(PositionRepository.class)),
                 positionManager, new TradingStatusManager(), kisProperties,
                 new TradingUniverseService(universeRepository),
