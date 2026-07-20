@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -26,6 +28,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 @DataJpaTest
 @ActiveProfiles("paper")
+@RecordApplicationEvents
 @Import({FillStateUpdater.class, RetryConfig.class, TradeResultTracker.class})
 @DisplayName("FillStateUpdater 상태 가드 통합 테스트")
 class FillStateUpdaterTest {
@@ -34,6 +37,7 @@ class FillStateUpdaterTest {
     @Autowired OrderHistoryRepository orderRepo;
     @Autowired PositionRepository positionRepo;
     @Autowired PortfolioStateRepository portfolioStateRepo;
+    @Autowired ApplicationEvents applicationEvents;
 
     // ── CANCEL_FAILED 전이 ─────────────────────────────────────────────────────
 
@@ -163,6 +167,49 @@ class FillStateUpdaterTest {
         assertThatThrownBy(() -> stateUpdater.finalizeAfterCancel(order.getId(), 0, 0.0))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("CANCEL_REQUESTED");
+    }
+
+    // ── 부분 체결 이벤트 발행 (결함 #5 — 부분 체결분 손절 장착 경로) ─────────
+
+    @Test
+    @DisplayName("부분 체결 → OrderPartialFilledEvent 발행 (전량 체결 이벤트는 미발행)")
+    void partial_fill_publishes_partial_event() {
+        OrderHistory order = orderRepo.saveAndFlush(
+                OrderHistory.accepted("005930", OrderSide.BUY, 100, "ORD-PE-01"));
+
+        stateUpdater.applyFill(order.getId(), 30, 72_000.0);
+
+        assertThat(applicationEvents.stream(OrderPartialFilledEvent.class))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.side()).isEqualTo(OrderSide.BUY);
+                    assertThat(e.stockCode()).isEqualTo("005930");
+                    assertThat(e.totalFilledQty()).isEqualTo(30);
+                    assertThat(e.avgPrice()).isEqualTo(72_000.0);
+                });
+        assertThat(applicationEvents.stream(OrderFilledEvent.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("전량 체결 → OrderFilledEvent만 발행 (부분 체결 이벤트 미발행)")
+    void full_fill_publishes_only_filled_event() {
+        OrderHistory order = orderRepo.saveAndFlush(
+                OrderHistory.accepted("005930", OrderSide.BUY, 100, "ORD-PE-02"));
+
+        stateUpdater.applyFill(order.getId(), 100, 72_000.0);
+
+        assertThat(applicationEvents.stream(OrderFilledEvent.class)).hasSize(1);
+        assertThat(applicationEvents.stream(OrderPartialFilledEvent.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("취소 창 중 부분 체결 → 취소 확정과 함께 OrderPartialFilledEvent 발행")
+    void finalize_after_cancel_partial_publishes_partial_event() {
+        OrderHistory order = savedCancelRequested("ORD-PE-03");
+
+        stateUpdater.finalizeAfterCancel(order.getId(), 30, 72_000.0);
+
+        assertThat(applicationEvents.stream(OrderPartialFilledEvent.class)).hasSize(1);
     }
 
     // ── F-5: 매도 체결 → 실현손익 연속 손실 카운터 ───────────────────────────

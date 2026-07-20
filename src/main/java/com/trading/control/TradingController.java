@@ -2,15 +2,20 @@ package com.trading.control;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.position.PortfolioState;
+import com.trading.position.PortfolioStateRepository;
 import com.trading.position.ShadowPortfolioReconciler;
 import com.trading.risk.LiquidationService;
 import com.trading.risk.TradingMode;
 import com.trading.risk.TradingStatusManager;
+import com.trading.scheduler.RunStreakRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -35,17 +40,20 @@ public class TradingController {
     private final LiquidationService   liquidationService;
     private final ShadowPortfolioReconciler reconciler;
     private final NotificationService  notifier;
+    private final PortfolioStateRepository portfolioStateRepository;
 
     public TradingController(TradingStatusManager statusManager,
                               KisProperties        kisProperties,
                               LiquidationService   liquidationService,
                               ShadowPortfolioReconciler reconciler,
-                              NotificationService  notifier) {
+                              NotificationService  notifier,
+                              PortfolioStateRepository portfolioStateRepository) {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.liquidationService = liquidationService;
         this.reconciler = reconciler;
         this.notifier = notifier;
+        this.portfolioStateRepository = portfolioStateRepository;
     }
 
     /**
@@ -135,6 +143,27 @@ public class TradingController {
         liquidationService.triggerForceLiquidation();
         return result(true, "강제청산 개시 — 진행 상황은 텔레그램/로그 확인, 종료 후 EMERGENCY_STOPPED 유지",
                 statusManager.getCurrentMode());
+    }
+
+    /**
+     * 연속 무중단 가동일수 조회 (릴리즈 체크리스트 "모의투자 5거래일 연속 실행" 검증).
+     * 기록은 RunStreakRecorder가 거래일마다 15:25 KST에 남긴다.
+     */
+    @GetMapping("/run-streak")
+    public Map<String, Object> runStreak() {
+        int streak = portfolioStateRepository.findById(PortfolioState.KEY_RUN_STREAK_DAYS)
+                .map(s -> (int) s.getStateValue()).orElse(0);
+        String lastDate = portfolioStateRepository.findById(PortfolioState.KEY_RUN_STREAK_LAST_DATE)
+                .map(s -> LocalDate.parse(String.valueOf((long) s.getStateValue()),
+                        DateTimeFormatter.BASIC_ISO_DATE).toString())
+                .orElse(null);
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("streakDays", streak);
+        m.put("goalDays", RunStreakRecorder.GOAL_DAYS);
+        m.put("achieved", streak >= RunStreakRecorder.GOAL_DAYS);
+        m.put("lastRecordedDate", lastDate);
+        return m;
     }
 
     private static Map<String, Object> result(boolean success, String message, TradingMode mode) {

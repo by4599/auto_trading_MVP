@@ -3,6 +3,7 @@ package com.trading.control;
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
 import com.trading.position.BalanceClient;
+import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionRepository;
 import com.trading.position.ShadowPortfolioReconciler;
 import com.trading.risk.ActualAccountInfo;
@@ -40,6 +41,7 @@ class TradingControllerTest {
     private ShadowPortfolioReconciler reconciler;
     private BalanceClient balanceClient;
     private PositionRepository positionRepository;
+    private PortfolioStateRepository portfolioStateRepository;
     private NotificationService notifier;
     private TradingController sut;
 
@@ -61,7 +63,9 @@ class TradingControllerTest {
         reconciler = new ShadowPortfolioReconciler(statusManager, liquidationService, balanceClient,
                 positionRepository, reconcilerBrokerClient, mock(NotificationService.class));
 
-        sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier);
+        portfolioStateRepository = mock(PortfolioStateRepository.class);
+        sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier,
+                portfolioStateRepository);
     }
 
     private static KisProperties configuredProps() {
@@ -121,7 +125,8 @@ class TradingControllerTest {
     @DisplayName("KIS 자격증명 미설정 → /start 거부")
     void start_rejected_when_not_configured() {
         TradingController unconfigured = new TradingController(
-                statusManager, new KisProperties(), liquidationService, reconciler, notifier);
+                statusManager, new KisProperties(), liquidationService, reconciler, notifier,
+                portfolioStateRepository);
 
         Map<String, Object> res = unconfigured.start();
 

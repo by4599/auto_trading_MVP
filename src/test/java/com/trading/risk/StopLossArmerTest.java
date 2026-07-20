@@ -3,6 +3,8 @@ package com.trading.risk;
 import com.trading.market.AtrCalculator;
 import com.trading.market.Candle;
 import com.trading.market.MarketDataService;
+import com.trading.order.OrderPartialFilledEvent;
+import com.trading.order.OrderSide;
 import com.trading.position.Position;
 import com.trading.position.PositionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -70,6 +73,27 @@ class StopLossArmerTest {
         sut.arm("005930", 72_500.0);
 
         assertThat(pos.getStopPrice()).isNull();
+    }
+
+    @Test
+    @DisplayName("부분 체결(BUY) 이벤트 → 누적 평균 체결가 기준 손절선 장착 (결함 #5 해소)")
+    void partial_fill_buy_arms_stop_loss() {
+        givenAtr(2_000);
+        Position pos = Position.empty("005930");
+        pos.applyBuy(10, 72_500.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.onOrderPartialFilled(new OrderPartialFilledEvent(OrderSide.BUY, "005930", 10, 72_500.0));
+
+        assertThat(pos.getStopPrice()).isEqualTo(72_500.0 - 2_000.0 * RiskLimits.ATR_STOP_MULTIPLIER);
+    }
+
+    @Test
+    @DisplayName("부분 체결(SELL) 이벤트 → 아무것도 하지 않음")
+    void partial_fill_sell_is_ignored() {
+        sut.onOrderPartialFilled(new OrderPartialFilledEvent(OrderSide.SELL, "005930", 10, 72_500.0));
+
+        verifyNoInteractions(marketDataService, positionRepository);
     }
 
     @Test

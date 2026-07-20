@@ -3,6 +3,7 @@ package com.trading.risk;
 import com.trading.market.AtrCalculator;
 import com.trading.market.MarketDataService;
 import com.trading.order.OrderFilledEvent;
+import com.trading.order.OrderPartialFilledEvent;
 import com.trading.order.OrderSide;
 import com.trading.position.PositionRepository;
 import org.slf4j.Logger;
@@ -50,6 +51,18 @@ public class StopLossArmer {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onOrderFilled(OrderFilledEvent event) {
+        if (event.side() != OrderSide.BUY) return;
+        arm(event.stockCode(), event.avgPrice());
+    }
+
+    /**
+     * 부분 체결 보유분에도 손절선을 장착한다 (알려진 결함 #5 해소).
+     * 추가 체결마다 갱신된 누적 평균 체결가로 재장착되고,
+     * 전량 체결 시 onOrderFilled()가 최종가로 한 번 더 덮어쓴다 — 항등적으로 안전.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onOrderPartialFilled(OrderPartialFilledEvent event) {
         if (event.side() != OrderSide.BUY) return;
         arm(event.stockCode(), event.avgPrice());
     }

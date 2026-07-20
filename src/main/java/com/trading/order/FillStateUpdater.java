@@ -118,6 +118,9 @@ public class FillStateUpdater {
             order.markPartialFilled(apiTotalFilledQty, apiAvgPrice);
             log.info("부분 체결: side={} stockCode={} 체결={}/{} avgPrice={}",
                     order.getSide(), order.getStockCode(), apiTotalFilledQty, order.getQuantity(), apiAvgPrice);
+            // 부분 체결 보유분에도 손절선 장착 — AFTER_COMMIT 후 StopLossArmer 수신
+            eventPublisher.publishEvent(new OrderPartialFilledEvent(
+                    order.getSide(), order.getStockCode(), apiTotalFilledQty, apiAvgPrice));
         }
         return true;
     }
@@ -178,6 +181,9 @@ public class FillStateUpdater {
                 return;
             }
             order.recordFillDuringCancel(apiTotalFilledQty, apiAvgPrice);
+            // 취소 창 중 부분 체결분도 손절선 장착 대상 — 취소 확정 후에도 보유는 남는다
+            eventPublisher.publishEvent(new OrderPartialFilledEvent(
+                    order.getSide(), order.getStockCode(), apiTotalFilledQty, apiAvgPrice));
         }
 
         order.markCancelled();
