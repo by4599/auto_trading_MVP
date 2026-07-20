@@ -13,6 +13,7 @@ import com.trading.position.Account;
 import com.trading.position.Position;
 import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
+import com.trading.strategy.ScalpingProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,7 +63,8 @@ class StopLossMonitorTest {
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
-                new TrailingStopTracker(new com.trading.strategy.FilterProperties()));
+                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
+                new com.trading.strategy.ScalpingProperties());
     }
 
     /** 보유 33주 @72,500, 손절선 69,500, 현재가 currentPrice인 상태를 구성 */
@@ -154,5 +156,82 @@ class StopLossMonitorTest {
         sut.checkStops();
 
         verify(orderClient).sell("005930", 33);
+    }
+
+    // ── 스캘핑(방식3, MIX 버킷) 목표 익절 ────────────────────────────────────
+
+    private ScalpingProperties scalpingProps(boolean enabled, double takeProfitPct) {
+        ScalpingProperties props = new ScalpingProperties();
+        props.setEnabled(enabled);
+        props.setTakeProfitPct(takeProfitPct);
+        return props;
+    }
+
+    private void rebuildWithScalping(ScalpingProperties scalpingProperties) {
+        OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                positionRepository);
+        sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
+                new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
+                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
+                scalpingProperties);
+    }
+
+    private Position givenMixPosition(double avgPrice, double currentPrice) {
+        Position pos = Position.empty("005930");
+        pos.applyBuy(10, avgPrice);
+        pos.assignBucketIfAbsent(com.trading.bucket.StrategyBucket.MIX);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+        when(positionManager.snapshotAccount()).thenReturn(new Account(
+                10_000_000, 0.0, 0,
+                List.of(new Account.PositionSnapshot("005930", 10, avgPrice, currentPrice))));
+        return pos;
+    }
+
+    @Test
+    @DisplayName("스캘핑 활성 + MIX 버킷 + 목표수익(+0.8%) 도달 → 전량 익절 매도")
+    void takes_profit_for_scalping_bucket_at_target() {
+        rebuildWithScalping(scalpingProps(true, 0.008));
+        givenMixPosition(10_000.0, 10_081.0); // +0.81% ≥ +0.8%
+
+        sut.checkStops();
+
+        verify(orderClient).sell("005930", 10);
+    }
+
+    @Test
+    @DisplayName("MIX 버킷이지만 목표수익 미달 → 매도 없음")
+    void holds_mix_bucket_below_target() {
+        rebuildWithScalping(scalpingProps(true, 0.008));
+        givenMixPosition(10_000.0, 10_050.0); // +0.5% < +0.8%
+
+        sut.checkStops();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("스캘핑 기능 OFF면 MIX 버킷이 목표수익 도달해도 익절하지 않음")
+    void does_not_take_profit_when_scalping_disabled() {
+        rebuildWithScalping(scalpingProps(false, 0.008));
+        givenMixPosition(10_000.0, 10_100.0); // +1.0%, 목표 초과
+
+        sut.checkStops();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("VB 버킷(레거시 null)은 목표수익 도달해도 익절 대상이 아니다 — 손절선 없으면 매도 없음")
+    void does_not_take_profit_for_non_mix_bucket() {
+        rebuildWithScalping(scalpingProps(true, 0.008));
+        // givenArmedPosition은 bucket을 지정하지 않음 → null(레거시=VB 취급), 손절선만 있음
+        givenArmedPosition(1.0, 100_000.0); // 손절선 1원이라 ATR 손절도 안 걸림
+
+        sut.checkStops();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
     }
 }

@@ -1,5 +1,6 @@
 package com.trading.risk;
 
+import com.trading.bucket.StrategyBucket;
 import com.trading.market.KisProperties;
 import com.trading.order.OrderEngine;
 import com.trading.order.OrderHistoryRepository;
@@ -10,6 +11,7 @@ import com.trading.position.Position;
 import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
 import com.trading.signal.Signal;
+import com.trading.strategy.ScalpingProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -33,6 +35,7 @@ public class StopLossMonitor {
 
     private static final String STRATEGY_NAME = "StopLoss-ATR";
     private static final String TRAILING_NAME = "TrailingStop";
+    private static final String TAKE_PROFIT_NAME = "TakeProfit-Scalping";
 
     private final PositionRepository positionRepository;
     private final OrderHistoryRepository orderHistoryRepository;
@@ -42,6 +45,7 @@ public class StopLossMonitor {
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
     private final TrailingStopTracker trailingStopTracker;
+    private final ScalpingProperties scalpingProperties;
 
     public StopLossMonitor(PositionRepository positionRepository,
                            OrderHistoryRepository orderHistoryRepository,
@@ -50,7 +54,8 @@ public class StopLossMonitor {
                            OrderEngine orderEngine,
                            TradingStatusManager statusManager,
                            KisProperties kisProperties,
-                           TrailingStopTracker trailingStopTracker) {
+                           TrailingStopTracker trailingStopTracker,
+                           ScalpingProperties scalpingProperties) {
         this.positionRepository = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionManager = positionManager;
@@ -59,6 +64,7 @@ public class StopLossMonitor {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.trailingStopTracker = trailingStopTracker;
+        this.scalpingProperties = scalpingProperties;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -95,6 +101,15 @@ public class StopLossMonitor {
 
         double current = snapshot.currentPrice();
         if (current <= 0) return;                       // 시세 불명 — 판정하지 않는다
+
+        // 스캘핑(방식3, MIX 버킷) 목표 익절 — 다른 버킷 포지션은 건드리지 않는다
+        if (scalpingProperties.isEnabled() && pos.getBucket() == StrategyBucket.MIX) {
+            double target = pos.getAveragePrice() * (1 + scalpingProperties.getTakeProfitPct());
+            if (current >= target) {
+                sellVia(TAKE_PROFIT_NAME, snapshot.stockCode(), account, current, pos);
+                return;
+            }
+        }
 
         // 트레일링 스톱 필터 (§3.3, 기본 OFF) — ATR 손절과 별개의 수익 보존 훅
         trailingStopTracker.updateHigh(snapshot.stockCode(), current);

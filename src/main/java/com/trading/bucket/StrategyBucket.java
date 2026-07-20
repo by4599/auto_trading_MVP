@@ -1,22 +1,27 @@
 package com.trading.bucket;
 
 /**
- * 전략 실험용 자금 칸(지갑 칸) 구분 — 실험 설계(2026-07-19):
+ * 전략 실험용 자금 칸(지갑 칸) 구분 — 실험 설계(2026-07-19, 방식 재정의 2026-07-20):
  * 방식별 1,000만원 한도로 성적을 분리 기록해 우열을 비교한다.
  *
  * 거래 이름표는 Signal → OrderHistory → Position → TradeResult로 흐른다.
  * 매수는 Signal의 bucket이 원천, 매도는 Position의 bucket이 원천(보유 칸 귀속).
+ *
+ * ⚠ 2026-07-20: 방식2·3은 원래 EVENT(공시)·MIX(혼합)이었으나 B-4 재검증(CANDIDATE 0건,
+ * BACKTEST-DESIGN §12)으로 재료가 없어 폐기하고, 이동평균선·스캘핑으로 교체했다.
+ * enum 상수명(EVENT/MIX)은 DB 컬럼 호환을 위해 유지 — displayName만 새 의미를 반영한다.
+ * 둘 다 **백테스트 검증 없이** 사용자 판단으로 바로 모의투자에 연결(2026-07-20).
  */
 public enum StrategyBucket {
 
     /** 방식1 — 변동성 돌파 (기존 전략, 비교 기준선) */
     VB("방식1·돌파"),
 
-    /** 방식2 — 뉴스·공시 이벤트 기반 (B-4 합격 재료 대기, 비활성) */
-    EVENT("방식2·이벤트"),
+    /** 방식2 — 이동평균선 정배열 돌파 (MovingAverageBreakoutStrategy, 검증 없이 가동) */
+    EVENT("방식2·이평선"),
 
-    /** 방식3 — 방식1(70%) + 방식2(30%) 혼합 (방식2 활성화 후 가동) */
-    MIX("방식3·혼합");
+    /** 방식3 — 눌림목 반등 스캘핑 (ScalpingStrategy, 검증 없이 가동) */
+    MIX("방식3·스캘핑");
 
     private final String displayName;
 

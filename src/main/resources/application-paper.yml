@@ -33,15 +33,24 @@ trading:
 
   # 지갑 칸 실험 (2026-07-19 설계) — 방식별 1,000만원 한도로 성적 분리.
   # paper 전용: backtest 프로필에서는 켜지 않는다 (B-3 결정성 보존).
-  # 방식2(event)·방식3(mix)은 B-4 합격 재료 확보 후 사람이 직접 켠다 (게이트 G2).
+  # 2026-07-20: 방식2·3을 이평선·스캘핑으로 교체하며 사용자 판단으로 검증 없이 활성화
+  # (BACKTEST-DESIGN §12 — 원래 EVENT/MIX 재료는 CANDIDATE 0건으로 폐기됨).
   bucket:
     enabled: true
     experiment-start: 2026-07-20
     vb-allocation: 10000000
     event-allocation: 10000000
     mix-allocation: 10000000
-    event-enabled: false
-    mix-enabled: false
+    event-enabled: true
+    mix-enabled: true
+
+  # 스캘핑(방식3) 파라미터 — 검증 없이 가동, 사용자 판단(2026-07-20)
+  scalping:
+    enabled: true
+    window-size: 10
+    pullback-pct: 0.005
+    rebound-pct: 0.003
+    take-profit-pct: 0.008
 
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
