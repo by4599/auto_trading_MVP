@@ -2,6 +2,7 @@ package com.trading;
 
 import com.trading.order.CancelFailedEvent;
 import com.trading.order.OrderFilledEvent;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -16,8 +17,15 @@ import org.springframework.transaction.event.TransactionalEventListener;
  *   비교: FillProcessor에서 직접 notifier.send() 호출 시
  *     → FillProcessor가 @Transactional을 얻는 순간 동일 위험 재발
  *     → 이벤트 기반은 미래 리팩터링에도 안전하다
+ *
+ * @Profile("!backtest") (2026-07-20 사고 대응): BacktestOrderClient도 StopLossArmer 등을
+ * 프로덕션과 동일 경로로 검증하려고 같은 OrderFilledEvent를 발행한다. application-backtest.yml의
+ * telegram.bot-token: "" 은 이를 막으려는 의도였지만, OS 환경변수 TELEGRAM_BOT_TOKEN이 설정돼
+ * 있으면 Spring Boot 프로퍼티 우선순위상 환경변수가 프로파일 yml을 이긴다 — yml만으로는
+ * 백테스트 격리가 보장되지 않는다. 리스너 자체를 배제해 텔레그램 발송 경로를 구조적으로 차단한다.
  */
 @Component
+@Profile("!backtest")
 public class TradingEventListener {
 
     private final TelegramNotifier notifier;

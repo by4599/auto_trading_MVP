@@ -44,6 +44,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private final Clock clock;
     private final ConfigurableApplicationContext context;
     private final EventBacktestPipeline eventPipeline;
+    private final LiquidityScreener liquidityScreener;
 
     public BacktestOrchestrator(CandleBackfillService backfillService,
                                 BacktestRunner runner,
@@ -54,7 +55,8 @@ public class BacktestOrchestrator implements CommandLineRunner {
                                 BacktestDataProperties properties,
                                 Clock clock,
                                 ConfigurableApplicationContext context,
-                                EventBacktestPipeline eventPipeline) {
+                                EventBacktestPipeline eventPipeline,
+                                LiquidityScreener liquidityScreener) {
         this.backfillService = backfillService;
         this.runner = runner;
         this.walkForwardEngine = walkForwardEngine;
@@ -65,6 +67,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         this.clock = clock;
         this.context = context;
         this.eventPipeline = eventPipeline;
+        this.liquidityScreener = liquidityScreener;
     }
 
     @Override
@@ -86,9 +89,12 @@ public class BacktestOrchestrator implements CommandLineRunner {
         int saved = backfillService.backfillAll();
         log.info("[Orchestrator] 백필 완료: 신규 {}건", saved);
 
-        List<String> symbols = backfillService.targetSymbols();
         LocalDate from = LocalDate.now(clock).minusYears(properties.getYears());
         LocalDate to = backfillService.rangeTo();
+        // 유동성 필터 (B-3 유니버스 확장 재검증) — 중소형 후보 중 거래대금 미달 제외.
+        // 이벤트 모드(events)는 별도 표본 로직(EventBacktestPipeline)을 쓰므로 영향 없다.
+        List<String> symbols = liquidityScreener.filter(
+                backfillService.targetSymbols(), to, properties.getMinDailyTradingValue());
 
         if ("events".equalsIgnoreCase(properties.getMode())) {
             // B-4: 공시 이벤트 유형별 반응 통계 (--backtest.mode=events)

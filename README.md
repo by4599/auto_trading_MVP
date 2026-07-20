@@ -205,6 +205,7 @@ Sprint 3 — 안전장치 실동작 ([검증 보고서](docs/TRADING-RULES-AUDIT
 Phase 2 완료 후, Phase 3 착수 전:
 
 - ~~**백테스트 인프라 B-1~B-3**~~ ✅ **완료 (2026-07-11)** — 판정 **❌ 불합격**: 검증 PF 0.66·기대값 −0.33%·MDD 50.4%, 10개 Walk-Forward 윈도우 전부 PF<1.0, K 0.4~0.6 전부 미달 ([설계 문서 §7](docs/BACKTEST-DESIGN.md) 판정 상세). **현행 당일 변동성 돌파는 실전 승격 불가 — Phase 3 착수 전 전략 교체/재설계 판단 필요** (분봉 축적 후 시간창·거래량 필터 재검증이 기각 전 마지막 확인 항목)
+- ~~**3방식(VB/EVENT/MIX) 재검증**~~ ✅ **완료 (2026-07-20)** — 판정 **❌ 둘 다 기각**: VB 유니버스 확장(대형주 6→중소형 포함 39종목)은 PF 0.66→0.60·MDD 50%→61.4%로 **악화**, EVENT 시가총액 세분화(LARGE/MIDSMALL 42조합)는 **CANDIDATE 0건**에 MIDSMALL이 오히려 LARGE보다 나쁜 반응 ([설계 문서 §12](docs/BACKTEST-DESIGN.md) 판정 상세). **3방식 모두 실매매 승격 불가 — 지갑 칸 게이트(EVENT/MIX 비활성) 그대로 유지**, 분봉 데이터 축적 완료 후 재검증이 다음 확인 항목
 
 Phase 3 이후 ([투자 판단 방법론 §5 단계표](docs/INVESTMENT-METHODOLOGY.md),
 컴포넌트 수준 실행 설계는 [추천→투자 파이프라인 설계](docs/RECOMMENDATION-TO-TRADE-DESIGN.md) 참고):

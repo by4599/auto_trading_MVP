@@ -39,3 +39,7 @@ backtest:
   years: 3
   include-kospi: true
   initial-cash: 10000000
+  # B-3 유니버스 확장 재검증 (2026-07-20) — 대형주 6종목 + 중소형 33종목(39종목)으로
+  # 재검증했으나 기각됨(PF 0.60·MDD 61.4%, 6종목 기준선보다 악화 — BACKTEST-DESIGN §12).
+  # 원본 6종목 기본값(BacktestDataProperties)으로 원복 — 실험 재현이 필요하면
+  # git 이력에서 이 커밋 직전 버전의 symbols 목록을 복원할 것.

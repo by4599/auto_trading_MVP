@@ -18,6 +18,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -101,6 +102,11 @@ public class EventBacktestPipeline {
             return;
         }
 
+        // 시가총액 세분화 재검증 (2026-07-20) — 대형주는 공시에 둔감하다는 §8 통설을
+        // 정량 확인하기 위해 같은 유형을 LARGE/MIDSMALL로 나눠 별도 집계한다.
+        // eventType을 "<유형>:<그룹>"으로 태깅해 기존 통계 엔진·레지스트리·리포트 서식을 그대로 재사용.
+        List<EventStatsBacktester.EventStat> groupedStats = computeGroupedStats(symbols, from, to);
+
         // 테마 파급 통계 — 앵커 공시 → 밸류체인 D+N 초과수익 (방법론 파일럿)
         List<SpilloverStatsBacktester.SpilloverStat> spillover =
                 spilloverBacktester.compute(from, to);
@@ -110,8 +116,68 @@ public class EventBacktestPipeline {
                 entryTriggerBacktester.compute(from, to);
 
         updateRegistry(stats);
+        updateRegistry(groupedStats);
         updateSpilloverRegistry(spillover);
-        writeReport(symbols, from, to, stats, spillover, triggers);
+        writeReport(symbols, from, to, stats, groupedStats, spillover, triggers);
+    }
+
+    // ── 시가총액 세분화 (LARGE/MIDSMALL) ─────────────────────────────────────
+
+    /**
+     * B-3 원본 대형주 6종목 — 고정 상수로 둔다. properties.getSymbols()(backtest.symbols)는
+     * VB 유니버스 확장 실험(2026-07-20)에서 중소형주까지 포함하도록 이미 넓혀졌으므로,
+     * 그 프로퍼티를 LARGE 판정 기준으로 재사용하면 전 종목이 LARGE로 오분류된다
+     * (실제로 이 버그로 EVENT-REPORT-20260720-1056.md의 MIDSMALL 행이 전부 비었던 사고 있었음).
+     */
+    private static final List<String> B3_LARGE_CAP_SYMBOLS = List.of(
+            "005930", "000660", "373220", "005380", "035420", "068270");
+
+    /**
+     * 종목 → 그룹 태그. event-themes의 large-benchmark + B3_LARGE_CAP_SYMBOLS → LARGE,
+     * 그 외 chain류(semi-chain/battery/bio/game/robot) → MIDSMALL. semi-anchor는 B-3
+     * 6종목과 중복이라 건너뛴다(이미 LARGE로 태깅됨).
+     */
+    static Map<String, String> buildGroupTags(BacktestDataProperties properties) {
+        Map<String, String> group = new HashMap<>();
+        for (String s : B3_LARGE_CAP_SYMBOLS) {
+            group.put(s, "LARGE");
+        }
+        for (Map.Entry<String, List<String>> e : properties.getEventThemes().entrySet()) {
+            String theme = e.getKey();
+            if (theme.endsWith("-anchor")) continue;
+            String tag = "large-benchmark".equals(theme) ? "LARGE" : "MIDSMALL";
+            for (String s : e.getValue()) {
+                group.putIfAbsent(s, tag);
+            }
+        }
+        return group;
+    }
+
+    private List<EventStatsBacktester.EventStat> computeGroupedStats(
+            List<String> symbols, LocalDate from, LocalDate to) {
+        Map<String, String> groupOf = buildGroupTags(properties);
+        List<String> large = symbols.stream()
+                .filter(s -> "LARGE".equals(groupOf.get(s))).toList();
+        List<String> midsmall = symbols.stream()
+                .filter(s -> "MIDSMALL".equals(groupOf.get(s))).toList();
+
+        List<EventStatsBacktester.EventStat> grouped = new java.util.ArrayList<>();
+        if (!large.isEmpty()) {
+            grouped.addAll(tagGroup(statsBacktester.compute(large, from, to), "LARGE"));
+        }
+        if (!midsmall.isEmpty()) {
+            grouped.addAll(tagGroup(statsBacktester.compute(midsmall, from, to), "MIDSMALL"));
+        }
+        return grouped;
+    }
+
+    /** eventType에 그룹 접미사를 붙인 새 EventStat — 레지스트리 키 30자 제한 내 (§ updateSpilloverRegistry와 동일 관례) */
+    private static List<EventStatsBacktester.EventStat> tagGroup(
+            List<EventStatsBacktester.EventStat> stats, String group) {
+        return stats.stream()
+                .map(s -> new EventStatsBacktester.EventStat(
+                        s.eventType() + ":" + group, s.samples(), s.winRateD5(), s.horizons()))
+                .toList();
     }
 
     // ── ① 공시 소급 백필 ─────────────────────────────────────────────────────
@@ -175,6 +241,10 @@ public class EventBacktestPipeline {
 
     private void updateRegistry(List<EventStatsBacktester.EventStat> stats) {
         for (EventStatsBacktester.EventStat s : stats) {
+            if (s.eventType().length() > 30) { // event_type 컬럼 길이 — 그룹 접미사 방어
+                log.warn("[EventBacktest] 레지스트리 키 30자 초과 — 저장 건너뜀: {}", s.eventType());
+                continue;
+            }
             EventTypeStat row = registryRepository.findById(s.eventType())
                     .orElseGet(() -> EventTypeStat.recorded(s.eventType()));
             row.updateStats(s.samples(), s.winRateD5(),
@@ -223,6 +293,7 @@ public class EventBacktestPipeline {
 
     private void writeReport(List<String> symbols, LocalDate from, LocalDate to,
                              List<EventStatsBacktester.EventStat> stats,
+                             List<EventStatsBacktester.EventStat> groupedStats,
                              List<SpilloverStatsBacktester.SpilloverStat> spillover,
                              List<EntryTriggerBacktester.TriggerStat> triggers) {
         StringBuilder sb = new StringBuilder();
@@ -252,6 +323,23 @@ public class EventBacktestPipeline {
                     meetsCandidateBar(s) ? "🟡 CANDIDATE" : "RECORDED"));
         }
         sb.append("\n※ 표본이 작은 유형(<30)은 통계가 노이즈다 — 수집이 쌓일수록 신뢰도가 오른다.\n");
+
+        if (!groupedStats.isEmpty()) {
+            sb.append("\n## 시가총액별 재집계 (LARGE vs MIDSMALL)\n\n");
+            sb.append("- 가설: 대형주는 개별 공시에 둔감하다는 통설(§8) — 유형을 그대로 두고 ")
+              .append("종목만 대형주(LARGE)/중소형주(MIDSMALL)로 나눠 같은 CANDIDATE 기준으로 재본다.\n");
+            sb.append("- LARGE = event-themes의 large-benchmark + B-3 6종목, ")
+              .append("MIDSMALL = semi-chain·battery·bio·game·robot\n\n");
+            sb.append("| 유형:그룹 | 표본 | D+5 승률 | D+1 중앙값 | D+5 중앙값 | D+5 p25 | D+10 중앙값 | D+20 중앙값 | D+20 p25 | 판정 |\n");
+            sb.append("|---|---|---|---|---|---|---|---|---|---|\n");
+            for (EventStatsBacktester.EventStat s : groupedStats) {
+                sb.append(String.format("| %s | %d | %.1f%% | %s | %s | %s | %s | %s | %s | %s |%n",
+                        s.eventType(), s.samples(), s.winRateD5() * 100,
+                        pct(s.at(1).median()), pct(s.at(5).median()), pct(s.at(5).p25()),
+                        pct(s.at(10).median()), pct(s.at(20).median()), pct(s.at(20).p25()),
+                        meetsCandidateBar(s) ? "🟡 CANDIDATE" : "RECORDED"));
+            }
+        }
 
         if (!spillover.isEmpty()) {
             sb.append("\n## 테마 파급(Spillover) — 앵커 공시 → 밸류체인 D+N 초과수익\n\n");

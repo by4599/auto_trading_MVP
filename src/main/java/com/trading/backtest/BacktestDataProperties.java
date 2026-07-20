@@ -64,6 +64,9 @@ public class BacktestDataProperties {
     /** smoke = 전기간 1런 (배관 검증), full = B-3 전체 (K 민감도 + WF + 필터 A/B) */
     private String mode = "full";
 
+    /** 유동성 필터 임계값 (원/일) — 미달 종목은 VB 유니버스 재검증에서 제외 (방법론 §2.2) */
+    private double minDailyTradingValue = 5_000_000_000d;
+
     public List<String> getSymbols() { return symbols; }
     public void setSymbols(List<String> symbols) { this.symbols = symbols; }
 
@@ -101,4 +104,7 @@ public class BacktestDataProperties {
 
     public String getMode() { return mode; }
     public void setMode(String mode) { this.mode = mode; }
+
+    public double getMinDailyTradingValue() { return minDailyTradingValue; }
+    public void setMinDailyTradingValue(double minDailyTradingValue) { this.minDailyTradingValue = minDailyTradingValue; }
 }
