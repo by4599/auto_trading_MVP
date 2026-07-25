@@ -127,6 +127,77 @@ class CandleBackfillServiceTest {
         verify(candleClient).fetchIndexDailyCandles(eq("0001"), any(), any());
     }
 
+    // ── 소급 데이터 확장 (2026-07-24) ──
+
+    @Test
+    @DisplayName("backfill-from 미설정이면 rangeFrom은 기존 공식(now - years - 워밍업 260일) 그대로다")
+    void rangeFrom_withoutOverride_keepsLegacyFormula() {
+        assertThat(properties.getBackfillFrom()).isNull();
+
+        assertThat(sut.rangeFrom()).isEqualTo(
+                TODAY.minusYears(3).minusDays(BacktestMarketDataService.WARMUP_CALENDAR_DAYS));
+    }
+
+    @Test
+    @DisplayName("backfill-from을 설정하면 rangeFrom이 그 값을 그대로 쓴다 (저장 하한만 바뀜)")
+    void rangeFrom_withOverride_returnsConfiguredDate() {
+        properties.setBackfillFrom(LocalDate.of(2019, 4, 1));
+
+        assertThat(sut.rangeFrom()).isEqualTo(LocalDate.of(2019, 4, 1));
+        // rangeTo(판정 창의 끝)와 years는 영향받지 않는다
+        assertThat(sut.rangeTo()).isEqualTo(TODAY.minusDays(1));
+        assertThat(properties.getYears()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("소급 확장 시 앞쪽 공백이 backfill-from까지 잡힌다")
+    void missingRanges_withOverride_coversExtendedHead() {
+        LocalDate extendedFrom = LocalDate.of(2019, 4, 1);
+        LocalDate storedFrom = LocalDate.of(2023, 7, 22);
+        LocalDate to = TODAY.minusDays(1);
+        stubStoredRange("005930", storedFrom, to);
+
+        List<CandleBackfillService.DateRange> gaps =
+                sut.missingRanges("005930", extendedFrom, to);
+
+        assertThat(gaps).hasSize(1);
+        assertThat(gaps.get(0).from()).isEqualTo(extendedFrom);
+        assertThat(gaps.get(0).to()).isEqualTo(storedFrom.minusDays(1));
+    }
+
+    @Test
+    @DisplayName("weekdaysBetween은 양끝 포함 평일 수를 센다 (주말 제외)")
+    void weekdaysBetween_countsInclusiveWeekdays() {
+        // 2026-07-20(월) ~ 2026-07-26(일) = 평일 5일
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2026, 7, 20), LocalDate.of(2026, 7, 26))).isEqualTo(5);
+        // 하루짜리 토요일 = 0
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2026, 7, 25), LocalDate.of(2026, 7, 25))).isZero();
+        // 2020년 전체 = 평일 262일
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2020, 1, 1), LocalDate.of(2020, 12, 31))).isEqualTo(262);
+    }
+
+    @Test
+    @DisplayName("긴 구간을 기대 거래일보다 크게 적게 받으면 불완전 수취로 판정한다")
+    void isSuspiciouslyIncomplete_flagsShortFetchOnLongRange() {
+        // 4년치(평일 ~1040일) 요청에 100건만 = KIS 1회 호출 상한에 걸린 전형적 구멍
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(1040, 100)).isTrue();
+        // 공휴일로 평일보다 조금 적은 정상 수취(94%)는 경고하지 않는다
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(1040, 978)).isFalse();
+    }
+
+    @Test
+    @DisplayName("짧은 증분 구간은 연휴로 비어도 불완전 수취로 보지 않는다 (헛경보 방지)")
+    void isSuspiciouslyIncomplete_ignoresShortRanges() {
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(
+                CandleBackfillService.COVERAGE_MIN_WEEKDAYS - 1, 0)).isFalse();
+        // 경계: 최소 길이에 도달하면 판정 대상
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(
+                CandleBackfillService.COVERAGE_MIN_WEEKDAYS, 0)).isTrue();
+    }
+
     private void stubStoredRange(String code, LocalDate storedFrom, LocalDate storedTo) {
         CandleHistory first = CandleHistory.ofDaily(code,
                 new Candle(storedFrom, 1, 1, 1, 1, 1));

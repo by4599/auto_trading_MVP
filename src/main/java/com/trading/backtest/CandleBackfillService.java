@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -59,8 +60,18 @@ public class CandleBackfillService {
         return List.copyOf(merged);
     }
 
-    /** 재생 시작일 이전 워밍업(전일봉·ATR 14) 여유를 포함해 적재한다 */
+    /**
+     * 재생 시작일 이전 워밍업(전일봉·ATR 14) 여유를 포함해 적재한다.
+     *
+     * <p>{@code backtest.backfill-from}이 설정돼 있으면 그 날짜를 저장 하한으로 쓴다 —
+     * 판정 창(전역 from/to)은 여전히 now-years라서 기존 모드 결과는 바뀌지 않고,
+     * "얼마나 오래된 것까지 저장하느냐"만 달라진다.
+     */
     public LocalDate rangeFrom() {
+        LocalDate override = properties.getBackfillFrom();
+        if (override != null) {
+            return override;
+        }
         return LocalDate.now(clock).minusYears(properties.getYears())
                 .minusDays(BacktestMarketDataService.WARMUP_CALENDAR_DAYS);
     }
@@ -122,8 +133,47 @@ public class CandleBackfillService {
             repository.saveAll(rows);
             saved += rows.size();
             log.info("[Backfill] {} {}~{} → {}건 저장", storageCode, gap.from(), gap.to(), rows.size());
+            warnIfIncomplete(storageCode, gap, fetched.size());
         }
         return saved;
+    }
+
+    // ── 불완전 수취 감지 ──────────────────────────────────────────────────────
+    //
+    // KIS 일봉 TR은 호출당 상한이 있고(실측: 종목 100행·지수 50행) 클라이언트가 날짜 커서로
+    // 페이지네이션하지만, 페이지 상한(MAX_PAGES)이나 일시 오류로 일부만 받고도 "성공"으로
+    // 보일 수 있다. 소급 백필처럼 긴 구간을 한 번에 요청할 때 이 구멍이 가장 위험하므로
+    // 기대 거래일 수 대비 현저히 적으면 경고를 남긴다.
+
+    /** 기대 평일 수 대비 이 비율 미만이면 불완전 수취로 본다 (공휴일 여유 포함) */
+    static final double COVERAGE_WARN_RATIO = 0.80;
+
+    /** 이보다 짧은 gap은 검사하지 않는다 — 연휴 낀 증분 수취의 헛경보 방지 */
+    static final int COVERAGE_MIN_WEEKDAYS = 20;
+
+    private void warnIfIncomplete(String storageCode, DateRange gap, int received) {
+        long weekdays = weekdaysBetween(gap.from(), gap.to());
+        if (!isSuspiciouslyIncomplete(weekdays, received)) return;
+        log.warn("[Backfill] ⚠ {} {}~{} 수취 {}건 — 기대 거래일(평일 {}일)에 크게 못 미친다. "
+                        + "상장 전 구간·장기 거래정지면 정상이지만, 아니라면 API 페이지 상한/일시 오류로 "
+                        + "데이터에 구멍이 난 것이니 재실행해 확인할 것",
+                storageCode, gap.from(), gap.to(), received, weekdays);
+    }
+
+    /** [from, to] 양끝 포함 평일 수 (한국 공휴일은 세지 않는다 — 근사 상한) */
+    static long weekdaysBetween(LocalDate from, LocalDate to) {
+        long count = 0;
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) count++;
+        }
+        return count;
+    }
+
+    /** 수취 건수가 기대 거래일 수에 크게 못 미치는가 (짧은 구간은 판정하지 않음) */
+    static boolean isSuspiciouslyIncomplete(long expectedWeekdays, int received) {
+        if (expectedWeekdays < COVERAGE_MIN_WEEKDAYS) return false;
+        return received < expectedWeekdays * COVERAGE_WARN_RATIO;
     }
 
     record DateRange(LocalDate from, LocalDate to) {}

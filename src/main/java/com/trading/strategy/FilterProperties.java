@@ -18,12 +18,14 @@ public class FilterProperties {
     private final VolumeConfirm volumeConfirm = new VolumeConfirm();
     private final TrailingStop trailingStop = new TrailingStop();
     private final IndexRegime indexRegime = new IndexRegime();
+    private final IndexTrend indexTrend = new IndexTrend();
     private final DisclosureCooldown disclosureCooldown = new DisclosureCooldown();
 
     public EntryWindow getEntryWindow()     { return entryWindow; }
     public VolumeConfirm getVolumeConfirm() { return volumeConfirm; }
     public TrailingStop getTrailingStop()   { return trailingStop; }
     public IndexRegime getIndexRegime()     { return indexRegime; }
+    public IndexTrend getIndexTrend()       { return indexTrend; }
     public DisclosureCooldown getDisclosureCooldown() { return disclosureCooldown; }
 
     /** 장초반 휩소성 가짜 돌파 회피 — notBefore 이전 신규 진입 금지 */
@@ -68,6 +70,24 @@ public class FilterProperties {
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    }
+
+    /**
+     * 지수 장기 추세 이탈 시 신규 진입 금지 — 하락 추세 휩쏘 차단(§14.4).
+     *
+     * <p>위 {@link IndexRegime}(갭다운, 하루짜리 판정)과는 <b>다른 필터</b>다. 이쪽은
+     * "지수가 N거래일 이동평균 아래인가"라는 <b>추세</b> 판정이며, 2022 금리 쇼크처럼
+     * 1년짜리 하락 국면에서 반등마다 진입해 잘리는 패턴을 겨냥한다. 둘은 서로 간섭하지
+     * 않는다(둘 다 켜면 각자 독립적으로 매수를 막는다 — RiskEngine이 OR로 합친다).
+     */
+    public static class IndexTrend {
+        private volatile boolean enabled = false;
+        private volatile int maPeriod = 200;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getMaPeriod() { return maPeriod; }
+        public void setMaPeriod(int maPeriod) { this.maPeriod = maPeriod; }
     }
 
     /**

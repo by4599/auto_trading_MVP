@@ -10,6 +10,7 @@ import com.trading.risk.RiskResult;
 import com.trading.risk.TrailingStopTracker;
 import com.trading.signal.Signal;
 import com.trading.signal.SignalDispatcher;
+import com.trading.strategy.ScalpingProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -51,6 +52,7 @@ public class DailyBarSimulator {
     private final BacktestOrderClient orderClient;
     private final TrailingStopTracker trailingStopTracker;
     private final MutableClock clock;
+    private final ScalpingProperties scalpingProperties;
 
     public DailyBarSimulator(BacktestMarketDataService market,
                              SignalDispatcher signalDispatcher,
@@ -60,7 +62,8 @@ public class DailyBarSimulator {
                              PositionManager positionManager,
                              BacktestOrderClient orderClient,
                              TrailingStopTracker trailingStopTracker,
-                             MutableClock clock) {
+                             MutableClock clock,
+                             ScalpingProperties scalpingProperties) {
         this.market = market;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -70,6 +73,7 @@ public class DailyBarSimulator {
         this.orderClient = orderClient;
         this.trailingStopTracker = trailingStopTracker;
         this.clock = clock;
+        this.scalpingProperties = scalpingProperties;
     }
 
     public void simulateDay(String stockCode, LocalDate date) {
@@ -77,10 +81,14 @@ public class DailyBarSimulator {
         if (bar == null) return; // 거래정지/데이터 공백 — 포지션 이월
         if (market.previousCandle(stockCode, date) == null) return; // 시리즈 첫날 — 전일 없음
 
+        // 장 시작 시점(오늘 진입 전) 보유 여부 — 트레일 판정에서 이월/당일진입을 구분한다
+        boolean carriedAtOpen = heldPosition(stockCode) != null;
+
         checkCarriedStop(stockCode, date, bar);
         checkEntry(stockCode, date, bar);
         checkSameDayStop(stockCode, date, bar);
-        checkTrailingStop(stockCode, date, bar);
+        checkTakeProfit(stockCode, date, bar);
+        checkTrailingStop(stockCode, date, bar, carriedAtOpen);
     }
 
     // ── ①② 이월 보유분 손절 ─────────────────────────────────────────────────
@@ -162,16 +170,60 @@ public class DailyBarSimulator {
         exitAt(stockCode, pos.getStopPrice(), EXIT_STOP_INTRA);
     }
 
-    // ── ⑤ 트레일링 스톱 필터 (§3.3, 기본 OFF — A/B 변형에서만 켠다) ──────────
+    // ── ④-b 스캘핑(방식3) 목표 익절 (BACKTEST-DESIGN §13) ────────────────────
     //
-    // 일봉 근사의 정당성: 진입은 돌파가 최초 크로싱 시점이므로 당일 고가는 항상
-    // 진입 이후에 성립한다. 종가 ≤ 트레일 레벨이면 고가→종가 경로에서 반드시
-    // 레벨을 위에서 아래로 지났으므로 트레일 체결가는 레벨 그 자체다.
+    // 스캘핑 전략의 청산은 ATR 손절/타임컷 외에 takeProfitPct 목표 도달 시 즉시 익절이
+    // 핵심이다(paper의 StopLossMonitor). 이 시뮬레이터에는 대응 로직이 없었으므로,
+    // 스캘핑 전략이 켜진 실행에서만(ScalpingProperties.enabled) 당일 고가가 진입가 ×
+    // (1+takeProfitPct) 이상이면 그 가격에 청산한다. 손절(loss-side) 판정을 먼저 거친
+    // 뒤에 검사해 "애매하면 항상 불리하게" 원칙을 지킨다.
 
-    private void checkTrailingStop(String stockCode, LocalDate date, Candle bar) {
+    private void checkTakeProfit(String stockCode, LocalDate date, Candle bar) {
+        if (!scalpingProperties.isEnabled()) return;
         Position pos = heldPosition(stockCode);
         if (pos == null) return;
 
+        double target = pos.getAveragePrice() * (1 + scalpingProperties.getTakeProfitPct());
+        if (bar.getHigh() >= target) {
+            clock.setTo(date, LocalTime.of(14, 15));
+            exitAt(stockCode, target, "TakeProfit-Scalping");
+        }
+    }
+
+    // ── ⑤ 트레일링 스톱 필터 (§3.3, 기본 OFF — A/B 변형에서만 켠다) ──────────
+    //
+    // 이월(다일 보유) 포지션은 트레일 손절선을 "쉬고 있는 손절 주문"으로 모델링한다
+    // (BACKTEST-DESIGN §14, checkCarriedStop과 동일 패턴 — 애매하면 항상 불리하게):
+    //   레벨 = 어제까지의 고점 × (1−trail)  [오늘 고가 반영 전 — 선견 차단]
+    //   ① 시가 ≤ 레벨 → 갭 관통, 시가 체결(더 나쁜 값)   ② 저가 ≤ 레벨 → 장중 터치, 레벨 체결
+    //   미청산 시에만 오늘 고가를 반영해 내일의 레벨을 상향한다.
+    // 진입 당일 포지션은 돌파 후 당일 경로라 고가가 진입 이후에 성립하므로, 기존 근사
+    // (고가 반영 후 종가 판정, 레벨 체결)를 유지한다.
+
+    private void checkTrailingStop(String stockCode, LocalDate date, Candle bar, boolean carriedAtOpen) {
+        Position pos = heldPosition(stockCode);
+        if (pos == null) return;
+
+        if (carriedAtOpen) {
+            java.util.OptionalDouble levelOpt =
+                    trailingStopTracker.exitLevelFromPriorHigh(stockCode, pos.getAveragePrice());
+            if (levelOpt.isPresent()) {
+                double level = levelOpt.getAsDouble();
+                if (bar.getOpen() <= level) {          // 갭 관통 — 시가 체결(보수)
+                    clock.setTo(date, LocalTime.of(9, 5));
+                    exitAt(stockCode, bar.getOpen(), "TrailingStop-Gap");
+                    return;
+                } else if (bar.getLow() <= level) {    // 장중 터치 — 레벨 체결
+                    clock.setTo(date, LocalTime.of(14, 30));
+                    exitAt(stockCode, level, "TrailingStop");
+                    return;
+                }
+            }
+            trailingStopTracker.updateHigh(stockCode, bar.getHigh()); // 미청산 — 내일 레벨 상향
+            return;
+        }
+
+        // 진입 당일 근사 (기존 유지)
         trailingStopTracker.updateHigh(stockCode, bar.getHigh());
         trailingStopTracker.exitPrice(stockCode, bar.getClose(), pos.getAveragePrice())
                 .ifPresent(level -> {
