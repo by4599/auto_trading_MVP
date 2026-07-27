@@ -170,9 +170,10 @@ REM 리스크 엔진 집중 테스트
 .\gradlew.bat test --tests "com.trading.risk.LiquidationServiceTest"
 ```
 
-> **참고**: 프로젝트 경로에 한글이 포함되어 있어 `build.gradle`에서
-> `layout.buildDirectory.set(file('C:/Users/SAMSUNG/auto_trading-build'))`로
-> 빌드 출력 경로를 ASCII 경로로 우회하고 있습니다.
+> **참고**: 예전에는 프로젝트 경로에 한글('개발')이 포함돼 빌드가 깨졌으나,
+> 2026-07 부모 폴더를 `workspace`(ASCII)로 rename해 근본 해소되었습니다.
+> `build.gradle`의 `TRADING_BUILD_DIR` 빌드 출력 경로 우회는 더는 필수가 아니지만
+> 무해하여 안전망으로 남겨 두었습니다.
 
 ---
 

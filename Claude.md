@@ -37,10 +37,11 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
 
 ## 빌드 · 실행 · 테스트 명령
 
-프로젝트 경로에 한글(`개발`)이 포함되어 있어 Gradle test worker가 클래스패스를
-percent-encode하지 못해 깨진다. 두 가지를 항상 지킬 것:
+예전에는 프로젝트 경로에 한글(`개발`)이 포함돼 Gradle test worker가 클래스패스를
+percent-encode하지 못해 깨졌다. **2026-07 부모 폴더를 `workspace`(ASCII)로 rename해
+근본 원인이 해소됐다** — 이제 아래 1번은 필수가 아니다(무해한 안전망). 2번은 그대로 유효:
 
-1. **빌드 출력 경로**를 ASCII 경로로 강제 (`build.gradle`이 이미 처리 —
+1. **빌드 출력 경로** ASCII 강제 (`build.gradle`이 이미 처리 — 더는 필수 아님, 안전망 —
    `TRADING_BUILD_DIR` 환경변수 또는 기본값 `C:/Users/SAMSUNG/auto_trading-build`)
 2. **`./gradlew.bat`이 이 환경(Git Bash)에서 걸릴 수 있다** — 걸리면 아래처럼
    캐시된 Gradle 배포본을 직접 호출한다 (배포본 경로는 `gradle-wrapper.properties`의
@@ -67,8 +68,9 @@ REM 백테스트 실행 (엔진은 com.trading.backtest, 별도 backtest-db 사�
 .\gradlew.bat bootRun --args="--spring.profiles.active=backtest"
 ```
 
-- `TRADING_BUILD_DIR` 미설정 시 한글 경로로 폴백되어 **테스트가 전부
-  `ClassNotFoundException`으로 죽는다** — 반드시 설정할 것.
+- 경로가 ASCII가 된 지금은 `TRADING_BUILD_DIR` 미설정이어도 테스트가 정상 동작한다
+  (예전엔 미설정 시 한글 경로 폴백으로 **테스트가 전부 `ClassNotFoundException`으로
+  죽었다** — 만약 그 증상이 재현되면 이 설정부터 확인).
 - Java 25 + 인라인 Mockito는 구체 클래스(예: `TradingUniverseService`) 목킹이
   불안정하다 → 테스트는 리포지토리 등 **인터페이스를 목**으로, 서비스는 실객체로
   구성하는 패턴을 따른다 (`mock(XxxRepository.class)` — 기존 테스트 다수가 이 패턴).
