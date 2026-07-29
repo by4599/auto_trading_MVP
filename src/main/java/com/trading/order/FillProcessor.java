@@ -2,6 +2,7 @@ package com.trading.order;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.trading.market.KisApiClient;
+import com.trading.position.BalanceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -38,12 +39,14 @@ public class FillProcessor {
     private final KisApiClient kisApiClient;
     private final FillStateUpdater stateUpdater;
     private final OrderCancelClient cancelClient;
+    private final BalanceClient balanceClient;
 
     public FillProcessor(KisApiClient kisApiClient, FillStateUpdater stateUpdater,
-                         OrderCancelClient cancelClient) {
+                         OrderCancelClient cancelClient, BalanceClient balanceClient) {
         this.kisApiClient = kisApiClient;
         this.stateUpdater = stateUpdater;
         this.cancelClient = cancelClient;
+        this.balanceClient = balanceClient;
     }
 
     public void process(Long orderId) {
@@ -114,14 +117,36 @@ public class FillProcessor {
                 || snapshot.status() == OrderStatus.PARTIAL_FILLED;
 
         if (cancellable && isTimedOut(snapshot)) {
-            boolean sent = cancelClient.cancelAll(snapshot.orderNo());
-            if (sent) {
-                stateUpdater.markCancelRequested(snapshot.id());
-            } else {
-                log.warn("주문 취소 실패 - 폴링 계속: ordNo={} requestedAt={}",
+            switch (cancelClient.cancelAll(snapshot.orderNo())) {
+                case SENT -> stateUpdater.markCancelRequested(snapshot.id());
+                // 취소할 잔량 없음 = 이미 체결됨. 체결조회가 놓친 체결을 실잔고로 대사해 종결한다.
+                case NO_OPEN_QTY -> resolveFilledByBalance(snapshot);
+                case FAILED -> log.warn("주문 취소 실패 - 폴링 계속: ordNo={} requestedAt={}",
                         snapshot.orderNo(), snapshot.requestedAt());
             }
         }
+    }
+
+    /**
+     * 취소가 "잔량 없음"으로 거부된 주문 처리 — 그 주문은 브로커에서 이미 체결(종료)됐다.
+     * 체결조회(VTTC8001R)가 이 체결을 빈 응답으로 놓치므로, 실제 잔고를 진실로 삼아
+     * 포지션을 정렬하고 주문을 종결해 무한 폴링을 끊는다.
+     * 잔고 조회 실패 시에는 종결하지 않고 다음 폴에서 재시도한다.
+     */
+    private void resolveFilledByBalance(OrderSnapshot snapshot) {
+        int brokerQty;
+        double brokerAvg;
+        try {
+            BalanceClient.Holding h = balanceClient.fetchBalance().holdings().stream()
+                    .filter(x -> x.stockCode().equals(snapshot.stockCode()))
+                    .findFirst().orElse(null);
+            brokerQty = h == null ? 0    : h.quantity();
+            brokerAvg = h == null ? 0.0  : h.averagePrice();
+        } catch (Exception e) {
+            log.warn("[체결 대사] 잔고 조회 실패 - 다음 폴 재시도: ordNo={}", snapshot.orderNo());
+            return;
+        }
+        stateUpdater.reconcileFilledFromBalance(snapshot.id(), brokerQty, brokerAvg);
     }
 
     // ── KIS 체결조회 API (VTTC8001R) ────────────────────────────────────────

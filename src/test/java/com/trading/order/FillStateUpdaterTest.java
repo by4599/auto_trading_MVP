@@ -251,6 +251,55 @@ class FillStateUpdaterTest {
                 .hasValueSatisfying(s -> assertThat(s.getStateValue()).isEqualTo(0.0));
     }
 
+    // ── 체결 대사: 취소불가(잔량없음)=체결로 판정 (유령 포지션 desync 해소) ──────
+
+    @Test
+    @DisplayName("취소불가+브로커 4주 보유 → 포지션 4주 생성·손절 이벤트·주문 FILLED")
+    void reconcileFilledFromBalance_creates_position_from_broker() {
+        OrderHistory order = orderRepo.saveAndFlush(
+                OrderHistory.accepted("066570", OrderSide.BUY, 4, "ORD-RC-01"));
+
+        stateUpdater.reconcileFilledFromBalance(order.getId(), 4, 90_000.0);
+
+        Position pos = positionRepo.findByStockCode("066570").orElseThrow();
+        assertThat(pos.getQuantity()).isEqualTo(4);
+        assertThat(pos.getAveragePrice()).isEqualTo(90_000.0);
+        assertThat(reload(order).getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(applicationEvents.stream(OrderPartialFilledEvent.class))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.stockCode()).isEqualTo("066570");
+                    assertThat(e.totalFilledQty()).isEqualTo(4);
+                });
+    }
+
+    @Test
+    @DisplayName("취소불가+브로커 0주(이미 정리됨) → 포지션 없음·주문 FILLED(폴링 중단)·이벤트 없음")
+    void reconcileFilledFromBalance_broker_flat_just_terminates_order() {
+        OrderHistory order = orderRepo.saveAndFlush(
+                OrderHistory.accepted("066570", OrderSide.BUY, 4, "ORD-RC-02"));
+
+        stateUpdater.reconcileFilledFromBalance(order.getId(), 0, 0.0);
+
+        assertThat(positionRepo.findByStockCode("066570")).isEmpty();
+        assertThat(reload(order).getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(applicationEvents.stream(OrderPartialFilledEvent.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미 FILLED 주문 → reconcileFilledFromBalance 무시 (포지션 중복 생성 없음)")
+    void reconcileFilledFromBalance_guard_ignores_terminal_order() {
+        OrderHistory order = orderRepo.saveAndFlush(
+                OrderHistory.accepted("066570", OrderSide.BUY, 4, "ORD-RC-03"));
+        order.markFilled(4, 90_000.0);
+        orderRepo.saveAndFlush(order);
+
+        long posBefore = positionRepo.count();
+        stateUpdater.reconcileFilledFromBalance(order.getId(), 4, 90_000.0);
+
+        assertThat(positionRepo.count()).isEqualTo(posBefore);
+    }
+
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────
 
     /** 100주 BUY 주문을 CANCEL_REQUESTED 상태로 저장한다. */

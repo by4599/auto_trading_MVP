@@ -30,7 +30,7 @@ public class KisOrderCancelClient implements OrderCancelClient {
     }
 
     @Override
-    public boolean cancelAll(String orderNo) {
+    public CancelOutcome cancelAll(String orderNo) {
         String[] acnt = split(kisApiClient.getProps().getAccountNo());
 
         Map<String, String> body = new LinkedHashMap<>();
@@ -53,10 +53,19 @@ public class KisOrderCancelClient implements OrderCancelClient {
                     .retrieve()
                     .body(CancelResponse.class);
 
-            return resp != null && resp.isSuccess();
+            if (resp != null && resp.isSuccess()) return CancelOutcome.SENT;
+
+            // "정정/취소할 수량이 없습니다" = 이미 체결/종료된 주문 → 잔고 대사 트리거
+            if (resp != null && resp.msg1() != null && resp.msg1().contains("취소할 수량")) {
+                return CancelOutcome.NO_OPEN_QTY;
+            }
+
+            log.warn("취소 거부: ordNo={} rt_cd={} msg={}", orderNo,
+                    resp == null ? "null" : resp.rtCd(), resp == null ? "null" : resp.msg1());
+            return CancelOutcome.FAILED;
         } catch (Exception e) {
             log.error("취소 API 오류: ordNo={}", orderNo, e);
-            return false;
+            return CancelOutcome.FAILED;
         }
     }
 
