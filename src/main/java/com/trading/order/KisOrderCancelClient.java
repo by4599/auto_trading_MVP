@@ -53,20 +53,33 @@ public class KisOrderCancelClient implements OrderCancelClient {
                     .retrieve()
                     .body(CancelResponse.class);
 
-            if (resp != null && resp.isSuccess()) return CancelOutcome.SENT;
-
-            // "정정/취소할 수량이 없습니다" = 이미 체결/종료된 주문 → 잔고 대사 트리거
-            if (resp != null && resp.msg1() != null && resp.msg1().contains("취소할 수량")) {
-                return CancelOutcome.NO_OPEN_QTY;
+            if (resp == null) {
+                log.warn("취소 응답 없음: ordNo={}", orderNo);
+                return CancelOutcome.FAILED;
             }
-
-            log.warn("취소 거부: ordNo={} rt_cd={} msg={}", orderNo,
-                    resp == null ? "null" : resp.rtCd(), resp == null ? "null" : resp.msg1());
-            return CancelOutcome.FAILED;
+            CancelOutcome outcome = classify(resp.rtCd(), resp.msg1());
+            if (outcome == CancelOutcome.FAILED) {
+                log.warn("취소 거부: ordNo={} rt_cd={} msg={}", orderNo, resp.rtCd(), resp.msg1());
+            }
+            return outcome;
         } catch (Exception e) {
             log.error("취소 API 오류: ordNo={}", orderNo, e);
             return CancelOutcome.FAILED;
         }
+    }
+
+    /**
+     * KIS 취소 응답을 결과로 분류한다.
+     * 종료된 주문은 취소 잔량이 없거나("취소할 수량 없음") 원주문번호가 사라져
+     * ("원주문번호가 존재하지 않습니다") 취소가 거부된다 — 둘 다 NO_OPEN_QTY로 보고
+     * 호출 측이 실잔고 대사로 종결하게 한다.
+     */
+    static CancelOutcome classify(String rtCd, String msg1) {
+        if ("0".equals(rtCd)) return CancelOutcome.SENT;
+        if (msg1 != null && (msg1.contains("취소할 수량") || msg1.contains("원주문번호가 존재하지 않"))) {
+            return CancelOutcome.NO_OPEN_QTY;
+        }
+        return CancelOutcome.FAILED;
     }
 
     private static String[] split(String accountNo) {

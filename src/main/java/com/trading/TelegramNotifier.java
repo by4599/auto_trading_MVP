@@ -1,5 +1,6 @@
 package com.trading;
 
+import com.trading.market.MarketCalendarService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -21,10 +22,12 @@ public class TelegramNotifier implements NotificationService {
     private static final Logger log = LoggerFactory.getLogger(TelegramNotifier.class);
 
     private final TelegramProperties props;
+    private final MarketCalendarService marketCalendar;
     private final RestClient restClient;
 
-    public TelegramNotifier(TelegramProperties props) {
+    public TelegramNotifier(TelegramProperties props, MarketCalendarService marketCalendar) {
         this.props = props;
+        this.marketCalendar = marketCalendar;
         // 네트워크 장애 시 빠른 실패: 알림 실패는 무시하도록 설계되어 있으므로
         // 타임아웃 없이 블로킹되는 것보다 3+5초 안에 실패하는 게 안전하다.
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -43,6 +46,11 @@ public class TelegramNotifier implements NotificationService {
     public void send(String text) {
         if (props.getBotToken().isBlank()) {
             log.debug("Telegram 미설정 — 알림 스킵: {}", text);
+            return;
+        }
+        // 장중~장마감(거래일 09:00~15:30)에만 텔레그램 전송 — 장외 이벤트는 로그로만 남긴다
+        if (!marketCalendar.isDuringMarketHoursNow()) {
+            log.info("장외 시간 — 텔레그램 알림 스킵(로그만): {}", text);
             return;
         }
         try {
