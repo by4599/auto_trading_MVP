@@ -66,7 +66,7 @@ public class KisPositionManager implements PositionManager {
             if (cached != null) {
                 log.warn("잔고 API 실패 — {}초 전 스냅샷으로 대체: {}",
                         cached.ageMillis() / 1000, e.getMessage());
-                return cached.account();
+                return cached.account().asStale();  // 낡은 값 — 청산 판정에서 걸러지도록 표시
             }
             log.warn("잔고 API 실패 + 캐시 없음 — Position 테이블 폴백 (dailyPnl=0): {}", e.getMessage());
             return fallbackFromDb();
@@ -130,7 +130,7 @@ public class KisPositionManager implements PositionManager {
                 .sum();
 
         return new Account(totalAssetValue, 0.0,
-                tradeResultTracker.getConsecutiveLossCount(), snapshots);
+                tradeResultTracker.getConsecutiveLossCount(), snapshots).asStale();  // DB 폴백 — 낡음 표시
     }
 
     // ── 내부 타입 ─────────────────────────────────────────────────────────────

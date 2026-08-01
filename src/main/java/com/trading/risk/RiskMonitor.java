@@ -2,6 +2,7 @@ package com.trading.risk;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.Account;
 import com.trading.position.PositionManager;
 import com.trading.position.ShadowPortfolio;
@@ -37,6 +38,7 @@ public class RiskMonitor {
     private final KisProperties kisProperties;
     private final NotificationService notifier;
     private final RiskLimitsProperties limits;
+    private final MarketCalendarService marketCalendar;
 
     public RiskMonitor(PositionManager positionManager,
                        ShadowPortfolio shadowPortfolio,
@@ -44,7 +46,8 @@ public class RiskMonitor {
                        TradingStatusManager statusManager,
                        KisProperties kisProperties,
                        NotificationService notifier,
-                       RiskLimitsProperties limits) {
+                       RiskLimitsProperties limits,
+                       MarketCalendarService marketCalendar) {
         this.positionManager = positionManager;
         this.shadowPortfolio = shadowPortfolio;
         this.liquidationService = liquidationService;
@@ -52,6 +55,7 @@ public class RiskMonitor {
         this.kisProperties = kisProperties;
         this.notifier = notifier;
         this.limits = limits;
+        this.marketCalendar = marketCalendar;
     }
 
     @PostConstruct
@@ -63,6 +67,8 @@ public class RiskMonitor {
     @Scheduled(fixedDelay = 1000)
     public void monitor() {
         if (!kisProperties.isConfigured()) return;
+        // 장 시간 외에는 청산 판정을 하지 않는다 — 마감 후 낡은 데이터로 헛청산하던 오판 차단
+        if (!marketCalendar.isDuringMarketHoursNow()) return;
         TradingMode mode = statusManager.getCurrentMode();
         if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) return;
         if (liquidationService.isAnyLiquidationInProgress()) return;
@@ -72,6 +78,13 @@ public class RiskMonitor {
             account = positionManager.snapshotAccount();
         } catch (Exception e) {
             log.warn("[RiskMonitor] 계좌 스냅샷 실패 — 이번 틱 건너뜀: {}", e.getMessage());
+            return;
+        }
+
+        // 낡은(폴백) 스냅샷이면 청산 판정을 건너뛴다 — 잔고 API 실패 시 옛 값으로
+        // 오판해 헛청산하는 사고 방지 (2026-07-30 -11.19% 오판 사건)
+        if (!account.isFresh()) {
+            log.warn("[RiskMonitor] 계좌 스냅샷이 낡음(잔고 API 실패 폴백) — 청산 판정 건너뜀");
             return;
         }
 

@@ -2,6 +2,8 @@ package com.trading.risk;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.Account;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionManager;
@@ -9,6 +11,11 @@ import com.trading.position.ShadowPortfolio;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,8 +54,19 @@ class RiskMonitorTest {
         liquidationService = new LiquidationService(brokerageClient, statusManager, notifier);
 
         sut = new RiskMonitor(monitorPm, shadowPortfolio, liquidationService,
-                statusManager, configuredProps(), notifier, new RiskLimitsProperties());
+                statusManager, configuredProps(), notifier, new RiskLimitsProperties(), inHours());
     }
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** 2026-07-15(수) 평일 + 지정 시각으로 고정된 캘린더 */
+    private static MarketCalendarService cal(LocalTime t) {
+        Clock fixed = Clock.fixed(
+                LocalDateTime.of(LocalDate.of(2026, 7, 15), t).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+    private static MarketCalendarService inHours()  { return cal(LocalTime.NOON); }        // 12:00 장중
+    private static MarketCalendarService offHours() { return cal(LocalTime.of(17, 0)); }   // 17:00 장외
 
     private static KisProperties configuredProps() {
         KisProperties p = new KisProperties();
@@ -148,11 +166,36 @@ class RiskMonitorTest {
     @Test
     void skips_when_credentials_not_configured() {
         RiskMonitor unconfigured = new RiskMonitor(monitorPm, shadowPortfolio,
-                liquidationService, statusManager, new KisProperties(), notifier, new RiskLimitsProperties());
+                liquidationService, statusManager, new KisProperties(), notifier,
+                new RiskLimitsProperties(), inHours());
 
         unconfigured.monitor();
 
         verify(monitorPm, never()).snapshotAccount();
+    }
+
+    @Test
+    void off_market_hours_skips_monitoring() {
+        RiskMonitor offHoursMonitor = new RiskMonitor(monitorPm, shadowPortfolio,
+                liquidationService, statusManager, configuredProps(), notifier,
+                new RiskLimitsProperties(), offHours());
+
+        offHoursMonitor.monitor();
+
+        // 장외에는 스냅샷 조회도, 청산 판정도 하지 않는다
+        verify(monitorPm, never()).snapshotAccount();
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+    }
+
+    @Test
+    void stale_snapshot_does_not_trigger_liquidation() {
+        // -5% 손실이지만 잔고 API 실패로 낡은(폴백) 스냅샷 → 청산 트리거 금지 (2026-07-30 오판 방지)
+        when(monitorPm.snapshotAccount()).thenReturn(account(47_500_000, -0.05).asStale());
+
+        sut.monitor();
+
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+        verify(notifier, never()).sendCritical(anyString());
     }
 
     @Test
