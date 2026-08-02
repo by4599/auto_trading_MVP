@@ -189,6 +189,21 @@ public class BacktestOrchestrator implements CommandLineRunner {
             return;
         }
 
+        // Donchian Risk Lab (2026-08) — Donchian P3가 exit-lab에서 MDD 15.6%로 0.6%p만 초과했다.
+        // 진입=Donchian, 출구=P3 고정, 사이징만 스윕해 MDD를 §4(≤15%) 안으로 넣는지 본다.
+        // MA와 동일한 54-후보/후보창을 써서 apples-to-apples 비교. 기준선은 안 건드린다(writeBaseline=false).
+        if ("donchian-risk-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> candidateSymbols = prepareCandidateUniverse(
+                    "donchian-risk-lab", properties.getCandidateFrom(), properties.getCandidateTo());
+            runRiskLab("돈치안 돌파 + P3 다일 트레일링", "DONCHIAN-P3", () -> {
+                strategyParameters.setEnabled(false);
+                maBreakoutProperties.setEnabled(false);
+                scalpingProperties.setEnabled(false);
+                donchianProperties.setEnabled(true);
+            }, false, candidateSymbols, properties.getCandidateFrom(), properties.getCandidateTo());
+            return;
+        }
+
         // Cost Lab (BACKTEST-DESIGN §14.1) — 검증 후보(MA+P3+RR1) 고정, 왕복 거래비용만 상향 스윕.
         if ("cost-lab".equalsIgnoreCase(properties.getMode())) {
             List<String> candidateSymbols = prepareCandidateUniverse(
@@ -471,11 +486,23 @@ public class BacktestOrchestrator implements CommandLineRunner {
         return candidateSymbols;
     }
 
+    /** §14.1 MA 후보 재현 — 진입=MA 고정, 기준선 기록은 write-baseline 플래그 따름 */
     private void runRiskLab(List<String> symbols, LocalDate from, LocalDate to) {
-        // 진입=MA, 출구=P3 고정
-        strategyParameters.setEnabled(false);
-        maBreakoutProperties.setEnabled(true);
-        scalpingProperties.setEnabled(false);
+        runRiskLab("MA 정배열 + P3 다일 트레일링", "MA-P3", () -> {
+            strategyParameters.setEnabled(false);
+            maBreakoutProperties.setEnabled(true);
+            scalpingProperties.setEnabled(false);
+        }, properties.isWriteBaseline(), symbols, from, to);
+    }
+
+    /**
+     * 진입을 파라미터화한 Risk Lab — 진입=enableEntry, 출구=P3 고정, 사이징(1R 비율)·동시보유만 스윕.
+     * 손익비·기대값은 사이징에 불변이고 MDD만 스케일다운 → exit-lab에서 MDD만 아슬하게 넘긴
+     * 후보(예: Donchian P3 15.6%)를 §4 안으로 넣는지 본다. writeBaseline=false면 기준선을 안 건드림.
+     */
+    private void runRiskLab(String label, String slug, Runnable enableEntry, boolean writeBaseline,
+                            List<String> symbols, LocalDate from, LocalDate to) {
+        enableEntry.run();
         applyExitProfile(new ExitProfile("P3", 1.0, false, 20, true, 0.01, 0.03));
 
         List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
@@ -485,9 +512,9 @@ public class BacktestOrchestrator implements CommandLineRunner {
             WalkForwardEngine.WalkForwardResult result =
                     walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
             BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
-                    symbols, from, to, Map.of(), result, List.of(), "MA+P3", "MA-P3");
+                    symbols, from, to, Map.of(), result, List.of(), label, slug);
             BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
-            log.info("[RiskLab] {}: {} → {}", rp.name(),
+            log.info("[RiskLab] {} · {}: {} → {}", slug, rp.name(),
                     result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
             rows.add(new BacktestReportWriter.ExitLabRow(rp.name(), result, judgment));
         }
@@ -496,8 +523,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         riskLimits.setMaxPositionCount(com.trading.risk.RiskLimits.MAX_POSITION_COUNT);
         resetExitProfile();
 
-        reportWriter.writeRiskLabReport("MA 정배열 + P3 다일 트레일링", "MA-P3", symbols, from, to, rows,
-                properties.isWriteBaseline());
+        reportWriter.writeRiskLabReport(label, slug, symbols, from, to, rows, writeBaseline);
     }
 
     private void applyExitProfile(ExitProfile p) {
