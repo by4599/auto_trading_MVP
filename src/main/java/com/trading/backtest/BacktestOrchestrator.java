@@ -2,6 +2,7 @@ package com.trading.backtest;
 
 import com.trading.risk.RiskLimitsProperties;
 import com.trading.strategy.FilterProperties;
+import com.trading.strategy.DonchianProperties;
 import com.trading.strategy.MaBreakoutProperties;
 import com.trading.strategy.ScalpingProperties;
 import com.trading.strategy.StrategyParameters;
@@ -51,6 +52,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private final LiquidityScreener liquidityScreener;
     private final MaBreakoutProperties maBreakoutProperties;
     private final ScalpingProperties scalpingProperties;
+    private final DonchianProperties donchianProperties;
     private final RiskLimitsProperties riskLimits;
     private final ExitLabProperties exitLab;
     private final BacktestCostProperties costProperties;
@@ -69,6 +71,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
                                 LiquidityScreener liquidityScreener,
                                 MaBreakoutProperties maBreakoutProperties,
                                 ScalpingProperties scalpingProperties,
+                                DonchianProperties donchianProperties,
                                 RiskLimitsProperties riskLimits,
                                 ExitLabProperties exitLab,
                                 BacktestCostProperties costProperties,
@@ -86,6 +89,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         this.liquidityScreener = liquidityScreener;
         this.maBreakoutProperties = maBreakoutProperties;
         this.scalpingProperties = scalpingProperties;
+        this.donchianProperties = donchianProperties;
         this.riskLimits = riskLimits;
         this.exitLab = exitLab;
         this.costProperties = costProperties;
@@ -160,6 +164,18 @@ public class BacktestOrchestrator implements CommandLineRunner {
                 strategyParameters.setEnabled(false);
                 maBreakoutProperties.setEnabled(true);
                 scalpingProperties.setEnabled(false);
+            });
+            return;
+        }
+
+        // Donchian 돌파(전략1=VB 대체 후보, 2026-08) — 진입만 Donchian으로 바꿔 검증된
+        // exit-lab(P0~P4) 스윕을 그대로 태운다. §14의 MA 검증 경로와 동일 절차로 비교.
+        if ("donchian".equalsIgnoreCase(properties.getMode())) {
+            runExitLab("돈치안 돌파(DONCHIAN)", "DONCHIAN", symbols, from, to, () -> {
+                strategyParameters.setEnabled(false);
+                maBreakoutProperties.setEnabled(false);
+                scalpingProperties.setEnabled(false);
+                donchianProperties.setEnabled(true);
             });
             return;
         }
