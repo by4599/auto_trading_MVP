@@ -87,7 +87,7 @@
 | `scheduler` | 오케스트레이션 | `TradingScheduler` 완료, 중복실행 가드 포함 |
 | 알림 | 텔레그램 | `TelegramNotifier` — 체결/에러/청산 알림 완료 |
 
-### 7대 리스크 룰 — 실제 동작 상태
+### 리스크 룰 7대 + 확장(`BucketBudgetRule`) — 실제 동작 상태
 
 | 룰 | 조건 | 현재 상태 |
 |---|---|---|
@@ -97,13 +97,22 @@
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (KST 타임존 가정) |
 | `DailyLossRule` | 일일 손실 -3% 매수 차단, -5% 강제청산 | ✅ **활성** — 실값 연동 + `RiskMonitor` 상시 감시 (Gate 1) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ **활성** — 현금 포함 총자산 기준, peakEquity 영속화 (Gate 1) |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | 🔴 **비활성** — 매도 체결 데이터 필요 (Gate 3) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ **활성** — `TradeResultTracker` 실현손익 스트릭 연동 (Gate 3) |
+| `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용, `trading.bucket.enabled` OFF면 통과) |
 
 계좌 단위 청산 트리거(일일 -5%·MDD 10%)는 매수 신호와 무관하게 **`RiskMonitor`가
 1초 주기로 상시 감시**한다. 총자산은 KIS 잔고조회(예수금 포함)를 3초 캐시로 사용한다.
 
+> **운영 신뢰성 강화 (2026-08)**: ① 모든 KIS 호출을 초당 한도(모의 2/실전 20,
+> `kis.rate-limit-per-sec`)로 균등 배분하는 `KisRateLimiter` — EGW00201·SAFE_MODE 플래핑 근절.
+> ② `RiskMonitor`·`StopLossMonitor`는 잔고 API 실패로 낡은 스냅샷이면 청산/손절 판정 스킵
+> (`Account.isFresh()` — 낡은 값 헛발동 방지). ③ 10분 주기 `ShadowPortfolioReconciler`가
+> 2주기 지속·신선·장중일 때 브로커-DB 불일치를 자동 보정. ④ 체결누락 desync는 취소불가=체결
+> 신호로 실잔고 대사 자동복구(뿌리 수정은 예정). ⑤ 텔레그램은 장중~장마감에만 발송.
+
 > ✅ **강제청산 실행부 구현 완료 (Gate 2)**: 트리거 시 미체결 일괄 취소 → 실잔고 조회 →
-> 보유 전량 시장가 매도 → EMERGENCY_STOPPED. 아직 **모의계좌 리허설 1회 미실행** —
+> 보유 전량 시장가 매도 → EMERGENCY_STOPPED. **모의계좌 리허설 깨끗한 1회 미완**
+> (2026-07-30 시도했으나 KIS 레이트리밋 폭주로 확인 불가 — 레이트 조정자 배포 후 재시도).
 > 아래 명령으로 리허설을 통과해야 Gate 2 완료로 판정한다:
 >
 > ```cmd
