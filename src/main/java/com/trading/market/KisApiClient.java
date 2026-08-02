@@ -55,6 +55,7 @@ public class KisApiClient {
     private final KisProperties props;
     private final TradingStatusManager statusManager;
     private final NotificationService notifier;
+    private final KisRateLimiter rateLimiter;
     // 토큰 발급 전용 — 인터셉터 없음 (순환 참조 방지)
     private volatile RestClient tokenClient;
     // 모든 API 호출용 — 인터셉터(인증 주입 + 401 재시도)가 붙어있음
@@ -67,10 +68,12 @@ public class KisApiClient {
     private final AtomicBoolean pausedByConnectionLoss = new AtomicBoolean(false);
 
     @Autowired
-    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier) {
+    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
+                        KisRateLimiter rateLimiter) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
         // 자격증명 미설정 시 placeholder — 실제 요청 시 getBearerToken()에서 명시적 오류 발생
         buildClients(props.isConfigured() ? props.getBaseUrl() : "https://placeholder.invalid");
     }
@@ -82,10 +85,11 @@ public class KisApiClient {
      * 인터셉터가 빠진 채로 조립돼 아무 것도 검증하지 못한다).
      */
     KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
-                 RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
+                 KisRateLimiter rateLimiter, RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
         this.tokenClient = tokenBuilder.build();
         this.apiClient = apiBuilder.requestInterceptor(this::intercept).build();
     }
@@ -256,6 +260,7 @@ public class KisApiClient {
 
     private ClientHttpResponse executeTracked(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
+        rateLimiter.acquire();  // 초당 한도 준수 — 모든 물리 호출(최초·재시도 포함)이 예산 슬롯을 받는다
         try {
             return execution.execute(withAuth(request), body);
         } catch (IOException e) {

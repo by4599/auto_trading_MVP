@@ -66,7 +66,9 @@ class KisApiClientTest {
     }
 
     private KisApiClient sut() {
-        return new KisApiClient(props, statusManager, notifier, tokenBuilder, apiBuilder);
+        // 테스트는 한도 대기가 무의미하도록 빠른 레이트리미터(10000/초)를 쓴다
+        return new KisApiClient(props, statusManager, notifier,
+                new KisRateLimiter(10_000), tokenBuilder, apiBuilder);
     }
 
     // ── 토큰 발급 재시도 ──────────────────────────────────────────────────────
