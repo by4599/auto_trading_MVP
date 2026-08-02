@@ -2,6 +2,8 @@ package com.trading.control;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.BalanceClient;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionRepository;
@@ -61,7 +63,8 @@ class TradingControllerTest {
         when(positionRepository.findAll()).thenReturn(List.of());
         BrokerageApiClient reconcilerBrokerClient = mock(BrokerageApiClient.class);
         reconciler = new ShadowPortfolioReconciler(statusManager, liquidationService, balanceClient,
-                positionRepository, reconcilerBrokerClient, mock(NotificationService.class));
+                positionRepository, reconcilerBrokerClient, mock(NotificationService.class),
+                new MarketCalendarService(new MarketCalendarProperties(), java.time.Clock.systemDefaultZone()));
 
         portfolioStateRepository = mock(PortfolioStateRepository.class);
         sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier,

@@ -1,6 +1,8 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.risk.ActualAccountInfo;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
@@ -10,6 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,9 +55,23 @@ class ShadowPortfolioReconcilerTest {
     }
 
     private ShadowPortfolioReconciler sut() {
-        return new ShadowPortfolioReconciler(statusManager, liquidationService,
-                balanceClient, positionRepository, brokerageClient, notifier);
+        return sut(inHours());
     }
+
+    private ShadowPortfolioReconciler sut(MarketCalendarService cal) {
+        return new ShadowPortfolioReconciler(statusManager, liquidationService,
+                balanceClient, positionRepository, brokerageClient, notifier, cal);
+    }
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 2026-07-15(수) 평일 + 지정 시각 고정 캘린더 */
+    private static MarketCalendarService cal(LocalTime t) {
+        Clock fixed = Clock.fixed(
+                LocalDateTime.of(LocalDate.of(2026, 7, 15), t).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+    private static MarketCalendarService inHours()  { return cal(LocalTime.NOON); }
+    private static MarketCalendarService offHours() { return cal(LocalTime.of(17, 0)); }
 
     private static Position dbHolding(String code, int qty, double avg) {
         Position p = Position.empty(code);
@@ -106,6 +127,50 @@ class ShadowPortfolioReconcilerTest {
         liquidationService.triggerForceLiquidation();
 
         sut().reconcile();
+
+        verify(balanceClient, never()).fetchBalance();
+    }
+
+    @Test
+    @DisplayName("불일치가 2주기 연속 지속 → 브로커 기준 자동 보정")
+    void reconcile_corrects_after_mismatch_persists_two_cycles() {
+        Position drifted = dbHolding("005930", 10, 70_000);
+        when(positionRepository.findAll()).thenReturn(List.of(drifted));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))));
+
+        ShadowPortfolioReconciler r = sut();
+        r.reconcile();  // 1차 — 알림만, 보정 없음
+        verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
+
+        r.reconcile();  // 2차 — 2주기 지속 → 자동 보정
+        assertThat(drifted.getQuantity()).isEqualTo(5);
+        verify(positionRepository).save(drifted);
+    }
+
+    @Test
+    @DisplayName("불일치가 다음 주기에 사라지면 → 자동 보정 안 함 (일시 오류 보호)")
+    void reconcile_transient_mismatch_not_corrected() {
+        Position pos = dbHolding("005930", 10, 70_000);
+        when(positionRepository.findAll()).thenReturn(List.of(pos));
+        when(balanceClient.fetchBalance()).thenReturn(
+                new BalanceClient.BalanceSnapshot(1_000_000,
+                        List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))),   // 1차: 불일치
+                new BalanceClient.BalanceSnapshot(1_000_000,
+                        List.of(new BalanceClient.Holding("005930", 10, 70_000, 71_000))));  // 2차: 일치
+
+        ShadowPortfolioReconciler r = sut();
+        r.reconcile();  // 불일치 감지 — 알림만
+        r.reconcile();  // 일치 회복 — previousMismatchStocks 클리어, 보정 없음
+
+        verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(positionRepository, never()).delete(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("장 시간 외 → 재동기화 자체를 건너뜀 (낡은 데이터 배제)")
+    void reconcile_skips_outside_market_hours() {
+        sut(offHours()).reconcile();
 
         verify(balanceClient, never()).fetchBalance();
     }
