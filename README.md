@@ -18,8 +18,11 @@
 > **규칙 검증의 도구**(백테스트 엔진·Walk-Forward·합격 기준)는
 > [docs/BACKTEST-DESIGN.md](docs/BACKTEST-DESIGN.md)에 정의되어 있다.
 
-현재는 그 1단계로, Spring Boot + 한국투자증권(KIS) Open API로 삼성전자(005930) 1종목을
-**모의투자 계좌**에서 변동성 돌파 전략으로 자동매매하며 파이프라인을 검증하고 있습니다.
+현재는 그 1단계로, Spring Boot + 한국투자증권(KIS) Open API로 **매매 유니버스(최대 20종목,
+시드 005930)**를 **모의투자 계좌**에서 자동매매하며 파이프라인을 검증하고 있습니다. 전략은
+변동성 돌파(VB) + 이동평균 정배열 돌파 + 눌림목 반등 스캘핑 3방식(지갑 칸 분리, paper 전용)이나,
+**세 전략 모두 백테스트 불합격**이라 실전 승격은 불가 — 파이프라인·안전장치 검증 목적으로만 가동한다
+(검증된 유일한 후보와 판정 이력은 [docs/BACKTEST-DESIGN.md](docs/BACKTEST-DESIGN.md)).
 
 ---
 
@@ -28,9 +31,9 @@
 | Phase | 목표 | 상태 |
 |---|---|---|
 | **1. 규칙 기반 MVP** | 시세→신호→리스크→주문 파이프라인을 모의투자로 검증. 뉴스는 수집·분류만 (매매 미연동) | 🟡 진행 중 |
-| **2. 안전장치·출구·운영 실동작** (Sprint 3) | 리스크 룰 실값 연동(잔고 API), 강제청산 실행부 실장, 15:15 타임컷 + ATR 손절 + R 기반 주문 수량 ([방법론 §4](docs/INVESTMENT-METHODOLOGY.md)) + 데드맨 스위치·SAFE_MODE·재가동 게이트 ([운영 §8](docs/OPERATIONS.md)) | ⬜ 예정 |
-| **B. 백테스트 인프라** (Phase 2↔3 사이) | 캔들 적재, 백테스트 엔진, **현행 K=0.5 소급 검증**, Walk-Forward ([백테스트 설계](docs/BACKTEST-DESIGN.md)) — Phase 3의 전제 조건 | ⬜ 예정 |
-| **3. 이벤트 → 투자 방향** | DART 공시 수집, 이벤트 택소노미 분류(LLM), 이벤트→밸류체인 매핑, 과거 반응 백테스트, 손익비 필터 ([방법론 §5](docs/INVESTMENT-METHODOLOGY.md)) | ⬜ 예정 |
+| **2. 안전장치·출구·운영 실동작** (Sprint 3) | 리스크 룰 실값 연동(잔고 API), 강제청산 실행부 실장, 15:15 타임컷 + ATR 손절 + R 기반 주문 수량 ([방법론 §4](docs/INVESTMENT-METHODOLOGY.md)) + 데드맨 스위치·SAFE_MODE·재가동 게이트 ([운영 §8](docs/OPERATIONS.md)) | ✅ 완료 (Gate 1~3·P2-A·운영 A/B). **청산 리허설 깨끗한 1회만 남음** |
+| **B. 백테스트 인프라** (Phase 2↔3 사이) | 캔들 적재, 백테스트 엔진, K=0.5 소급 검증, Walk-Forward ([백테스트 설계](docs/BACKTEST-DESIGN.md)) | ✅ 완료 (2026-07). **판정 ❌: 3방식 전부 불합격**, 손익비 재설계로 후보 1건만 §4 통과(잠정) |
+| **3. 이벤트 → 투자 방향** | DART 공시 수집, 이벤트 택소노미 분류(LLM), 이벤트→밸류체인 매핑, 과거 반응 백테스트, 손익비 필터 ([방법론 §5](docs/INVESTMENT-METHODOLOGY.md)) | 🟡 수집부·B-4 엔진 완료, 매매 연동 예정 |
 | **4. 멀티 슬리브 & 실전** | 팩터 스코어링, ADR-001 Sleeve 구조(단타 30% 한도), ADR-002 Trim 선정, `@Profile("real")` 실전 전환 | ⬜ 예정 |
 
 > **실전 전환 게이트**: ① [docs/TRADING-RULES-AUDIT.md](docs/TRADING-RULES-AUDIT.md)의 CRITICAL 4건(F-1~F-4) 해소
@@ -46,8 +49,9 @@
 ┌─ 트레이딩 파이프라인 (1초 루프) ──────────────────────────────┐
 │ TradingScheduler                                              │
 │   -> KisMarketDataService.getRecentCandles()  [KIS REST]     │
-│   -> SignalDispatcher.dispatch()   [VolatilityBreakout 평가] │
-│   -> RiskEngine.check()            [7개 리스크 룰 일괄 검사] │
+│      (모든 KIS 호출은 KisRateLimiter가 초당 한도로 균등 배분)│
+│   -> SignalDispatcher.dispatch()   [VB·MA돌파·스캘핑 평가]   │
+│   -> RiskEngine.check()            [8개 룰+필터 일괄 검사]   │
 │   -> 통과 시 OrderEngine.execute()                           │
 │   -> KisOrderClientImpl            [주문 접수, ACCEPTED 저장]│
 │   -> FillPoller (3초 주기)         [체결 조회]               │
@@ -77,15 +81,15 @@
 
 | 패키지 | 역할 | 상태 |
 |---|---|---|
-| `market` | 시세 조회 | `KisMarketDataService` — 전일 일봉 + 당일 라이브 캔들 |
-| `strategy` | 신호 생성 | `VolatilityBreakoutStrategy` (K=0.5) — 매수 신호만, 출구는 Sprint 3 |
+| `market` | 시세 조회 | `KisMarketDataService`(전일 일봉+당일 라이브) + `KisRateLimiter`(초당 한도 균등 배분) |
+| `strategy` | 신호 생성 | VB(K=0.5)·MA 정배열 돌파·눌림목 스캘핑 3방식 — 매수 신호만. 출구는 타임컷·ATR 손절 완료 |
 | `signal` | 신호 집계 | `SignalDispatcher` 완료 |
-| `risk` | 신호 검증·청산 | 7개 룰 등록 (아래 표), `LiquidationService` 상태머신 완료 |
-| `order` | 주문 실행 | `KisOrderClientImpl` — 시장가 1주 고정(v1), 체결은 `FillPoller` |
-| `position` | 계좌/포지션 | `KisPositionManager` + `ShadowPortfolio`(peakEquity 추적) |
-| `research` | 뉴스 수집·분류 | RSS 수집 + 키워드 감성 분류 완료 (매매 미연동) |
-| `scheduler` | 오케스트레이션 | `TradingScheduler` 완료, 중복실행 가드 포함 |
-| 알림 | 텔레그램 | `TelegramNotifier` — 체결/에러/청산 알림 완료 |
+| `risk` | 신호 검증·청산 | 8개 룰 + 필터 4종 등록(아래 표), `LiquidationService` 상태머신 완료 |
+| `order` | 주문 실행 | `KisOrderClientImpl` — 시장가, **R 사이징 수량**(`OrderSizingService`), 체결은 `FillPoller`→`FillProcessor` |
+| `position` | 계좌/포지션 | `KisPositionManager`(신선도 플래그) + `ShadowPortfolio`(peakEquity) + `ShadowPortfolioReconciler`(주기 재동기화) |
+| `research` | 뉴스·공시 | 뉴스 RSS 감성 분류 + DART 공시 수집 완료 (매매 미연동) |
+| `scheduler` | 오케스트레이션 | `TradingScheduler`(유니버스 라운드로빈)·`TimeCutScheduler`(15:15 매도)·`RunStreakRecorder` |
+| 알림 | 텔레그램 | `TelegramNotifier` — 체결/에러/청산, 장중~장마감에만 발송 |
 
 ### 리스크 룰 7대 + 확장(`BucketBudgetRule`) — 실제 동작 상태
 
@@ -158,11 +162,15 @@ run-paper.bat
 ### 정상 기동 확인 로그
 
 ```log
-[KisAuthManager]  OAuth 토큰 발급 성공 — 만료: ...
-[TradingScheduler] 루프 시작 — 종목: [005930]
-[RiskEngine] Loaded 7 risk rules: DailyLossRule, GlobalEquityStopRule, ...
-[KisPositionManager] [운영 주의] DailyLossRule / ConsecutiveLossRule 비활성 상태 ...
+[KisApiClient]  KIS OAuth 토큰 발급 완료, 만료: ...
+[RiskEngine]    Loaded 12 risk rules: BucketBudgetRule, ConsecutiveLossRule, DailyLossRule,
+                DisclosureCooldownRule, EntryTimeWindowRule, GlobalEquityStopRule, IndexRegimeRule,
+                IndexTrendRule, MarketCloseRule, MaxPositionCountRule, PendingOrderRule, PositionLimitRule
+[RiskMonitor]   계좌 감시 시작 — 일일손실 청산 -5.0%, MDD 한도 10.0%
+[Reconciler]    기동 재동기화 완료 — 자동 가동(RUNNING)
 ```
+> 12개 = 리스크 룰 8종(위 표) + 필터/이벤트 룰 4종(`EntryTimeWindow`·`IndexRegime`·`IndexTrend`·
+> `DisclosureCooldown` — 기본 OFF, 백테스트 A/B로 채택된 것만 paper에서 ON).
 
 ---
 
@@ -201,16 +209,21 @@ REM 리스크 엔진 집중 테스트
 
 ## 다음 작업 (우선순위 순)
 
-Sprint 3 — 안전장치 실동작 ([검증 보고서](docs/TRADING-RULES-AUDIT.md) Gate 1~3):
+> **현재 위치 (2026-08)**: Sprint 3(안전장치·출구·운영)와 백테스트 인프라는 완료됐고, 이제
+> **운영 신뢰성 로드맵 Phase 1**을 진행 중이다 — ✅ 레이트 조정자·주기 재동기화·데이터 품질 게이트
+> 완료, ⏳ **1.3 체결누락 뿌리 수정**(월요일 장중 진단, `_workspace/1.3_design_fill-tracking-diagnosis.md`).
+> 이후 Phase 2(검증된 전략 확보)·Phase 3(실전 전환)은 백테스트 판정·사람 게이트가 선행한다.
+
+Sprint 3 — 안전장치 실동작 ([검증 보고서](docs/TRADING-RULES-AUDIT.md) Gate 1~3), 아래는 완료 이력:
 
 1. ~~**equity 산출 교정** (F-1, F-7)~~ ✅ **완료 (Gate 1, 2026-07-07)** — `KisBalanceClient` 잔고 연동, 3초 캐시
 2. ~~**RiskMonitor 신설** (F-2)~~ ✅ **완료 (Gate 1, 2026-07-07)** — 1초 상시 감시 + dailyPnl 실값(F-5 일부)
-3. ~~**강제청산 실행부 실장** (F-3)~~ 🟡 **코드 완료 (Gate 2, 2026-07-08)** — 모의계좌 리허설 1회만 남음 (위 운영 주의 블록의 curl 명령) ← **완료 후 Gate 3 (타임컷)으로**
+3. ~~**강제청산 실행부 실장** (F-3)~~ 🟡 **코드 완료 (Gate 2, 2026-07-08)** — 모의계좌 리허설 **깨끗한 1회 미완**(2026-07-30 시도, 레이트리밋으로 확인 불가 → 레이트 조정자 배포 후 재시도). 위 curl 명령으로 통과 필요
 4. ~~**15:15 타임컷** (F-4) + **연속손실 카운터** (F-5 나머지)~~ ✅ **완료 (Gate 3, 2026-07-08)** — `TimeCutScheduler`(평일 15:15 KST 보유분 전량 매도, RiskEngine→OrderEngine 평시 경로) + `TradeResultTracker`(실현손익 연속손실 스트릭, `ConsecutiveLossRule` 활성화)
 5. 🟡 **주문 로직 현실화** ([방법론 §4.3](docs/INVESTMENT-METHODOLOGY.md)) — **부분 완료 (P2-A, 2026-07-08)**: ✅ R 사이징(`OrderSizingService` — 1R 역산·단주 내림·왜곡 ±20% 스킵) + ✅ ATR 손절(`StopLossArmer` 체결가 기준 장착, `StopLossMonitor` 1초 감시) + ✅ KST Clock 주입(F-8). 남은 것: 지정가 분할(Price Jitter — **ADR-001 3장 미결정 파라미터**(가격 간격·주문 개수) 결정 필요), 필터 훅 4종(시간 창·거래량·트레일링·지수 — 기본 OFF, [백테스트 §3.3](docs/BACKTEST-DESIGN.md)에서 A/B 후 채택)
-6. **성과 기록 기반 마련** ([거버넌스 §8](docs/PERFORMANCE-GOVERNANCE.md)): order_history에 신호 시점가·수수료·세금 기록 + `PerformanceReporter` 주간 리포트 — 이후 강등/승격 판정의 데이터 원천
-7. **운영 신뢰성** ([운영 §8](docs/OPERATIONS.md)): `server.address=127.0.0.1`(즉시), 데드맨 스위치, SAFE_MODE + 기동 재동기화 시퀀스, 재가동 게이트(/start 직접 전환 금지), 거래일 캘린더
-8. 시세 파싱 실패 시 예외 처리 (F-9), `MarketCloseRule` Clock 주입 (F-8 — 백테스트 엔진도 이 리팩터를 요구)
+6. **성과 기록 기반 마련** ([거버넌스 §8](docs/PERFORMANCE-GOVERNANCE.md)): 🟡 실현손익 영속화(`TradeResultTracker`→대시보드 실적)·연속 무중단 가동일(`RunStreakRecorder`) 완료. 남은 것: 수수료·세금 포함 주간 리포트(`PerformanceReporter`)
+7. ~~**운영 신뢰성** ([운영 §8](docs/OPERATIONS.md))~~ ✅ **완료 (Phase A/B, 2026-07-17~18)** — 데드맨 스위치, SAFE_MODE + 기동 재동기화, 재가동 게이트(/start 직접 전환 금지), 거래일 캘린더, KIS 장애 자동 SAFE_MODE·회복 시 자동 재개
+8. 🟡 `MarketCloseRule` Clock 주입 ✅완료(F-8, P2-A). 남은 것: 시세 파싱 실패 예외 처리(F-9)
 
 Phase 2 완료 후, Phase 3 착수 전:
 
