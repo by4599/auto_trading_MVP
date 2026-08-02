@@ -23,9 +23,11 @@ import org.springframework.stereotype.Component;
  *
  * 손절은 평시 매도이므로 청산 경로(LiquidationService)가 아닌
  * Signal → RiskEngine → OrderEngine 경로를 쓴다 (ADR 규칙 5).
- * 현재가는 KisPositionManager의 잔고 스냅샷(3초 캐시)을 재사용하므로
- * 추가 API 호출이 없다. 폴백 스냅샷(currentPrice=평단가)은 손절선보다 위라서
- * 오탐이 나지 않는다.
+ * 현재가는 KisPositionManager의 잔고 스냅샷(3초 캐시)을 재사용하므로 추가 API 호출이 없다.
+ *
+ * [데이터 품질 게이트] 잔고 API 실패로 낡은(폴백) 스냅샷이면 판정을 건너뛴다 —
+ * 옛 가격으로 손절/익절/트레일링을 헛발동(특히 옛 고가로 익절 매도)하는 것을 막는다.
+ * (RiskMonitor의 낡은-스냅샷 스킵과 동일 원칙. 매도=money-moving이라 신선값일 때만 판정.)
  */
 @Component
 @Profile("paper")
@@ -82,6 +84,12 @@ public class StopLossMonitor {
             account = positionManager.snapshotAccount();
         } catch (Exception e) {
             log.warn("[StopLoss] 계좌 스냅샷 실패 — 이번 틱 건너뜀: {}", e.getMessage());
+            return;
+        }
+
+        // 낡은(폴백) 스냅샷이면 옛 가격 헛매도 방지를 위해 판정을 건너뛴다 (데이터 품질 게이트)
+        if (!account.isFresh()) {
+            log.debug("[StopLoss] 계좌 스냅샷이 낡음(잔고 API 폴백) — 이번 틱 판정 건너뜀");
             return;
         }
 
