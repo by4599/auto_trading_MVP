@@ -4,6 +4,7 @@ import com.trading.risk.RiskLimitsProperties;
 import com.trading.strategy.FilterProperties;
 import com.trading.strategy.DonchianProperties;
 import com.trading.strategy.MaBreakoutProperties;
+import com.trading.strategy.RsiProperties;
 import com.trading.strategy.ScalpingProperties;
 import com.trading.strategy.StrategyParameters;
 import org.slf4j.Logger;
@@ -53,6 +54,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private final MaBreakoutProperties maBreakoutProperties;
     private final ScalpingProperties scalpingProperties;
     private final DonchianProperties donchianProperties;
+    private final RsiProperties rsiProperties;
     private final RiskLimitsProperties riskLimits;
     private final ExitLabProperties exitLab;
     private final BacktestCostProperties costProperties;
@@ -72,6 +74,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
                                 MaBreakoutProperties maBreakoutProperties,
                                 ScalpingProperties scalpingProperties,
                                 DonchianProperties donchianProperties,
+                                RsiProperties rsiProperties,
                                 RiskLimitsProperties riskLimits,
                                 ExitLabProperties exitLab,
                                 BacktestCostProperties costProperties,
@@ -90,6 +93,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         this.maBreakoutProperties = maBreakoutProperties;
         this.scalpingProperties = scalpingProperties;
         this.donchianProperties = donchianProperties;
+        this.rsiProperties = rsiProperties;
         this.riskLimits = riskLimits;
         this.exitLab = exitLab;
         this.costProperties = costProperties;
@@ -204,6 +208,21 @@ public class BacktestOrchestrator implements CommandLineRunner {
             return;
         }
 
+        // RSI(2) 평균회귀(전략3=스캘핑 대체 후보, 2026-08) — 과매도 종가 진입 + P3 다일 트레일링 고정,
+        // 사이징만 스윕. MA·Donchian과 동일한 54-후보/후보창을 써서 apples-to-apples 비교. 기준선 미기록.
+        if ("rsi-risk-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> candidateSymbols = prepareCandidateUniverse(
+                    "rsi-risk-lab", properties.getCandidateFrom(), properties.getCandidateTo());
+            runRiskLab("RSI(2) 평균회귀 + P3 다일 트레일링", "RSI2-P3", () -> {
+                strategyParameters.setEnabled(false);
+                maBreakoutProperties.setEnabled(false);
+                scalpingProperties.setEnabled(false);
+                donchianProperties.setEnabled(false);
+                rsiProperties.setEnabled(true);
+            }, false, candidateSymbols, properties.getCandidateFrom(), properties.getCandidateTo());
+            return;
+        }
+
         // Cost Lab (BACKTEST-DESIGN §14.1) — 검증 후보(MA+P3+RR1) 고정, 왕복 거래비용만 상향 스윕.
         if ("cost-lab".equalsIgnoreCase(properties.getMode())) {
             List<String> candidateSymbols = prepareCandidateUniverse(
@@ -231,6 +250,50 @@ public class BacktestOrchestrator implements CommandLineRunner {
             List<String> candidateSymbols = prepareCandidateUniverse(
                     "regime-lab", properties.getStressFrom(), properties.getStressTo());
             runRegimeLab(candidateSymbols, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+
+        // 신규 후보 약세장 검증 (2026-08) — Donchian/RSI 진입 + P3 + RR1 고정, 지수 추세 필터 A/B를
+        // MA와 동일한 6.5년 stress 창에서 태운다. §14.1 후보창(상승장) 합격이 약세장에서도 유지되는지가
+        // 실전 후보 자격의 실질 관문(MA는 이 관문에서 무너졌다가 지수 필터로 부분 회생 — §14.3~4).
+        if ("donchian-regime-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> candidateSymbols = prepareCandidateUniverse(
+                    "donchian-regime-lab", properties.getStressFrom(), properties.getStressTo());
+            runRegimeLab("돈치안 돌파 + P3 다일 트레일링 + RR1(0.5R·동시5)", "DONCHIAN-P3-RR1", () -> {
+                strategyParameters.setEnabled(false);
+                maBreakoutProperties.setEnabled(false);
+                scalpingProperties.setEnabled(false);
+                donchianProperties.setEnabled(true);
+                rsiProperties.setEnabled(false);
+            }, false, candidateSymbols, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+
+        if ("rsi-regime-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> candidateSymbols = prepareCandidateUniverse(
+                    "rsi-regime-lab", properties.getStressFrom(), properties.getStressTo());
+            runRegimeLab("RSI(2) 평균회귀 + P3 다일 트레일링 + RR1(0.5R·동시5)", "RSI2-P3-RR1", () -> {
+                strategyParameters.setEnabled(false);
+                maBreakoutProperties.setEnabled(false);
+                scalpingProperties.setEnabled(false);
+                donchianProperties.setEnabled(false);
+                rsiProperties.setEnabled(true);
+            }, false, candidateSymbols, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+
+        // 돈치안 후보 강건성 검증 (2026-08, Step 2·3) — 약세장 관문을 통과한 돈치안(+지수 MA120 필터)을
+        // 고정하고 ①자체 파라미터 ±20% ②왕복 비용 상향에서도 성과가 완만한지 본다. 창은 약세장(stress).
+        if ("donchian-sens".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-sens", properties.getStressFrom(), properties.getStressTo());
+            runDonchianSensitivity(cs, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+        if ("donchian-cost-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-cost-lab", properties.getStressFrom(), properties.getStressTo());
+            runDonchianCostLab(cs, properties.getStressFrom(), properties.getStressTo());
             return;
         }
 
@@ -681,26 +744,49 @@ public class BacktestOrchestrator implements CommandLineRunner {
         strategyParameters.setEnabled(false);
         maBreakoutProperties.setEnabled(true);
         scalpingProperties.setEnabled(false);
+        applyRegimeExitSizing();
+    }
+
+    /** regime-lab/sens 공통 출구·사이징 — P3 다일 트레일링 + RR1(0.5R·동시5). 진입은 별도 설정. */
+    private void applyRegimeExitSizing() {
         applyExitProfile(new ExitProfile("P3", 1.0, false, 20, true, 0.01, 0.03));
         riskLimits.setRiskFractionPerTrade(0.005);
         riskLimits.setMaxPositionCount(5);
     }
 
+    /** §14.4 MA 재현 (regime-lab 모드) — 진입=MA 고정, 배너·앵커·라벨 그대로 */
     private void runRegimeLab(List<String> symbols, LocalDate from, LocalDate to) {
-        applyRegimeFixedConditions();
+        runRegimeLab(REGIME_LAB_LABEL, REGIME_LAB_SLUG, () -> {
+            strategyParameters.setEnabled(false);
+            maBreakoutProperties.setEnabled(true);
+            scalpingProperties.setEnabled(false);
+            donchianProperties.setEnabled(false);
+            rsiProperties.setEnabled(false);
+        }, true, symbols, from, to);
+    }
 
-        logRegimeLabBanner(symbols, from, to);
+    /**
+     * 진입을 파라미터화한 Regime Lab (2026-08, Donchian·RSI 후보 약세장 검증) — 진입=enableEntry,
+     * 출구=P3, 사이징=RR1 고정, 지수 추세 필터 A/B(G0 OFF / G1 MA120 / G2 MA200). maAnchor=true면
+     * MA 재현 배너(§14.3 앵커 문구 포함), false면 신규 후보용 일반 배너.
+     */
+    private void runRegimeLab(String label, String slug, Runnable enableEntry, boolean maAnchor,
+                             List<String> symbols, LocalDate from, LocalDate to) {
+        enableEntry.run();
+        applyRegimeExitSizing();
+
+        if (maAnchor) logRegimeLabBanner(symbols, from, to);
+        else          logRegimeLabBannerGeneric(label, symbols, from, to);
         long labStart = System.nanoTime();
         List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
         for (int i = 0; i < REGIME_PROFILES.size(); i++) {
             rows.add(runRegimeProfile(REGIME_PROFILES.get(i), i, REGIME_PROFILES.size(),
-                    "RegimeLab", symbols, from, to));
+                    "RegimeLab", label, slug, symbols, from, to));
         }
 
         restoreRegimeDefaults();
 
-        Path report = reportWriter.writeRegimeLabReport(
-                REGIME_LAB_LABEL, REGIME_LAB_SLUG, symbols, from, to, rows);
+        Path report = reportWriter.writeRegimeLabReport(label, slug, symbols, from, to, rows);
         logRegimeLabSummary(rows, labStart, report);
     }
 
@@ -710,7 +796,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
      * 그대로 넘겨 출력이 이전과 한 톨도 다르지 않다(§14.4 재현). regime-sens는 "RegimeSens"·4개.
      */
     private BacktestReportWriter.ExitLabRow runRegimeProfile(RegimeProfile rp, int index, int total,
-            String tag, List<String> symbols, LocalDate from, LocalDate to) {
+            String tag, String label, String slug, List<String> symbols, LocalDate from, LocalDate to) {
         filters.getIndexTrend().setEnabled(rp.trendEnabled());
         filters.getIndexTrend().setMaPeriod(rp.maPeriod());
         log.info("[{}] ({}/{}) {} 시작 — 실제 적용: 지수 추세 필터 {}",
@@ -723,7 +809,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         WalkForwardEngine.WalkForwardResult result =
                 walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
         BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
-                symbols, from, to, Map.of(), result, List.of(), REGIME_LAB_LABEL, REGIME_LAB_SLUG);
+                symbols, from, to, Map.of(), result, List.of(), label, slug);
         BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
 
         log.info("[{}] ({}/{}) {} 완료 ({}초): {} → {}",
@@ -779,6 +865,20 @@ public class BacktestOrchestrator implements CommandLineRunner {
                 + "재현하지 못하면 이 실행은 무효다");
     }
 
+    /** 신규 후보(Donchian·RSI) 약세장 검증용 일반 배너 — §14.3 MA 앵커 문구 없이 */
+    private void logRegimeLabBannerGeneric(String label, List<String> symbols, LocalDate from, LocalDate to) {
+        int windowCount = WalkForwardEngine.windows(from, to).size();
+        log.info("[RegimeLab] ══ 지수 추세 진입금지 필터 A/B (BACKTEST-DESIGN §14.4 확장 — 신규 후보) ══");
+        log.info("[RegimeLab] 고정 조건: {}", label);
+        log.info("[RegimeLab] 기간: {} ~ {} (약세장 창 — 2020 코로나·2022 금리쇼크 포함)", from, to);
+        log.info("[RegimeLab] Walk-Forward 6/3/3 윈도우 {}개 · 종목 {}개", windowCount, symbols.size());
+        log.info("[RegimeLab] 프로필: {}", REGIME_PROFILES.stream().map(RegimeProfile::name).toList());
+        log.info("[RegimeLab] 총 실행 예정: 프로필 {} × 윈도우 {} = {}런",
+                REGIME_PROFILES.size(), windowCount, REGIME_PROFILES.size() * windowCount);
+        log.info("[RegimeLab] G0(필터OFF) 대비 G1(MA120)/G2(MA200)에서 약세장 낙폭이 §4(≤15%) 안으로 "
+                + "들어오는지, 상승장 수익까지 잘라내지는 않는지(과필터) 본다");
+    }
+
     /** 종료 요약 — 프로필별 한 줄 표 (리포트 파일을 열지 않아도 판독 가능하게) */
     private void logRegimeLabSummary(List<BacktestReportWriter.ExitLabRow> rows,
                                      long labStart, Path report) {
@@ -812,7 +912,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
         for (int i = 0; i < REGIME_SENS_PROFILES.size(); i++) {
             rows.add(runRegimeProfile(REGIME_SENS_PROFILES.get(i), i, REGIME_SENS_PROFILES.size(),
-                    "RegimeSens", symbols, from, to));
+                    "RegimeSens", REGIME_LAB_LABEL, REGIME_LAB_SLUG, symbols, from, to));
         }
 
         restoreRegimeDefaults();
@@ -883,6 +983,101 @@ public class BacktestOrchestrator implements CommandLineRunner {
         }
         log.info("[CrashVol] 두 표가 다르면 물었던 질문의 답은 PRE 쪽 (DURING은 '이번 급락에서 덜 맞은 정도')");
         log.info("[CrashVol] 리포트: {}", file.toAbsolutePath());
+    }
+
+    // ── 돈치안 강건성 (2026-08, Step 2·3) — 약세장 관문 통과 후보의 민감도·비용 검증 ──────
+    //
+    // 약세장 창(stress)에서 진입=Donchian / 출구=P3 / 사이징=RR1 / 지수 추세 MA120 필터 ON을 전부
+    // 고정하고, Step 2는 돈치안 자체 파라미터(고가기간·추세기간)를 ±20% 흔들고, Step 3는 왕복 비용을
+    // 0.41→0.80%로 올린다. 한 축만 뾰족하거나 비용에 급락하면 실전 후보 자격 약화.
+
+    private record DonchianParamProfile(String name, int lookback, int trendMa) {}
+
+    private static final List<DonchianParamProfile> DONCHIAN_PARAM_PROFILES = List.of(
+            new DonchianParamProfile("D0 기준(고가20·추세120)", 20, 120),
+            new DonchianParamProfile("D1 고가16 (-20%)",        16, 120),
+            new DonchianParamProfile("D2 고가24 (+20%)",        24, 120),
+            new DonchianParamProfile("D3 추세96 (-20%)",        20, 96),
+            new DonchianParamProfile("D4 추세144 (+20%)",       20, 144));
+
+    private static final String DONCHIAN_LABEL = "돈치안 돌파 + P3 + RR1 + 지수MA120";
+    private static final String DONCHIAN_SLUG  = "DONCHIAN-P3-RR1-IDX120";
+
+    /** Step 2·3 공통 고정 — 진입=Donchian / 출구=P3 / 사이징=RR1 / 지수 추세 MA120 필터 ON */
+    private void applyDonchianFixedWithIndexFilter() {
+        strategyParameters.setEnabled(false);
+        maBreakoutProperties.setEnabled(false);
+        scalpingProperties.setEnabled(false);
+        rsiProperties.setEnabled(false);
+        donchianProperties.setEnabled(true);
+        applyRegimeExitSizing();                 // P3 + RR1
+        filters.getIndexTrend().setEnabled(true);
+        filters.getIndexTrend().setMaPeriod(120);
+    }
+
+    /** Step 2 — 돈치안 자체 파라미터(고가기간·추세기간) ±20% 민감도 (약세장 창, 지수 MA120 ON) */
+    private void runDonchianSensitivity(List<String> symbols, LocalDate from, LocalDate to) {
+        applyDonchianFixedWithIndexFilter();
+        int windowCount = WalkForwardEngine.windows(from, to).size();
+        log.info("[DonchianSens] ══ 돈치안 파라미터 ±20% 민감도 (약세장 창, 지수 MA120 필터 ON) ══");
+        log.info("[DonchianSens] 기간 {}~{} · 종목 {}개 · Walk-Forward 윈도우 {}개 · 프로필 {}개",
+                from, to, symbols.size(), windowCount, DONCHIAN_PARAM_PROFILES.size());
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (DonchianParamProfile p : DONCHIAN_PARAM_PROFILES) {
+            donchianProperties.setLookback(p.lookback());
+            donchianProperties.setTrendMaPeriod(p.trendMa());
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            log.info("[DonchianSens] {}: {} → {}", p.name(),
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(p.name(), result, judgment));
+        }
+        // 기본값 복원
+        donchianProperties.setLookback(20);
+        donchianProperties.setTrendMaPeriod(120);
+        restoreRegimeDefaults();
+
+        Path report = reportWriter.writeRiskLabReport(
+                DONCHIAN_LABEL + " · 파라미터 민감도", DONCHIAN_SLUG + "-SENS", symbols, from, to, rows, false);
+        log.info("[DonchianSens] §4 민감도: D1~D4가 전부 완만(PF·MDD가 D0 근처)이면 강건. "
+                + "한 칸만 좋고 인접이 무너지면 과최적화 지문");
+        log.info("[DonchianSens] 리포트: {}", report.toAbsolutePath());
+    }
+
+    /** Step 3 — 돈치안 왕복 비용 0.41→0.80% 민감도 (약세장 창, 지수 MA120 ON) */
+    private void runDonchianCostLab(List<String> symbols, LocalDate from, LocalDate to) {
+        applyDonchianFixedWithIndexFilter();
+        int windowCount = WalkForwardEngine.windows(from, to).size();
+        log.info("[DonchianCost] ══ 돈치안 왕복 비용 상향 민감도 (약세장 창, 지수 MA120 필터 ON) ══");
+        log.info("[DonchianCost] 기간 {}~{} · 종목 {}개 · Walk-Forward 윈도우 {}개 · 비용 {}",
+                from, to, symbols.size(), windowCount,
+                COST_PROFILES.stream().map(c -> pct(c.roundTrip())).toList());
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (CostProfile cp : COST_PROFILES) {
+            costProperties.setRoundTripCost(cp.roundTrip());
+            BacktestReportWriter.AppliedCost applied = new BacktestReportWriter.AppliedCost(
+                    costProperties.getSlippageRate(), costProperties.roundTripCost());
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            log.info("[DonchianCost] {} (왕복 {}): {} → {}", cp.name(), pct(applied.roundTripCost()),
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(cp.name(), result, judgment, applied));
+        }
+        // 기본값 복원
+        costProperties.resetDefaults();
+        restoreRegimeDefaults();
+
+        Path report = reportWriter.writeCostLabReport(
+                DONCHIAN_LABEL, DONCHIAN_SLUG, symbols, from, to, rows);
+        log.info("[DonchianCost] 리포트: {}", report.toAbsolutePath());
     }
 
     private static String pct(double rate) {

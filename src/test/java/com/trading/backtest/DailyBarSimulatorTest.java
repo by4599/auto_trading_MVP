@@ -22,6 +22,7 @@ import com.trading.risk.TradingStatusManager;
 import com.trading.risk.TrailingStopTracker;
 import com.trading.signal.SignalDispatcher;
 import com.trading.strategy.FilterProperties;
+import com.trading.strategy.RsiProperties;
 import com.trading.strategy.ScalpingProperties;
 import com.trading.strategy.StrategyParameters;
 import com.trading.strategy.VolatilityBreakoutStrategy;
@@ -112,7 +113,7 @@ class DailyBarSimulatorTest {
         trailingStopTracker = new TrailingStopTracker(filters);
         sut = new DailyBarSimulator(market, dispatcher, new RiskEngine(List.of()),
                 orderEngine, positionRepository, positionManager, orderClient,
-                trailingStopTracker, clock, scalpingProperties);
+                trailingStopTracker, clock, scalpingProperties, new RsiProperties());
 
         market.setSimDate(TODAY);
     }

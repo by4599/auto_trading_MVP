@@ -176,6 +176,21 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
   켠 적 없어 실계좌 영향 없음.
   남은 미검증: 분봉 정밀 · 민감도 ±20% · 크래시형 MDD. **실전 전환은 ADR-001(다일 보유) 재논의 +
   게이트 G2(사람) 선행**. paper 기본값·리스크 룰·지갑 칸 불변.
+- 진입 교체 트랙 (2026-08-03, BACKTEST-DESIGN §15) — §13에서 3방식이 전부 불합격하자 **진입만
+  고전 기법으로 교체**해 §14 검증 경로(출구 P3 + 사이징 + 약세장 창 + 지수 필터)에 그대로 태웠다:
+  전략1(VB) → `DonchianBreakoutStrategy`(직전 20일 고가 돌파 + 종가>MA120),
+  전략3(스캘핑) → `RsiMeanReversionStrategy`(+`RsiCalculator`, 추세 안 RSI(2)<10 과매도, **종가 진입**).
+  둘 다 기본 OFF(`trading.donchian.enabled`/`trading.rsi.enabled`) — 백테스트에서만 켠다.
+  ⚠ RSI(2)는 `DailyBarSimulator`에 **종가 진입 경로**(`checkMeanReversionEntry`)를 새로 요구했다 —
+  기존 진입은 돌파 전용(고가 발화·이분탐색)이라 평균회귀 신호를 못 잡는다. 당일 진입분은 종가
+  매수라 당일 손절·트레일 판정을 하지 않는다(선견편향 차단).
+  ⚠ **판정 (§15.5)**: **돈치안 = 조건부·잠정 통과** — 약세장 6.5년·24창에서 지수 MA120 필터와 함께
+  PF 1.90 · 기대값 +1.36% · MDD 14.4% · 총수익 +358%(과필터 아님: 트레이드 -26%인데 수익 증가).
+  **RSI(2) = 보류** — MA200 한 곳만 턱걸이(MDD 14.2%)이고 총수익이 +63%로 자릿수가 달라 전략3
+  후보 근거 없음. **돈치안도 실전 후보 아님**: 모든 불합격의 단일 원인이 MDD 한도(15%) 근접이고
+  여유 0.6%p뿐 — 파라미터 ±20%는 4/5(종목 추세96에서 22.9%), 비용은 왕복 +0.09%p만 얹어도 탈락
+  (§14.2 MA보다 얇음). 엣지(PF 1.5~2.0)는 전 축에서 강건. 다음: 사이징 재스윕 · 추세기간 지도 ·
+  **실측 슬리피지**(로드맵 1.3 선행). 실전은 ADR-001 재논의 + 게이트 G2(사람) 선행.
 - 알림: 텔레그램 (체결/에러/청산)
 - 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
 - 공시(DART): 유니버스∪워치리스트 대상 30분 주기 수집·표시 전용.
@@ -197,6 +212,10 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
 > 단, **모의계좌 청산 리허설 1회 성공 전까지 Gate 2 완료 판정 아님**
 > (`POST /api/trading/liquidation-drill`). F-번호와 상세 근거는 `docs/TRADING-RULES-AUDIT.md` 참고.
+>
+> **데이터 품질 게이트 (2026-08)**: `RiskMonitor`(청산 트리거)·`StopLossMonitor`(손절/익절)는
+> 잔고 API 실패로 낡은 스냅샷일 때 판정을 건너뛴다(`Account.isFresh()`) — 옛 값 헛발동 방지.
+> 매수 차단 룰은 낡으면 보수적 차단이라 예외. 모든 KIS 호출은 `KisRateLimiter`가 초당 한도로 균등 배분.
 
 ## 패키지 구조 및 큰 흐름
 
@@ -222,7 +241,8 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
 - 각 KIS 연동 인터페이스(`MarketDataService`, `KisOrderClient`, `PositionManager`,
   `BrokerageApiClient` 등)는 `paper`/`real`/`backtest` 프로필별로 구현체를
   갈아끼운다 — 새 구현체를 추가할 때도 인터페이스 시그니처는 고정.
-- `KisApiClient`가 모든 KIS REST 연동(OAuth 토큰 포함)이 공유하는 공통 HTTP 클라이언트.
+- `KisApiClient`가 모든 KIS REST 연동(OAuth 토큰 포함)이 공유하는 공통 HTTP 클라이언트 —
+  모든 호출은 `KisRateLimiter`(초당 한도 균등 배분, `market`)를 통과한다.
 - 문서 지도: 로드맵·구현 현황은 `README.md`, 투자 판단 방법론은
   `docs/INVESTMENT-METHODOLOGY.md`, 백테스트 엔진·합격 기준은
   `docs/BACKTEST-DESIGN.md`, 장애 대응·재가동은 `docs/OPERATIONS.md`,
@@ -290,19 +310,38 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
   시가총액 세분화 재집계 추가. 판정은 위 "현재 스코프" 항목 참고 — 둘 다 기각, 게이트 불변.
   이 과정에서 백테스트 텔레그램 격리가 OS 환경변수로 무력화되는 사고 발견 —
   `TradingEventListener`에 `@Profile("!backtest")` 추가로 구조적 차단 (BACKTEST-DESIGN §12)
+- 운영 신뢰성 강화 (2026-08, 브랜치 `backtest/regime-filter-and-validation` 커밋 e1e095d~285a1b9·cb5988d) —
+  데이터·호출 신뢰성 결함 일괄 해소:
+  ① **체결누락 desync 자동복구** — 취소가 "취소할 수량 없음/원주문번호 없음"으로 거부되면
+     (=이미 체결) 실잔고와 대사해 포지션 정렬·주문 종결 (`FillStateUpdater.reconcileFilledFromBalance`,
+     `KisOrderCancelClient.classify`)
+  ② **토큰 만료 인식** — KIS가 만료를 HTTP 500(EGW00123)으로 주는 것을 401과 동일 취급해 즉시 재발급 (`KisApiClient`)
+  ③ **텔레그램 장중 전용** — 거래일 09:00~15:30에만 전송, 장외는 로그만 (`TelegramNotifier` + `MarketCalendarService`)
+  ④ **KIS 전역 레이트 조정자** `KisRateLimiter` — 모든 호출을 초당 한도(모의 2/실전 20,
+     `kis.rate-limit-per-sec`)로 균등 배분해 EGW00201·SAFE_MODE 플래핑 근절
+  ⑤ **주기적 안전 재동기화** — `ShadowPortfolioReconciler.reconcile`이 2주기 지속+신선값+장중일 때만
+     브로커 기준 자동 보정, 첫 감지는 알림만 (§5.3 개정)
+  ⑥ **데이터 품질 게이트** — `RiskMonitor`·`StopLossMonitor`는 낡은(폴백) 스냅샷이면 청산/손절 판정
+     스킵 (`Account.isFresh()`, 2026-07-30 -11.19% 헛청산 오판 재발 방지)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 
-1. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
+1. 모의계좌 강제청산 리허설 — **깨끗한 1회 성공 미완, Gate 2 판정 보류.** 2026-07-30 시도했으나
+   KIS 레이트리밋 폭주로 체결·취소 확인 불가(실패). 레이트 조정자(2026-08) 배포 후 재시도 예정 (사용자 실행)
 2. 지정가 분할(Price Jitter) 미구현 — ADR-001 3장 파라미터(가격 간격·주문 개수) 결정 선행
 3. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 (거래일 캘린더는 `market-calendar.yml`로 해소됨)
 4. 연속손실 기록은 매도 체결 청크 단위 — 부분 체결 매도 시 라운드트립 집계로 전환 필요
    (R 사이징으로 수량 > 1 매도가 가능해져 발생 확률 상승)
+5. **체결누락 뿌리 미수정** — 모의 체결조회(VTTC8001R)가 실제 체결을 빈 응답으로 놓치는 원인은
+   아직 근본 수정 전. 현재는 ①(취소불가=체결) 자동복구 + 주기적 재동기화로 **복구는 됨**(≈10분 지연).
+   뿌리 진단·수정은 Phase 1.3 (`_workspace/1.3_design_fill-tracking-diagnosis.md`, 월요일 장중 진단)
 
 해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 · 부분 체결 매수 손절 미장착 (2026-07-20 — `OrderPartialFilledEvent` 신설, 부분 체결분도
   `StopLossArmer`가 장착. 릴리즈 검증용 `RunStreakRecorder`(연속 무중단 가동일 기록,
   `GET /api/trading/run-streak`)도 같은 날 추가)
+· 체결누락 브로커-DB desync 복구·레이트리밋 플래핑·낡은데이터 헛청산 (2026-08 — 위 "구현 완료된 부분"
+  운영 신뢰성 강화 참고. 단 체결누락 뿌리는 위 5번으로 잔존)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

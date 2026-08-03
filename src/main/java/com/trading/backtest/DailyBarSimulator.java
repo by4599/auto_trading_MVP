@@ -10,6 +10,7 @@ import com.trading.risk.RiskResult;
 import com.trading.risk.TrailingStopTracker;
 import com.trading.signal.Signal;
 import com.trading.signal.SignalDispatcher;
+import com.trading.strategy.RsiProperties;
 import com.trading.strategy.ScalpingProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,7 @@ public class DailyBarSimulator {
     private final TrailingStopTracker trailingStopTracker;
     private final MutableClock clock;
     private final ScalpingProperties scalpingProperties;
+    private final RsiProperties rsiProperties;
 
     public DailyBarSimulator(BacktestMarketDataService market,
                              SignalDispatcher signalDispatcher,
@@ -63,7 +65,8 @@ public class DailyBarSimulator {
                              BacktestOrderClient orderClient,
                              TrailingStopTracker trailingStopTracker,
                              MutableClock clock,
-                             ScalpingProperties scalpingProperties) {
+                             ScalpingProperties scalpingProperties,
+                             RsiProperties rsiProperties) {
         this.market = market;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -74,6 +77,7 @@ public class DailyBarSimulator {
         this.trailingStopTracker = trailingStopTracker;
         this.clock = clock;
         this.scalpingProperties = scalpingProperties;
+        this.rsiProperties = rsiProperties;
     }
 
     public void simulateDay(String stockCode, LocalDate date) {
@@ -85,6 +89,17 @@ public class DailyBarSimulator {
         boolean carriedAtOpen = heldPosition(stockCode) != null;
 
         checkCarriedStop(stockCode, date, bar);
+
+        if (rsiProperties.isEnabled()) {
+            // 평균회귀(RSI2, 전략3) 종가 진입 시퀀스 — 이월분 트레일 청산 먼저, 그다음 종가 진입.
+            // 당일 진입분은 종가에 사므로 당일 손절/트레일(장중 저가·고가는 진입 전 성립)을 판정하지
+            // 않는다: checkSameDayStop·checkTakeProfit은 호출하지 않고, checkTrailingStop은 진입 전
+            // 호출이라 당일 진입분(보유 없음)에는 no-op이다(이월분만 처리).
+            checkTrailingStop(stockCode, date, bar, carriedAtOpen);
+            checkMeanReversionEntry(stockCode, date, bar);
+            return;
+        }
+
         checkEntry(stockCode, date, bar);
         checkSameDayStop(stockCode, date, bar);
         checkTakeProfit(stockCode, date, bar);
@@ -127,6 +142,35 @@ public class DailyBarSimulator {
             return;
         }
         orderEngine.execute(buy);
+    }
+
+    // ── ③′ 평균회귀 종가 진입 (RSI2, 전략3=스캘핑 대체 — 2026-08) ─────────────────
+    //
+    // RSI(2) 과매도는 장중 고가에서는 성립하지 않고 종가에 확정되는 신호라, 돌파용 고가-발화·
+    // 이분탐색(resolveEntryPrice) 경로로는 잡히지 않는다. 그래서 시뮬 현재가를 당일 종가로 놓고
+    // 전략을 평가해, 발화하면 종가에 진입한다(Connors 관례 — 신호 확정 시점이 종가). 출구는
+    // 프레임워크(ATR 손절·다일 트레일링·최대보유)가 맡는다. rsiProperties.enabled일 때만 호출된다.
+
+    private void checkMeanReversionEntry(String stockCode, LocalDate date, Candle bar) {
+        if (heldPosition(stockCode) != null) return; // 이미 보유 — 중복 진입 없음(라이브 PendingOrderRule 대응)
+        clock.setTo(date, LocalTime.of(15, 0));
+
+        market.setSimPrice(stockCode, bar.getClose());
+        List<Signal> signals = signalDispatcher.dispatch(
+                stockCode, market.getRecentCandles(stockCode));
+        Signal buy = signals.stream().filter(Signal::isBuy).findFirst().orElse(null);
+        if (buy == null) return;
+
+        RiskResult result = riskEngine.check(buy, positionManager.snapshotAccount());
+        if (!result.isPass()) {
+            log.debug("[Sim] {} {} 평균회귀 매수 거부: {}", date, stockCode, result.getReason());
+            return;
+        }
+        orderEngine.execute(buy);
+        if (heldPosition(stockCode) != null) {
+            // 트레일링 baseline = 진입 종가 (당일 고가는 진입 전에 성립하므로 쓰지 않는다)
+            trailingStopTracker.updateHigh(stockCode, bar.getClose());
+        }
     }
 
     /**
