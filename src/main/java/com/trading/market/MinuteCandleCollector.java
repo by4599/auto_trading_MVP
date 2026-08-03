@@ -16,6 +16,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 당일 분봉 전방 축적 배치 (B-1).
@@ -33,6 +34,10 @@ import java.util.Set;
  * ⚠ 저장 전 (일자,시각) 중복 제거 필수 — KIS 페이지 경계에서 같은 분이 두 번 오는 날이
  * 있고(2026-07-20 전 종목 11:35 중복 실측), 중복 1건이면 유니크 제약으로 그 종목의
  * 저장 전체가 롤백돼 그날 축적이 통째로 0건이 된다.
+ *
+ * ⚠ 15:40 정시 배치를 놓친 날은 <b>영구 손실</b>이다(소급 조회 불가). 그래서 장 마감 후
+ * 매시 캐치업을 돌려 앱이 꺼져 있었거나 수집이 중단된 날을 그날 안에 구제한다.
+ * 종목별로 이미 저장된 당일 분봉은 건너뛰므로 반복 실행이 안전하다.
  */
 @Component
 @Profile("paper")
@@ -44,34 +49,68 @@ public class MinuteCandleCollector {
     private final CandleHistoryRepository repository;
     private final TradingUniverseService universeService;
     private final BacktestDataProperties backtestProperties;
+    private final MarketCalendarService marketCalendar;
     private final Clock clock;
+
+    /** 정시 배치와 캐치업이 겹쳐 같은 종목을 동시에 수취하지 않게 하는 문지기 */
+    private final AtomicBoolean collecting = new AtomicBoolean(false);
 
     public MinuteCandleCollector(CandleHistoryClient candleClient,
                                  CandleHistoryRepository repository,
                                  TradingUniverseService universeService,
                                  BacktestDataProperties backtestProperties,
+                                 MarketCalendarService marketCalendar,
                                  Clock clock) {
         this.candleClient = candleClient;
         this.repository = repository;
         this.universeService = universeService;
         this.backtestProperties = backtestProperties;
+        this.marketCalendar = marketCalendar;
         this.clock = clock;
     }
 
     /** 평일 15:40 KST — 타임컷(15:15) 이후 당일 장이 완결된 시점 */
     @Scheduled(cron = "0 40 15 * * MON-FRI", zone = "Asia/Seoul")
     public void collectToday() {
-        LocalDate today = LocalDate.now(clock);
-        int savedTotal = 0;
+        collect("정시");
+    }
 
-        for (String stockCode : collectionTargets()) {
-            try {
-                savedTotal += collectSymbol(stockCode, today);
-            } catch (Exception e) {
-                log.warn("[MinuteCollector] {} 수집 실패 — 다음 종목 계속: {}", stockCode, e.getMessage());
-            }
+    /**
+     * 장 마감 후 매시 45분 캐치업 — 15:40에 앱이 꺼져 있었거나 수집이 중단된 날을 구제한다.
+     * 당일 분봉은 소급 조회가 불가해 자정을 넘기면 영구 손실이므로, 그날 안에 여러 번 시도한다.
+     */
+    @Scheduled(cron = "0 45 16-22 * * MON-FRI", zone = "Asia/Seoul")
+    public void catchUpToday() {
+        collect("캐치업");
+    }
+
+    private void collect(String trigger) {
+        LocalDate today = LocalDate.now(clock);
+        if (!marketCalendar.isTradingDay(today)) {
+            log.debug("[MinuteCollector] {} 휴장일 — {} 스킵", today, trigger);
+            return;
         }
-        log.info("[MinuteCollector] {} 분봉 축적 완료: {}건", today, savedTotal);
+        if (!collecting.compareAndSet(false, true)) {
+            log.info("[MinuteCollector] 수집이 이미 진행 중 — {} 트리거 스킵", trigger);
+            return;
+        }
+        try {
+            int savedTotal = 0;
+            int skipped = 0;
+            for (String stockCode : collectionTargets()) {
+                try {
+                    int saved = collectSymbol(stockCode, today);
+                    savedTotal += saved;
+                    if (saved == 0) skipped++;
+                } catch (Exception e) {
+                    log.warn("[MinuteCollector] {} 수집 실패 — 다음 종목 계속: {}", stockCode, e.getMessage());
+                }
+            }
+            log.info("[MinuteCollector] {} 분봉 축적 완료({}): {}건 저장, {}종목 기존재·스킵",
+                    today, trigger, savedTotal, skipped);
+        } finally {
+            collecting.set(false);
+        }
     }
 
     /** 매매 유니버스 ∪ 백테스트 대형주 표본 ∪ 이벤트 통계 KOSDAQ 표본 ∪ §14.1 후보 (순서 보존 중복 제거) */

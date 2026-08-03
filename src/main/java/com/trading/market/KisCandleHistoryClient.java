@@ -146,10 +146,13 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
         List<MinuteCandle> collected = new ArrayList<>();
         LocalTime cursor = LocalTime.of(15, 30);
         LocalTime marketOpen = LocalTime.of(9, 0);
+        int pagesUsed = 0;
+        boolean exhaustedPages = true;
 
         for (int page = 0; page < MAX_PAGES; page++) {
+            pagesUsed = page + 1;
             List<MinuteData> chunk = fetchMinuteWindow(stockCode, cursor);
-            if (chunk.isEmpty()) break;
+            if (chunk.isEmpty()) { exhaustedPages = false; break; }
 
             LocalTime oldest = null;
             for (MinuteData d : chunk) {
@@ -162,13 +165,21 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
                         parseDouble(d.low()), parseDouble(d.close()),
                         parseLong(d.volume())));
             }
-            if (oldest == null || !oldest.isAfter(marketOpen)) break;
+            if (oldest == null || !oldest.isAfter(marketOpen)) { exhaustedPages = false; break; }
             cursor = oldest.minusMinutes(1);
             throttle();
         }
 
         Collections.reverse(collected); // 과거→최신
-        log.info("[CandleHistory] 당일 분봉 수취: code={} → {}건", stockCode, collected.size());
+        long distinctMinutes = collected.stream().map(MinuteCandle::time).distinct().count();
+        log.info("[CandleHistory] 당일 분봉 수취: code={} → {}건 (고유 {}분, 페이지 {}회)",
+                stockCode, collected.size(), distinctMinutes, pagesUsed);
+        // 09:00~15:30 = 391분. 페이지 상한에 걸려 끝났다면 조기 종료 조건이 동작하지 않은 것이고,
+        // 그 경우 수취가 하루의 일부만 담았을 수 있다 — 조용히 반쪽 데이터를 쌓지 않도록 경고한다.
+        if (exhaustedPages) {
+            log.warn("[CandleHistory] ⚠ {} 분봉이 페이지 상한({})까지 소진됐다 — 종료 조건 미동작 의심, "
+                    + "당일 일부만 수취했을 수 있음", stockCode, MAX_PAGES);
+        }
         return List.copyOf(collected);
     }
 
