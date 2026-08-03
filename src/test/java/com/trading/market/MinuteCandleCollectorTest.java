@@ -43,6 +43,7 @@ class MinuteCandleCollectorTest {
         backtestProperties = new com.trading.backtest.BacktestDataProperties();
         backtestProperties.setSymbols(List.of());        // 기존 테스트는 유니버스만으로 구성
         backtestProperties.setEventThemes(Map.of());
+        backtestProperties.setCandidateSymbols(List.of()); // 기본 54종목이 대상에 섞이지 않게
         Clock fixed = Clock.fixed(
                 ZonedDateTime.of(TODAY.atTime(15, 40), KST).toInstant(), KST);
         sut = new MinuteCandleCollector(candleClient, repository, universeService,
@@ -90,13 +91,39 @@ class MinuteCandleCollectorTest {
     }
 
     @Test
-    @DisplayName("수집 대상 = 유니버스 ∪ 백테스트 표본 ∪ 이벤트 표본 (중복 제거)")
+    @DisplayName("수집 대상 = 유니버스 ∪ 백테스트 표본 ∪ 이벤트 표본 ∪ §14.1 후보 (중복 제거)")
     void collection_targets_merge_universe_and_backtest_samples() {
         stubUniverse("005930");
         backtestProperties.setSymbols(List.of("005930", "000660"));   // 005930 중복
         backtestProperties.setEventThemes(Map.of("battery", List.of("247540")));
+        backtestProperties.setCandidateSymbols(List.of("000660", "035420")); // 000660 중복
 
-        assertThat(sut.collectionTargets()).containsExactly("005930", "000660", "247540");
+        assertThat(sut.collectionTargets())
+                .containsExactly("005930", "000660", "247540", "035420");
+    }
+
+    @Test
+    @DisplayName("수취분에 같은 (일자,시각) 분봉이 두 번 오면 첫 값만 저장한다 — 2026-07-20 전 종목 롤백 재발 방지")
+    void collectToday_deduplicatesSameMinute() {
+        stubUniverse("005930");
+        when(repository.countByStockCodeAndTimeframeAndCandleDate(
+                eq("005930"), eq(Timeframe.MINUTE), eq(TODAY))).thenReturn(0L);
+        when(candleClient.fetchTodayMinuteCandles("005930")).thenReturn(List.of(
+                new MinuteCandle(TODAY, LocalTime.of(11, 34), 100, 101, 99, 100, 500),
+                new MinuteCandle(TODAY, LocalTime.of(11, 35), 101, 102, 100, 101, 600),
+                new MinuteCandle(TODAY, LocalTime.of(11, 35), 999, 999, 999, 999, 1), // 페이지 경계 중복
+                new MinuteCandle(TODAY, LocalTime.of(11, 36), 102, 103, 101, 102, 700)
+        ));
+
+        sut.collectToday();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CandleHistory>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository).saveAll(captor.capture());
+        assertThat(captor.getValue()).hasSize(3); // 11:34, 11:35(첫 값), 11:36
+        assertThat(captor.getValue().stream()
+                .filter(r -> LocalTime.of(11, 35).equals(r.getCandleTime()))
+                .count()).isEqualTo(1);
     }
 
     @Test
