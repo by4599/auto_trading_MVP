@@ -296,6 +296,20 @@ public class BacktestOrchestrator implements CommandLineRunner {
             runDonchianCostLab(cs, properties.getStressFrom(), properties.getStressTo());
             return;
         }
+        // §15.5 후속 ①: MDD가 유일 병목이므로 약세장 창에서 사이징을 직접 재스윕 (SZ0=G1 재현 앵커)
+        if ("donchian-stress-sizing".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-stress-sizing", properties.getStressFrom(), properties.getStressTo());
+            runDonchianStressSizing(cs, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+        // §15.5 후속 ②: 종목 추세 기간 96~192 지도 — 144가 평지의 일부인지 외딴 봉우리인지
+        if ("donchian-trend-map".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-trend-map", properties.getStressFrom(), properties.getStressTo());
+            runDonchianTrendMap(cs, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
 
         // Regime Sens (BACKTEST-DESIGN §14.4 민감도) — regime-lab의 승자 MA120 ±20%(MA96·MA144)
         // 단일 파라미터 민감도. 고정 조건·창은 regime-lab과 동일, MA 기간만 스윕한다.
@@ -1046,6 +1060,86 @@ public class BacktestOrchestrator implements CommandLineRunner {
         log.info("[DonchianSens] §4 민감도: D1~D4가 전부 완만(PF·MDD가 D0 근처)이면 강건. "
                 + "한 칸만 좋고 인접이 무너지면 과최적화 지문");
         log.info("[DonchianSens] 리포트: {}", report.toAbsolutePath());
+    }
+
+    /**
+     * §15.5 후속 ① — 약세장 창 사이징 재스윕 (지수 MA120 ON). 모든 불합격의 단일 원인이
+     * MDD 한도 근접(여유 0.6%p)이므로 1R 비율을 낮춰 여유를 벌 수 있는지 직접 확인한다.
+     * SZ0은 §15.2 G1(1255건·PF 1.90·MDD 14.4%)을 재현해야 하는 회귀 앵커다.
+     * ⚠ §15.1에서 사이징 효과가 비단조(슬롯 경합으로 체결 집합 변동)임이 관측됐다 — 기대는 낮게.
+     */
+    private record StressSizingProfile(String name, double riskFraction, int maxPositions) {}
+
+    private static final List<StressSizingProfile> STRESS_SIZING_PROFILES = List.of(
+            new StressSizingProfile("SZ0 0.5R·동시5 (G1 재현 앵커)", 0.005,  5),
+            new StressSizingProfile("SZ1 0.35R·동시5",              0.0035, 5),
+            new StressSizingProfile("SZ2 0.25R·동시5",              0.0025, 5),
+            new StressSizingProfile("SZ3 0.35R·동시3",              0.0035, 3),
+            new StressSizingProfile("SZ4 0.25R·동시3",              0.0025, 3));
+
+    private void runDonchianStressSizing(List<String> symbols, LocalDate from, LocalDate to) {
+        applyDonchianFixedWithIndexFilter();
+        log.info("[DonchianSizing] ══ 약세장 창 사이징 재스윕 (지수 MA120 ON, §15.5 후속①) ══");
+        log.info("[DonchianSizing] 기간 {}~{} · 종목 {}개 · 프로필 {}개 — SZ0가 §15.2 G1을 재현 못 하면 무효",
+                from, to, symbols.size(), STRESS_SIZING_PROFILES.size());
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (StressSizingProfile p : STRESS_SIZING_PROFILES) {
+            riskLimits.setRiskFractionPerTrade(p.riskFraction());
+            riskLimits.setMaxPositionCount(p.maxPositions());
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            log.info("[DonchianSizing] {}: {} → {}", p.name(),
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(p.name(), result, judgment));
+        }
+        riskLimits.setRiskFractionPerTrade(com.trading.risk.RiskLimits.RISK_FRACTION_PER_TRADE);
+        riskLimits.setMaxPositionCount(com.trading.risk.RiskLimits.MAX_POSITION_COUNT);
+        restoreRegimeDefaults();
+
+        Path report = reportWriter.writeRiskLabReport(
+                DONCHIAN_LABEL + " · 약세장 사이징 재스윕", DONCHIAN_SLUG + "-SIZING",
+                symbols, from, to, rows, false);
+        log.info("[DonchianSizing] 리포트: {}", report.toAbsolutePath());
+    }
+
+    /**
+     * §15.5 후속 ② — 종목 추세 기간 지도 (96~192, 지수 MA120 ON·RR1 고정). §15.3에서 96은 붕괴
+     * (MDD 22.9%)·144가 최선(10.6%)이었다 — 144 주변이 평지인지 봉우리인지 본다. T0·T1·T2는
+     * §15.3 D3·D0·D4의 재현 앵커. 평지로 확인되기 전에는 기준값(120)을 바꾸지 않는다(커브 피팅 방지).
+     */
+    private static final List<Integer> TREND_MAP_PERIODS = List.of(96, 120, 144, 168, 192);
+
+    private void runDonchianTrendMap(List<String> symbols, LocalDate from, LocalDate to) {
+        applyDonchianFixedWithIndexFilter();
+        log.info("[DonchianTrendMap] ══ 종목 추세 기간 지도 (지수 MA120 ON, §15.5 후속②) ══");
+        log.info("[DonchianTrendMap] 기간 {}~{} · 종목 {}개 · 스윕 {} — 96·120·144는 §15.3 재현 앵커",
+                from, to, symbols.size(), TREND_MAP_PERIODS);
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (int i = 0; i < TREND_MAP_PERIODS.size(); i++) {
+            int period = TREND_MAP_PERIODS.get(i);
+            donchianProperties.setTrendMaPeriod(period);
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            String name = String.format("T%d 추세%d일", i, period);
+            log.info("[DonchianTrendMap] {}: {} → {}", name,
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(name, result, judgment));
+        }
+        donchianProperties.setTrendMaPeriod(120);
+        restoreRegimeDefaults();
+
+        Path report = reportWriter.writeRiskLabReport(
+                DONCHIAN_LABEL + " · 추세 기간 지도", DONCHIAN_SLUG + "-TRENDMAP",
+                symbols, from, to, rows, false);
+        log.info("[DonchianTrendMap] 리포트: {}", report.toAbsolutePath());
     }
 
     /** Step 3 — 돈치안 왕복 비용 0.41→0.80% 민감도 (약세장 창, 지수 MA120 ON) */
