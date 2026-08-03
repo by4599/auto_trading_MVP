@@ -59,6 +59,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private final ExitLabProperties exitLab;
     private final BacktestCostProperties costProperties;
     private final LowVolCrashBacktester lowVolCrashBacktester;
+    private final MinuteCandleImporter minuteCandleImporter;
 
     public BacktestOrchestrator(CandleBackfillService backfillService,
                                 BacktestRunner runner,
@@ -78,7 +79,8 @@ public class BacktestOrchestrator implements CommandLineRunner {
                                 RiskLimitsProperties riskLimits,
                                 ExitLabProperties exitLab,
                                 BacktestCostProperties costProperties,
-                                LowVolCrashBacktester lowVolCrashBacktester) {
+                                LowVolCrashBacktester lowVolCrashBacktester,
+                                MinuteCandleImporter minuteCandleImporter) {
         this.backfillService = backfillService;
         this.runner = runner;
         this.walkForwardEngine = walkForwardEngine;
@@ -98,6 +100,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         this.exitLab = exitLab;
         this.costProperties = costProperties;
         this.lowVolCrashBacktester = lowVolCrashBacktester;
+        this.minuteCandleImporter = minuteCandleImporter;
     }
 
     @Override
@@ -125,6 +128,13 @@ public class BacktestOrchestrator implements CommandLineRunner {
         // 이벤트 모드(events)는 별도 표본 로직(EventBacktestPipeline)을 쓰므로 영향 없다.
         List<String> symbols = liquidityScreener.filter(
                 backfillService.targetSymbols(), to, properties.getMinDailyTradingValue());
+
+        // 분봉 이관 (2026-08-04) — 운영 DB에 쌓인 분봉을 backtest-db로 옮긴다. 백필·재생과
+        // 무관한 데이터 이동이므로 단독 모드로 두고, 끝나면 바로 종료한다.
+        if ("import-minutes".equalsIgnoreCase(properties.getMode())) {
+            minuteCandleImporter.importAll();
+            return;
+        }
 
         if ("events".equalsIgnoreCase(properties.getMode())) {
             // B-4: 공시 이벤트 유형별 반응 통계 (--backtest.mode=events)
