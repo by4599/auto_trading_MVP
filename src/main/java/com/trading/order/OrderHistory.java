@@ -91,6 +91,23 @@ public class OrderHistory {
         return h;
     }
 
+    /**
+     * 접수되지 못한 주문 시도 기록 (터미널). 예전에는 실패 시 아무것도 남기지 않아
+     * 시도 자체가 장부에서 사라졌고, 그래서 같은 매수를 몇 분 간격으로 반복했다
+     * (2026-08-04: 034020 11분간 7회). 감사·재시도 억제의 근거로 남긴다.
+     */
+    public static OrderHistory failed(String stockCode, OrderSide side, int quantity,
+                                      StrategyBucket bucket) {
+        OrderHistory h = new OrderHistory();
+        h.stockCode   = stockCode;
+        h.side        = side;
+        h.quantity    = quantity;
+        h.status      = OrderStatus.FAILED;
+        h.requestedAt = LocalDateTime.now();
+        h.bucket      = bucket;
+        return h;
+    }
+
     // ── 상태 전이 ─────────────────────────────────────────────────────────────
 
     /** 일부 체결. totalFilledQty = KIS 응답의 tot_ccld_qty (누적값). */
