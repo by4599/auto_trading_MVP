@@ -317,8 +317,10 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
      `KisOrderCancelClient.classify`)
   ② **토큰 만료 인식** — KIS가 만료를 HTTP 500(EGW00123)으로 주는 것을 401과 동일 취급해 즉시 재발급 (`KisApiClient`)
   ③ **텔레그램 장중 전용** — 거래일 09:00~15:30에만 전송, 장외는 로그만 (`TelegramNotifier` + `MarketCalendarService`)
-  ④ **KIS 전역 레이트 조정자** `KisRateLimiter` — 모든 호출을 초당 한도(모의 2/실전 20,
-     `kis.rate-limit-per-sec`)로 균등 배분해 EGW00201·SAFE_MODE 플래핑 근절
+  ④ **KIS 전역 레이트 조정자** `KisRateLimiter` — 모든 호출을 초당 한도로 균등 배분해
+     EGW00201·SAFE_MODE 플래핑 근절. **한도는 계좌 단위: 모의 1건/초 · 실전 18건/초 ·
+     토큰발급 1건/초** (KIS 공지 "API 호출 유량 안내" 2026.04.20 기준, 2026-08-04 확인 —
+     예전 값 2/20에서 하향됐다). `kis.rate-limit-per-sec`, paper yml에 1로 명시
   ⑤ **주기적 안전 재동기화** — `ShadowPortfolioReconciler.reconcile`이 2주기 지속+신선값+장중일 때만
      브로커 기준 자동 보정, 첫 감지는 알림만 (§5.3 개정)
   ⑥ **데이터 품질 게이트** — `RiskMonitor`·`StopLossMonitor`는 낡은(폴백) 스냅샷이면 청산/손절 판정
@@ -335,6 +337,13 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
 5. **체결누락 뿌리 미수정** — 모의 체결조회(VTTC8001R)가 실제 체결을 빈 응답으로 놓치는 원인은
    아직 근본 수정 전. 현재는 ①(취소불가=체결) 자동복구 + 주기적 재동기화로 **복구는 됨**(≈10분 지연).
    뿌리 진단·수정은 Phase 1.3 (`_workspace/1.3_design_fill-tracking-diagnosis.md`, 월요일 장중 진단)
+
+6. **자동 보정으로 생성된 포지션에 손절선이 없다** (2026-08-04 발견, 미수정) —
+   `ShadowPortfolioReconciler.correctFromBroker()`가 브로커 기준으로 포지션을 새로 만들 때
+   `StopLossArmer` 경로를 타지 않아 `stopPrice=null`로 남는다. 실측: 034020 13주가 무방비
+   (오늘 "신규 생성" 보정 3회). 어제 보정을 알림→자동으로 승격하면서 상시 노출됨.
+   ⚠ 계좌 단위 룰(일일손실·MDD)만 남으므로 종목 급락에 무방비 — 주문 실패 연쇄(2026-08-04
+   레이트 한도 오설정)가 보정을 자주 부르면 노출이 커진다.
 
 해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 · 부분 체결 매수 손절 미장착 (2026-07-20 — `OrderPartialFilledEvent` 신설, 부분 체결분도
