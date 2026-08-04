@@ -8,6 +8,10 @@ kis:
   appkey: ${KIS_APPKEY}
   secretkey: ${KIS_SECRETKEY}
   account-no: ${KIS_ACCOUNT_NO}   # 예) 50000000-01
+  # KIS 공지 "API 호출 유량 안내"(2026.04.20 기준, 2026-08-04 확인): 모의투자 1건/초.
+  # 계좌 단위 제한이라 매매·잔고·체결·대시보드 호출을 합쳐 이 한도를 넘으면 안 된다.
+  # 실전 전환 시 18 (기존 20에서 하향됨).
+  rate-limit-per-sec: 1
 
 telegram:
   bot-token: ${TELEGRAM_BOT_TOKEN:}   # 비워두면 알림 스킵 (개발 환경)
