@@ -60,8 +60,24 @@ class ShadowPortfolioReconcilerTest {
 
     private ShadowPortfolioReconciler sut(MarketCalendarService cal) {
         return new ShadowPortfolioReconciler(statusManager, liquidationService,
-                balanceClient, positionRepository, brokerageClient, notifier, cal);
+                balanceClient, positionRepository, brokerageClient, notifier, cal, stopLossArmer());
     }
+
+    /** StopLossArmer는 구체 클래스 — 인터페이스(MarketDataService·PositionRepository)만 목으로 실조립 */
+    private com.trading.risk.StopLossArmer stopLossArmer() {
+        com.trading.market.MarketDataService marketData = mock(com.trading.market.MarketDataService.class);
+        when(marketData.getDailyCandles(anyString(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(atrCandles);
+        return new com.trading.risk.StopLossArmer(marketData, new com.trading.market.AtrCalculator(),
+                positionRepository, new com.trading.risk.RiskLimitsProperties());
+    }
+
+    /** ATR 14 산출용 일봉 15개 — TR=10 고정이라 ATR=10, 손절폭 = 10 × 1.5 = 15 */
+    private final List<com.trading.market.Candle> atrCandles = java.util.stream.IntStream.range(0, 15)
+            .mapToObj(i -> new com.trading.market.Candle(
+                    LocalDate.of(2026, 7, 1).plusDays(i), 100, 105, 95, 100, 1000))
+            .map(c -> (com.trading.market.Candle) c)
+            .toList();
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 2026-07-15(수) 평일 + 지정 시각 고정 캘린더 */
@@ -213,6 +229,43 @@ class ShadowPortfolioReconcilerTest {
         verify(positionRepository).save(org.mockito.ArgumentMatchers.argThat(
                 p -> p.getStockCode().equals("005930") && p.getQuantity() == 7 && p.getAveragePrice() == 68_000));
         verify(notifier).sendCritical(anyString());
+    }
+
+    @Test
+    @DisplayName("보정으로 만든 포지션에도 손절선이 장착된다 — 무방비 보유 방지(2026-08-04 실측 결함)")
+    void correction_arms_stop_loss_on_created_position() {
+        // 브로커에만 있는 보유분 → 신규 생성. 생성분이 findAll에 보이도록 저장을 반영한다.
+        List<Position> store = new java.util.ArrayList<>();
+        when(positionRepository.findAll()).thenAnswer(inv -> List.copyOf(store));
+        when(positionRepository.save(org.mockito.ArgumentMatchers.any(Position.class)))
+                .thenAnswer(inv -> { Position p = inv.getArgument(0);
+                                     if (!store.contains(p)) store.add(p); return p; });
+        when(positionRepository.findByStockCode("005930"))
+                .thenAnswer(inv -> store.stream().filter(p -> p.getStockCode().equals("005930")).findFirst());
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
+
+        sut().correctFromBroker();
+
+        Position created = store.stream().filter(p -> p.getStockCode().equals("005930")).findFirst().orElseThrow();
+        // 평균단가 68,000 − ATR(10) × 1.5 = 67,985
+        assertThat(created.getStopPrice()).isNotNull();
+        assertThat(created.getStopPrice()).isEqualTo(67_985.0);
+    }
+
+    @Test
+    @DisplayName("이미 손절선이 있으면 건드리지 않는다 — 임의로 옮기면 방어선이 느슨해질 수 있으므로")
+    void correction_keeps_existing_stop_loss() {
+        Position held = dbHolding("005930", 7, 68_000);
+        held.armStopLoss(60_000);
+        when(positionRepository.findAll()).thenReturn(List.of(held));
+        when(positionRepository.findByStockCode("005930")).thenReturn(java.util.Optional.of(held));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
+
+        sut().correctFromBroker();
+
+        assertThat(held.getStopPrice()).isEqualTo(60_000);
     }
 
     @Test

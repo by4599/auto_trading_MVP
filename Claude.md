@@ -338,19 +338,16 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
    아직 근본 수정 전. 현재는 ①(취소불가=체결) 자동복구 + 주기적 재동기화로 **복구는 됨**(≈10분 지연).
    뿌리 진단·수정은 Phase 1.3 (`_workspace/1.3_design_fill-tracking-diagnosis.md`, 월요일 장중 진단)
 
-6. **자동 보정으로 생성된 포지션에 손절선이 없다** (2026-08-04 발견, 미수정) —
-   `ShadowPortfolioReconciler.correctFromBroker()`가 브로커 기준으로 포지션을 새로 만들 때
-   `StopLossArmer` 경로를 타지 않아 `stopPrice=null`로 남는다. 실측: 034020 13주가 무방비
-   (오늘 "신규 생성" 보정 3회). 어제 보정을 알림→자동으로 승격하면서 상시 노출됨.
-   ⚠ 계좌 단위 룰(일일손실·MDD)만 남으므로 종목 급락에 무방비 — 주문 실패 연쇄(2026-08-04
-   레이트 한도 오설정)가 보정을 자주 부르면 노출이 커진다.
-
 해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 · 부분 체결 매수 손절 미장착 (2026-07-20 — `OrderPartialFilledEvent` 신설, 부분 체결분도
   `StopLossArmer`가 장착. 릴리즈 검증용 `RunStreakRecorder`(연속 무중단 가동일 기록,
   `GET /api/trading/run-streak`)도 같은 날 추가)
 · 체결누락 브로커-DB desync 복구·레이트리밋 플래핑·낡은데이터 헛청산 (2026-08 — 위 "구현 완료된 부분"
   운영 신뢰성 강화 참고. 단 체결누락 뿌리는 위 5번으로 잔존)
+· **보정 포지션 손절선 누락** (2026-08-04 — `ShadowPortfolioReconciler.armMissingStops()`:
+  브로커 기준 보정은 체결 이벤트가 없어 `StopLossArmer` 경로를 안 타 `stopPrice=null`로 남았다
+  (실측: 034020 13주 무방비, 그날 신규 생성 3회). 이제 대조할 때마다 "보유분은 반드시 손절선을
+  갖는다"를 불변식으로 강제한다 — 기준가는 브로커 평균단가, 기존 손절선은 건드리지 않는다)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

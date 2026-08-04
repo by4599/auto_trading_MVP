@@ -4,6 +4,7 @@ import com.trading.NotificationService;
 import com.trading.market.MarketCalendarService;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
+import com.trading.risk.StopLossArmer;
 import com.trading.risk.TradingMode;
 import com.trading.risk.TradingStatusManager;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ public class ShadowPortfolioReconciler {
     private final BrokerageApiClient brokerageClient;
     private final NotificationService notifier;
     private final MarketCalendarService marketCalendar;
+    private final StopLossArmer stopLossArmer;
 
     /** 직전 주기에 관측된 불일치 종목 집합 — 2주기 연속(약 20분) 지속 시에만 자동 보정한다. */
     private volatile Set<String> previousMismatchStocks = Set.of();
@@ -51,7 +53,8 @@ public class ShadowPortfolioReconciler {
                                       PositionRepository positionRepository,
                                       BrokerageApiClient brokerageClient,
                                       NotificationService notifier,
-                                      MarketCalendarService marketCalendar) {
+                                      MarketCalendarService marketCalendar,
+                                      StopLossArmer stopLossArmer) {
         this.statusManager = statusManager;
         this.liquidationService = liquidationService;
         this.balanceClient = balanceClient;
@@ -59,6 +62,7 @@ public class ShadowPortfolioReconciler {
         this.brokerageClient = brokerageClient;
         this.notifier = notifier;
         this.marketCalendar = marketCalendar;
+        this.stopLossArmer = stopLossArmer;
     }
 
     /**
@@ -150,12 +154,39 @@ public class ShadowPortfolioReconciler {
             }
         }
 
+        armMissingStops();
+
         if (corrections.isEmpty()) {
             log.info("[Reconciler] 브로커 대조 완료 — 불일치 없음");
         } else {
             log.warn("[Reconciler] 브로커 기준 보정 {}건: {}", corrections.size(), corrections);
             notifier.sendCritical("🔧 [Reconciler] 브로커 기준 포지션 보정:\n"
                     + String.join("\n", corrections));
+        }
+    }
+
+    /**
+     * 보유 중인데 손절선이 없는 포지션에 손절선을 장착한다 — 보정 경로의 구멍을 메운다.
+     *
+     * {@link #correctFromBroker()}는 브로커 잔고를 그대로 옮겨 담을 뿐이라 체결 이벤트가 없고,
+     * 따라서 {@code StopLossArmer}의 이벤트 경로를 타지 않는다. 그 결과 보정으로 만들어진
+     * 포지션은 손절선 없이 남았다(2026-08-04 실측: 034020 13주 무방비, 그날 "신규 생성" 3회).
+     * 보정을 알림→자동으로 승격하면서 이 구멍이 상시 노출됐으므로, 대조할 때마다
+     * "보유분은 반드시 손절선을 갖는다"를 불변식으로 강제한다.
+     *
+     * 기준가는 브로커 평균단가다 — 체결가를 알 수 없는 경로이므로 실제 취득원가에 가장 가깝다.
+     * 이미 손절선이 있으면 건드리지 않는다(임의로 옮기면 기존 방어선이 느슨해질 수 있다).
+     */
+    private void armMissingStops() {
+        List<Position> unprotected = positionRepository.findAll().stream()
+                .filter(p -> p.getQuantity() > 0 && p.getStopPrice() == null)
+                .toList();
+        if (unprotected.isEmpty()) return;
+
+        log.warn("[Reconciler] 손절선 없는 보유분 {}건 — 브로커 평균단가 기준으로 장착 시도: {}",
+                unprotected.size(), unprotected.stream().map(Position::getStockCode).toList());
+        for (Position pos : unprotected) {
+            stopLossArmer.arm(pos.getStockCode(), pos.getAveragePrice());
         }
     }
 

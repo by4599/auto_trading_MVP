@@ -67,7 +67,11 @@ public class StopLossArmer {
         arm(event.stockCode(), event.avgPrice());
     }
 
-    void arm(String stockCode, double fillPrice) {
+    /**
+     * @param fillPrice 손절선 기준가. 체결 경로에서는 실제 체결가, 브로커 기준 보정 경로에서는
+     *                  브로커가 알려준 평균단가를 넣는다.
+     */
+    public void arm(String stockCode, double fillPrice) {
         try {
             OptionalDouble atrOpt = atrCalculator.atr(
                     marketDataService.getDailyCandles(stockCode, AtrCalculator.PERIOD + 1));
