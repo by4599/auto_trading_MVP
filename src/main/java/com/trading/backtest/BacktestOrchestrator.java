@@ -327,6 +327,16 @@ public class BacktestOrchestrator implements CommandLineRunner {
             runDonchianStressSizing(cs, properties.getStressFrom(), properties.getStressTo());
             return;
         }
+        // B동(당일 단타) 진입 조건 A/B (2026-08-04, ADR-001 개정 결정 2) — VB 진입 + 현행 paper
+        // 출구(ATR1.5·15:15 타임컷·트레일 arm3%/trail1%)·사이징(1.0R·동시5)을 그대로 고정하고
+        // 진입 필터만 스윕한다. 이긴 조합이 없으면 B동 존치 자체를 재검토한다.
+        if ("vb-filter-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "vb-filter-lab", properties.getStressFrom(), properties.getStressTo());
+            runVbFilterLab(cs, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+
         // §15.5 후속 ②: 종목 추세 기간 96~192 지도 — 144가 평지의 일부인지 외딴 봉우리인지
         if ("donchian-trend-map".equalsIgnoreCase(properties.getMode())) {
             List<String> cs = prepareCandidateUniverse(
@@ -1214,6 +1224,63 @@ public class BacktestOrchestrator implements CommandLineRunner {
         Path report = reportWriter.writeCostLabReport(
                 sizing.label(), sizing.slug(), symbols, from, to, rows);
         log.info("[DonchianCost] 리포트: {}", report.toAbsolutePath());
+    }
+
+    // ── B동 진입 조건 A/B (ADR-001 개정 결정 2) ──────────────────────────────────
+    //
+    // 진입=VB, 출구·사이징은 <b>지금 모의투자가 쓰는 값</b>으로 고정한다 — 이 실험의 질문은
+    // "출구를 바꾸면 나아지나"(그건 §14에서 이미 답함)가 아니라 "같은 방식으로 돌리되 살 종목을
+    // 더 가려내면 나아지나"이기 때문이다. B0(필터 OFF)는 현행 B동 자체의 약세장 성적이다.
+
+    private record VbFilterProfile(String name, boolean indexTrend, int maPeriod, boolean volumeConfirm) {}
+
+    private static final List<VbFilterProfile> VB_FILTER_PROFILES = List.of(
+            new VbFilterProfile("B0 필터OFF (현행 B동)",      false, 120, false),
+            new VbFilterProfile("B1 지수 MA120 이탈 시 금지",  true,  120, false),
+            new VbFilterProfile("B2 거래량 확인",              false, 120, true),
+            new VbFilterProfile("B3 지수MA120 + 거래량",       true,  120, true));
+
+    private static final String VB_LAB_LABEL = "VB 진입 + 현행 당일 출구(ATR1.5·타임컷·트레일1%) + 1.0R";
+    private static final String VB_LAB_SLUG  = "VB-DAYTRADE-FILTERS";
+
+    private void runVbFilterLab(List<String> symbols, LocalDate from, LocalDate to) {
+        strategyParameters.setEnabled(true);
+        maBreakoutProperties.setEnabled(false);
+        scalpingProperties.setEnabled(false);
+        donchianProperties.setEnabled(false);
+        rsiProperties.setEnabled(false);
+        riskLimits.setRiskFractionPerTrade(com.trading.risk.RiskLimits.RISK_FRACTION_PER_TRADE);
+        riskLimits.setMaxPositionCount(com.trading.risk.RiskLimits.MAX_POSITION_COUNT);
+
+        int windowCount = WalkForwardEngine.windows(from, to).size();
+        log.info("[VbFilterLab] ══ B동 진입 조건 A/B (약세장 창, ADR-001 개정 결정 2) ══");
+        log.info("[VbFilterLab] 고정: {} · 기간 {}~{} · 윈도우 {}개 · 종목 {}개",
+                VB_LAB_LABEL, from, to, windowCount, symbols.size());
+        log.info("[VbFilterLab] B0는 현행 B동의 약세장 성적 그 자체 — 이긴 필터가 없으면 존치를 재검토한다");
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (VbFilterProfile p : VB_FILTER_PROFILES) {
+            // 현행 paper 출구: ATR1.5 · 15:15 타임컷 ON · 다일 보유 없음 · 트레일 arm3%/trail1%
+            applyExitProfile(new ExitProfile("B동현행", 1.5, true, 0, true, 0.03, 0.01));
+            filters.getIndexTrend().setEnabled(p.indexTrend());
+            filters.getIndexTrend().setMaPeriod(p.maPeriod());
+            filters.getVolumeConfirm().setEnabled(p.volumeConfirm());
+
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), VB_LAB_LABEL, VB_LAB_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            log.info("[VbFilterLab] {}: {} → {}", p.name(),
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(p.name(), result, judgment));
+        }
+        restoreRegimeDefaults();
+        filters.getVolumeConfirm().setEnabled(false);
+
+        Path report = reportWriter.writeRiskLabReport(
+                VB_LAB_LABEL, VB_LAB_SLUG, symbols, from, to, rows, false);
+        log.info("[VbFilterLab] 리포트: {}", report.toAbsolutePath());
     }
 
     private static String pct(double rate) {
