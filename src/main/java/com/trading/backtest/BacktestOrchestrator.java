@@ -337,6 +337,16 @@ public class BacktestOrchestrator implements CommandLineRunner {
             return;
         }
 
+        // B동 비용 하향 스윕 (2026-08-05) — "왜 유명한 기법이 마이너스인가"의 답을 찾는다.
+        // 기대값은 1차적으로 (총이익률 − 왕복비용)이므로 비용을 낮춰가며 부호가 뒤집히는
+        // 지점을 본다. 슬리피지 0에서도 수수료 0.03% + 매도 제세 0.18% = 0.21%가 법정 바닥이다.
+        if ("vb-cost-lab".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "vb-cost-lab", properties.getStressFrom(), properties.getStressTo());
+            runVbCostLab(cs, properties.getStressFrom(), properties.getStressTo());
+            return;
+        }
+
         // §15.5 후속 ②: 종목 추세 기간 96~192 지도 — 144가 평지의 일부인지 외딴 봉우리인지
         if ("donchian-trend-map".equalsIgnoreCase(properties.getMode())) {
             List<String> cs = prepareCandidateUniverse(
@@ -1281,6 +1291,52 @@ public class BacktestOrchestrator implements CommandLineRunner {
         Path report = reportWriter.writeRiskLabReport(
                 VB_LAB_LABEL, VB_LAB_SLUG, symbols, from, to, rows, false);
         log.info("[VbFilterLab] 리포트: {}", report.toAbsolutePath());
+    }
+
+    /**
+     * B동 비용 하향 스윕 — VB의 마이너스가 "기법이 틀려서"인지 "마찰이 먹어서"인지 가른다.
+     *
+     * 슬리피지만 낮출 수 있다(수수료·매도 제세는 법정 확정값). 0.21%가 물리적 바닥이며,
+     * 지수선물은 매도 제세가 없어 왕복 0.02% 수준 — <b>이 모델로는 표현조차 안 되는 영역</b>이다.
+     */
+    private static final List<Double> VB_COST_SWEEP = List.of(0.0041, 0.0031, 0.0025, 0.0021);
+
+    private void runVbCostLab(List<String> symbols, LocalDate from, LocalDate to) {
+        strategyParameters.setEnabled(true);
+        maBreakoutProperties.setEnabled(false);
+        scalpingProperties.setEnabled(false);
+        donchianProperties.setEnabled(false);
+        rsiProperties.setEnabled(false);
+        riskLimits.setRiskFractionPerTrade(com.trading.risk.RiskLimits.RISK_FRACTION_PER_TRADE);
+        riskLimits.setMaxPositionCount(com.trading.risk.RiskLimits.MAX_POSITION_COUNT);
+
+        log.info("[VbCostLab] ══ B동 왕복 비용 하향 스윕 (약세장 24창, 종목 {}개) ══", symbols.size());
+        log.info("[VbCostLab] 고정: {} · 법정 바닥 0.21%(수수료 0.03 + 매도 제세 0.18)", VB_LAB_LABEL);
+
+        List<BacktestReportWriter.ExitLabRow> rows = new ArrayList<>();
+        for (double cost : VB_COST_SWEEP) {
+            applyExitProfile(new ExitProfile("B동현행", 1.5, true, 0, true, 0.03, 0.01));
+            costProperties.setRoundTripCost(cost);
+            BacktestReportWriter.AppliedCost applied = new BacktestReportWriter.AppliedCost(
+                    costProperties.getSlippageRate(), costProperties.roundTripCost());
+
+            WalkForwardEngine.WalkForwardResult result =
+                    walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
+            BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
+                    symbols, from, to, Map.of(), result, List.of(), VB_LAB_LABEL, VB_LAB_SLUG);
+            BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
+            String name = String.format("왕복 %s (슬리피지 편도 %s)",
+                    pct(cost), pct(applied.slippageRate()));
+            log.info("[VbCostLab] {}: {} → {}", name,
+                    result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
+            rows.add(new BacktestReportWriter.ExitLabRow(name, result, judgment, applied));
+        }
+        costProperties.resetDefaults();
+        restoreRegimeDefaults();
+
+        Path report = reportWriter.writeCostLabReport(
+                VB_LAB_LABEL + " · 비용 하향", VB_LAB_SLUG + "-COSTDOWN", symbols, from, to, rows);
+        log.info("[VbCostLab] 리포트: {}", report.toAbsolutePath());
     }
 
     private static String pct(double rate) {
