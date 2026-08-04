@@ -297,13 +297,27 @@ public class BacktestOrchestrator implements CommandLineRunner {
         if ("donchian-sens".equalsIgnoreCase(properties.getMode())) {
             List<String> cs = prepareCandidateUniverse(
                     "donchian-sens", properties.getStressFrom(), properties.getStressTo());
-            runDonchianSensitivity(cs, properties.getStressFrom(), properties.getStressTo());
+            runDonchianSensitivity(cs, properties.getStressFrom(), properties.getStressTo(), SIZING_RR1);
             return;
         }
         if ("donchian-cost-lab".equalsIgnoreCase(properties.getMode())) {
             List<String> cs = prepareCandidateUniverse(
                     "donchian-cost-lab", properties.getStressFrom(), properties.getStressTo());
-            runDonchianCostLab(cs, properties.getStressFrom(), properties.getStressTo());
+            runDonchianCostLab(cs, properties.getStressFrom(), properties.getStressTo(), SIZING_RR1);
+            return;
+        }
+        // §15.6 결론 — 0.5R의 MDD 잣대가 노이즈였으므로 SZ2(0.25R·동시5)로 고정해 두 민감도를 재시험한다.
+        // D0(추세120)는 §15.6 SZ2(1181건·PF 1.92·MDD 4.2%)를, C0(0.41%)는 같은 값을 재현해야 하는 앵커.
+        if ("donchian-sens-sz2".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-sens-sz2", properties.getStressFrom(), properties.getStressTo());
+            runDonchianSensitivity(cs, properties.getStressFrom(), properties.getStressTo(), SIZING_SZ2);
+            return;
+        }
+        if ("donchian-cost-sz2".equalsIgnoreCase(properties.getMode())) {
+            List<String> cs = prepareCandidateUniverse(
+                    "donchian-cost-sz2", properties.getStressFrom(), properties.getStressTo());
+            runDonchianCostLab(cs, properties.getStressFrom(), properties.getStressTo(), SIZING_SZ2);
             return;
         }
         // §15.5 후속 ①: MDD가 유일 병목이므로 약세장 창에서 사이징을 직접 재스윕 (SZ0=G1 재현 앵커)
@@ -1027,23 +1041,39 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private static final String DONCHIAN_LABEL = "돈치안 돌파 + P3 + RR1 + 지수MA120";
     private static final String DONCHIAN_SLUG  = "DONCHIAN-P3-RR1-IDX120";
 
-    /** Step 2·3 공통 고정 — 진입=Donchian / 출구=P3 / 사이징=RR1 / 지수 추세 MA120 필터 ON */
-    private void applyDonchianFixedWithIndexFilter() {
+    /**
+     * 민감도·비용 랩이 쓰는 사이징 고정값. §15.6에서 0.5R의 MDD 잣대가 경로 의존 노이즈로
+     * 드러나(추세 기간을 흔들면 10.6~24.5% 요동) 분포를 한도에서 떼어놓은 SZ2로 재시험한다.
+     */
+    private record DonchianSizing(String label, String slug, double riskFraction, int maxPositions) {}
+
+    private static final DonchianSizing SIZING_RR1 =
+            new DonchianSizing(DONCHIAN_LABEL, DONCHIAN_SLUG, 0.005, 5);
+    private static final DonchianSizing SIZING_SZ2 =
+            new DonchianSizing("돈치안 돌파 + P3 + SZ2(0.25R·동시5) + 지수MA120",
+                    "DONCHIAN-P3-SZ2-IDX120", 0.0025, 5);
+
+    /** Step 2·3 공통 고정 — 진입=Donchian / 출구=P3 / 사이징=지정값 / 지수 추세 MA120 필터 ON */
+    private void applyDonchianFixedWithIndexFilter(DonchianSizing sizing) {
         strategyParameters.setEnabled(false);
         maBreakoutProperties.setEnabled(false);
         scalpingProperties.setEnabled(false);
         rsiProperties.setEnabled(false);
         donchianProperties.setEnabled(true);
-        applyRegimeExitSizing();                 // P3 + RR1
+        applyRegimeExitSizing();                 // P3 출구 + 기본 사이징
+        riskLimits.setRiskFractionPerTrade(sizing.riskFraction());
+        riskLimits.setMaxPositionCount(sizing.maxPositions());
         filters.getIndexTrend().setEnabled(true);
         filters.getIndexTrend().setMaPeriod(120);
     }
 
     /** Step 2 — 돈치안 자체 파라미터(고가기간·추세기간) ±20% 민감도 (약세장 창, 지수 MA120 ON) */
-    private void runDonchianSensitivity(List<String> symbols, LocalDate from, LocalDate to) {
-        applyDonchianFixedWithIndexFilter();
+    private void runDonchianSensitivity(List<String> symbols, LocalDate from, LocalDate to,
+                                        DonchianSizing sizing) {
+        applyDonchianFixedWithIndexFilter(sizing);
         int windowCount = WalkForwardEngine.windows(from, to).size();
-        log.info("[DonchianSens] ══ 돈치안 파라미터 ±20% 민감도 (약세장 창, 지수 MA120 필터 ON) ══");
+        log.info("[DonchianSens] ══ 돈치안 파라미터 ±20% 민감도 (약세장 창, 지수 MA120 ON, {}) ══",
+                sizing.slug());
         log.info("[DonchianSens] 기간 {}~{} · 종목 {}개 · Walk-Forward 윈도우 {}개 · 프로필 {}개",
                 from, to, symbols.size(), windowCount, DONCHIAN_PARAM_PROFILES.size());
 
@@ -1054,7 +1084,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
             WalkForwardEngine.WalkForwardResult result =
                     walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
             BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
-                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+                    symbols, from, to, Map.of(), result, List.of(), sizing.label(), sizing.slug());
             BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
             log.info("[DonchianSens] {}: {} → {}", p.name(),
                     result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
@@ -1066,7 +1096,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         restoreRegimeDefaults();
 
         Path report = reportWriter.writeRiskLabReport(
-                DONCHIAN_LABEL + " · 파라미터 민감도", DONCHIAN_SLUG + "-SENS", symbols, from, to, rows, false);
+                sizing.label() + " · 파라미터 민감도", sizing.slug() + "-SENS", symbols, from, to, rows, false);
         log.info("[DonchianSens] §4 민감도: D1~D4가 전부 완만(PF·MDD가 D0 근처)이면 강건. "
                 + "한 칸만 좋고 인접이 무너지면 과최적화 지문");
         log.info("[DonchianSens] 리포트: {}", report.toAbsolutePath());
@@ -1088,7 +1118,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
             new StressSizingProfile("SZ4 0.25R·동시3",              0.0025, 3));
 
     private void runDonchianStressSizing(List<String> symbols, LocalDate from, LocalDate to) {
-        applyDonchianFixedWithIndexFilter();
+        applyDonchianFixedWithIndexFilter(SIZING_RR1);
         log.info("[DonchianSizing] ══ 약세장 창 사이징 재스윕 (지수 MA120 ON, §15.5 후속①) ══");
         log.info("[DonchianSizing] 기간 {}~{} · 종목 {}개 · 프로필 {}개 — SZ0가 §15.2 G1을 재현 못 하면 무효",
                 from, to, symbols.size(), STRESS_SIZING_PROFILES.size());
@@ -1124,7 +1154,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
     private static final List<Integer> TREND_MAP_PERIODS = List.of(96, 120, 144, 168, 192);
 
     private void runDonchianTrendMap(List<String> symbols, LocalDate from, LocalDate to) {
-        applyDonchianFixedWithIndexFilter();
+        applyDonchianFixedWithIndexFilter(SIZING_RR1);
         log.info("[DonchianTrendMap] ══ 종목 추세 기간 지도 (지수 MA120 ON, §15.5 후속②) ══");
         log.info("[DonchianTrendMap] 기간 {}~{} · 종목 {}개 · 스윕 {} — 96·120·144는 §15.3 재현 앵커",
                 from, to, symbols.size(), TREND_MAP_PERIODS);
@@ -1153,10 +1183,12 @@ public class BacktestOrchestrator implements CommandLineRunner {
     }
 
     /** Step 3 — 돈치안 왕복 비용 0.41→0.80% 민감도 (약세장 창, 지수 MA120 ON) */
-    private void runDonchianCostLab(List<String> symbols, LocalDate from, LocalDate to) {
-        applyDonchianFixedWithIndexFilter();
+    private void runDonchianCostLab(List<String> symbols, LocalDate from, LocalDate to,
+                                    DonchianSizing sizing) {
+        applyDonchianFixedWithIndexFilter(sizing);
         int windowCount = WalkForwardEngine.windows(from, to).size();
-        log.info("[DonchianCost] ══ 돈치안 왕복 비용 상향 민감도 (약세장 창, 지수 MA120 필터 ON) ══");
+        log.info("[DonchianCost] ══ 돈치안 왕복 비용 상향 민감도 (약세장 창, 지수 MA120 ON, {}) ══",
+                sizing.slug());
         log.info("[DonchianCost] 기간 {}~{} · 종목 {}개 · Walk-Forward 윈도우 {}개 · 비용 {}",
                 from, to, symbols.size(), windowCount,
                 COST_PROFILES.stream().map(c -> pct(c.roundTrip())).toList());
@@ -1169,7 +1201,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
             WalkForwardEngine.WalkForwardResult result =
                     walkForwardEngine.run(symbols, from, to, List.of(0.5), null);
             BacktestReportWriter.ReportData judgeData = new BacktestReportWriter.ReportData(
-                    symbols, from, to, Map.of(), result, List.of(), DONCHIAN_LABEL, DONCHIAN_SLUG);
+                    symbols, from, to, Map.of(), result, List.of(), sizing.label(), sizing.slug());
             BacktestReportWriter.Judgment judgment = reportWriter.judge(judgeData);
             log.info("[DonchianCost] {} (왕복 {}): {} → {}", cp.name(), pct(applied.roundTripCost()),
                     result.aggregateValidation().summaryLine(), judgment.pass() ? "✅ 합격" : "❌ 불합격");
@@ -1180,7 +1212,7 @@ public class BacktestOrchestrator implements CommandLineRunner {
         restoreRegimeDefaults();
 
         Path report = reportWriter.writeCostLabReport(
-                DONCHIAN_LABEL, DONCHIAN_SLUG, symbols, from, to, rows);
+                sizing.label(), sizing.slug(), symbols, from, to, rows);
         log.info("[DonchianCost] 리포트: {}", report.toAbsolutePath());
     }
 
