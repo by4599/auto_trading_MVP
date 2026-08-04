@@ -9,6 +9,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.Collections;
 import java.util.List;
 
@@ -36,6 +38,8 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HHmmss");
+
+    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 0);
 
     private final KisApiClient kisApiClient;
 
@@ -139,13 +143,15 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
 
     /**
      * 당일 분봉을 시간 커서 역순 페이지네이션(호출당 ~30행)으로 전부 수집한다.
-     * 장 시작(09:00) 이전 행이 나오면 중단.
+     *
+     * 종료 조건은 세 가지다: 빈 응답 / 09:00 도달 / <b>새 분이 하나도 없는 페이지</b>.
+     * 셋째가 핵심인데, 커서가 장 시작 아래로 내려가면 KIS가 같은 창을 계속 되돌려주기
+     * 때문이다(2026-08-04 실측: 전 종목이 상한 60페이지를 소진해 고유 391분을 1800행으로 받았다).
      */
     @Override
     public List<MinuteCandle> fetchTodayMinuteCandles(String stockCode) {
-        List<MinuteCandle> collected = new ArrayList<>();
+        Map<LocalTime, MinuteCandle> byTime = new TreeMap<>(); // 과거→최신 정렬 + 분 단위 중복 제거
         LocalTime cursor = LocalTime.of(15, 30);
-        LocalTime marketOpen = LocalTime.of(9, 0);
         int pagesUsed = 0;
         boolean exhaustedPages = true;
 
@@ -154,33 +160,49 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
             List<MinuteData> chunk = fetchMinuteWindow(stockCode, cursor);
             if (chunk.isEmpty()) { exhaustedPages = false; break; }
 
-            LocalTime oldest = null;
-            for (MinuteData d : chunk) {
-                LocalTime time = LocalTime.parse(d.time(), TIME_FMT);
-                oldest = time;
-                if (time.isBefore(marketOpen)) continue;
-                collected.add(new MinuteCandle(
-                        LocalDate.parse(d.date(), DATE_FMT), time,
-                        parseDouble(d.open()), parseDouble(d.high()),
-                        parseDouble(d.low()), parseDouble(d.close()),
-                        parseLong(d.volume())));
+            if (!accumulatePage(chunk, MARKET_OPEN, byTime)) {
+                exhaustedPages = false; // 새 분이 없다 = 커서를 더 내려도 같은 창만 돌아온다
+                break;
             }
-            if (oldest == null || !oldest.isAfter(marketOpen)) { exhaustedPages = false; break; }
+            LocalTime oldest = LocalTime.parse(chunk.get(chunk.size() - 1).time(), TIME_FMT);
+            if (!oldest.isAfter(MARKET_OPEN)) { exhaustedPages = false; break; }
             cursor = oldest.minusMinutes(1);
             throttle();
         }
 
-        Collections.reverse(collected); // 과거→최신
-        long distinctMinutes = collected.stream().map(MinuteCandle::time).distinct().count();
-        log.info("[CandleHistory] 당일 분봉 수취: code={} → {}건 (고유 {}분, 페이지 {}회)",
-                stockCode, collected.size(), distinctMinutes, pagesUsed);
-        // 09:00~15:30 = 391분. 페이지 상한에 걸려 끝났다면 조기 종료 조건이 동작하지 않은 것이고,
-        // 그 경우 수취가 하루의 일부만 담았을 수 있다 — 조용히 반쪽 데이터를 쌓지 않도록 경고한다.
+        List<MinuteCandle> collected = List.copyOf(byTime.values());
+        log.info("[CandleHistory] 당일 분봉 수취: code={} → {}분 (페이지 {}회)",
+                stockCode, collected.size(), pagesUsed);
         if (exhaustedPages) {
             log.warn("[CandleHistory] ⚠ {} 분봉이 페이지 상한({})까지 소진됐다 — 종료 조건 미동작 의심, "
                     + "당일 일부만 수취했을 수 있음", stockCode, MAX_PAGES);
         }
-        return List.copyOf(collected);
+        return collected;
+    }
+
+    /**
+     * 한 페이지 수취분을 분 단위로 누적한다 (장 시작 이전 봉은 버린다).
+     *
+     * @return 새로 담긴 분이 하나라도 있으면 true. false면 KIS가 이미 받은 창을 다시 준 것이라
+     *         커서를 더 내려도 소용이 없다 — 2026-08-04 실측에서 이 종료 조건이 없어 전 종목이
+     *         페이지 상한(60)까지 같은 하루를 약 4.6회 반복 수취했다(1800행 = 고유 391분).
+     */
+    static boolean accumulatePage(List<MinuteData> chunk, LocalTime marketOpen,
+                                  Map<LocalTime, MinuteCandle> into) {
+        boolean added = false;
+        for (MinuteData d : chunk) {
+            LocalTime time = LocalTime.parse(d.time(), TIME_FMT);
+            if (time.isBefore(marketOpen)) continue;
+            MinuteCandle candle = new MinuteCandle(
+                    LocalDate.parse(d.date(), DATE_FMT), time,
+                    parseDouble(d.open()), parseDouble(d.high()),
+                    parseDouble(d.low()), parseDouble(d.close()),
+                    parseLong(d.volume()));
+            if (into.putIfAbsent(time, candle) == null) {
+                added = true;
+            }
+        }
+        return added;
     }
 
     private List<MinuteData> fetchMinuteWindow(String stockCode, LocalTime cursor) {
@@ -260,7 +282,7 @@ public class KisCandleHistoryClient implements CandleHistoryClient {
 
     private record MinuteChartResponse(@JsonProperty("output2") List<MinuteData> output2) {}
 
-    private record MinuteData(
+    record MinuteData(
             @JsonProperty("stck_bsop_date") String date,
             @JsonProperty("stck_cntg_hour") String time,
             @JsonProperty("stck_oprc")      String open,
