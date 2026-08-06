@@ -78,6 +78,12 @@ public class TradingScheduler {
         if (marketCalendarService.isHolidayToday()) {
             return; // KRX 휴장일 — 루프 자체를 돌리지 않는다 (OPERATIONS §5.1)
         }
+        if (!marketCalendarService.isDuringMarketHoursNow()) {
+            // 장 시간 밖에서는 시세 조회도 주문도 의미가 없다. 게이트가 없던 동안 새벽에도
+            // 1초마다 돌며 KIS 유량(모의 1건/초)을 태우고 "모의투자 장시작전 입니다" 거부를
+            // 양산했다 (2026-08-05~06 실측: 매수 요청 2,389건 중 2,336건이 이 사유).
+            return;
+        }
         if (statusManager.getCurrentMode() != TradingMode.RUNNING) {
             return; // FORCE_LIQUIDATING / EMERGENCY_STOPPED 상태에서 신규 매매 루프 진입 금지
         }
