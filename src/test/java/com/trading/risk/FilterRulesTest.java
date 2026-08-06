@@ -173,7 +173,7 @@ class FilterRulesTest {
         @Test
         @DisplayName("OFF(기본)이면 절대 청산 신호를 내지 않는다")
         void off_neverExits() {
-            TrailingStopTracker tracker = new TrailingStopTracker(new FilterProperties());
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), new FilterProperties()));
             tracker.updateHigh("005930", 110);
             assertThat(tracker.exitPrice("005930", 90, 100)).isEmpty();
         }
@@ -184,7 +184,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true); // arm 3%, trail 2% 기본
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 104);          // 진입가 100 → +4% 도달 (armed)
 
             // 고점 104 × 0.98 = 101.92 — 현재가 101이면 청산
@@ -199,7 +199,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true);
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 102);          // +2% — 미장착
 
             assertThat(tracker.exitPrice("005930", 99, 100)).isEmpty();
@@ -211,7 +211,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true);
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 110);
             tracker.clear("005930");
 

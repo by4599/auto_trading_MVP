@@ -59,7 +59,7 @@ class OrderSizingServiceTest {
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         return new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), props,
-                new BucketAccountService(props, positionRepository, tradeResultRepository));
+                new BucketAccountService(props, positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     private void givenAtr(double atr) {
@@ -165,7 +165,7 @@ class OrderSizingServiceTest {
         when(positionRepository.findAll()).thenReturn(List.of(held));
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), bucketProps(true),
-                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository));
+                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         givenAtr(2_000);
         givenEquity(50_000_000);
@@ -184,7 +184,7 @@ class OrderSizingServiceTest {
         when(positionRepository.findAll()).thenReturn(List.of(held));
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), bucketProps(true),
-                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository));
+                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         givenAtr(2_000);
         givenEquity(50_000_000);

@@ -40,19 +40,22 @@ public class OrderSizingService {
     private final RiskLimitsProperties limits;
     private final BucketProperties bucketProperties;
     private final BucketAccountService bucketAccountService;
+    private final com.trading.bucket.BucketParameterResolver bucketParams;
 
     public OrderSizingService(MarketDataService marketDataService,
                               PositionManager positionManager,
                               AtrCalculator atrCalculator,
                               RiskLimitsProperties limits,
                               BucketProperties bucketProperties,
-                              BucketAccountService bucketAccountService) {
+                              BucketAccountService bucketAccountService,
+                              com.trading.bucket.BucketParameterResolver bucketParams) {
         this.marketDataService = marketDataService;
         this.positionManager = positionManager;
         this.atrCalculator = atrCalculator;
         this.limits = limits;
         this.bucketProperties = bucketProperties;
         this.bucketAccountService = bucketAccountService;
+        this.bucketParams = bucketParams;
     }
 
     public SizingResult sizeBuy(String stockCode) {
@@ -77,8 +80,8 @@ public class OrderSizingService {
             return SizingResult.skip("자산 조회 불가 (equity<=0) — 사이징 불성립");
         }
 
-        double stopDistance = atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
-        double oneR = equity * limits.getRiskFractionPerTrade();
+        double stopDistance = atrOpt.getAsDouble() * bucketParams.atrStopMultiplier(bucket);
+        double oneR = equity * bucketParams.riskFractionPerTrade(bucket);
 
         int quantity = (int) Math.floor(oneR / stopDistance);
         if (quantity < 1) {

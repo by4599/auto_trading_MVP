@@ -60,7 +60,7 @@ class OrderEngineTest {
                 bucketProps, positionRepository, mock(TradeResultRepository.class));
         sut = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
-                        new RiskLimitsProperties(), bucketProps, bucketAccounts),
+                        new RiskLimitsProperties(), bucketProps, bucketAccounts, com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
     }
 

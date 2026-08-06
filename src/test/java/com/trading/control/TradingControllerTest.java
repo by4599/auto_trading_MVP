@@ -67,7 +67,7 @@ class TradingControllerTest {
                 new MarketCalendarService(new MarketCalendarProperties(), java.time.Clock.systemDefaultZone()),
                 new com.trading.risk.StopLossArmer(mock(com.trading.market.MarketDataService.class),
                         new com.trading.market.AtrCalculator(), positionRepository,
-                        new com.trading.risk.RiskLimitsProperties()));
+                        com.trading.bucket.BucketTestSupport.defaultParams()));
 
         portfolioStateRepository = mock(PortfolioStateRepository.class);
         sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier,

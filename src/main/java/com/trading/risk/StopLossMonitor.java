@@ -122,7 +122,7 @@ public class StopLossMonitor {
         // 트레일링 스톱 필터 (§3.3, 기본 OFF) — ATR 손절과 별개의 수익 보존 훅
         trailingStopTracker.updateHigh(snapshot.stockCode(), current);
         if (trailingStopTracker.exitPrice(
-                snapshot.stockCode(), current, pos.getAveragePrice()).isPresent()) {
+                snapshot.stockCode(), current, pos.getAveragePrice(), pos.getBucket()).isPresent()) {
             sellVia(TRAILING_NAME, snapshot.stockCode(), account, current, pos);
             return;
         }

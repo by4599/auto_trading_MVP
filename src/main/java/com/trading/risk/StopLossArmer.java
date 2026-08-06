@@ -36,16 +36,16 @@ public class StopLossArmer {
     private final MarketDataService marketDataService;
     private final AtrCalculator atrCalculator;
     private final PositionRepository positionRepository;
-    private final RiskLimitsProperties limits;
+    private final com.trading.bucket.BucketParameterResolver bucketParams;
 
     public StopLossArmer(MarketDataService marketDataService,
                          AtrCalculator atrCalculator,
                          PositionRepository positionRepository,
-                         RiskLimitsProperties limits) {
+                         com.trading.bucket.BucketParameterResolver bucketParams) {
         this.marketDataService = marketDataService;
         this.atrCalculator = atrCalculator;
         this.positionRepository = positionRepository;
-        this.limits = limits;
+        this.bucketParams = bucketParams;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -80,14 +80,17 @@ public class StopLossArmer {
                 return;
             }
 
-            double stopPrice = fillPrice - atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
+            // 손절 배수는 칸마다 다르다(다일 보유 1.0 / 당일 단타 1.5) — 보유 칸 기준으로 정한다
             positionRepository.findByStockCode(stockCode).ifPresentOrElse(pos -> {
+                double multiplier = bucketParams.atrStopMultiplier(pos.getBucket());
+                double stopPrice = fillPrice - atrOpt.getAsDouble() * multiplier;
                 pos.armStopLoss(stopPrice);
                 positionRepository.save(pos);
-                log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (ATR={})",
+                log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (ATR={} × {})",
                         stockCode, String.format("%.0f", fillPrice),
                         String.format("%.0f", stopPrice),
-                        String.format("%.0f", atrOpt.getAsDouble()));
+                        String.format("%.0f", atrOpt.getAsDouble()),
+                        String.format("%.1f", multiplier));
             }, () -> log.error("[StopLoss] Position 없음 — 손절선 미장착: {}", stockCode));
         } catch (Exception e) {
             log.error("[StopLoss] 손절선 장착 실패 — 수동 확인 필요: {}", stockCode, e);

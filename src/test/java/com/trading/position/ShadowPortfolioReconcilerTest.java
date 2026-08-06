@@ -69,7 +69,7 @@ class ShadowPortfolioReconcilerTest {
         when(marketData.getDailyCandles(anyString(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(atrCandles);
         return new com.trading.risk.StopLossArmer(marketData, new com.trading.market.AtrCalculator(),
-                positionRepository, new com.trading.risk.RiskLimitsProperties());
+                positionRepository, com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     /** ATR 14 산출용 일봉 15개 — TR=10 고정이라 ATR=10, 손절폭 = 10 × 1.5 = 15 */

@@ -103,14 +103,14 @@ class DailyBarSimulatorTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, new TradingStatusManager(),
                 new OrderSizingService(market, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         filters = new FilterProperties();
         SignalDispatcher dispatcher = new SignalDispatcher(
                 List.of(new VolatilityBreakoutStrategy(new StrategyParameters(), filters)));
 
         scalpingProperties = new ScalpingProperties();
-        trailingStopTracker = new TrailingStopTracker(filters);
+        trailingStopTracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
         sut = new DailyBarSimulator(market, dispatcher, new RiskEngine(List.of()),
                 orderEngine, positionRepository, positionManager, orderClient,
                 trailingStopTracker, clock, scalpingProperties, new RsiProperties());

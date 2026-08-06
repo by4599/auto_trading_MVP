@@ -59,11 +59,11 @@ class StopLossMonitorTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
-                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
+                new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
                 new com.trading.strategy.ScalpingProperties());
     }
 
@@ -188,11 +188,11 @@ class StopLossMonitorTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
-                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
+                new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
                 scalpingProperties);
     }
 

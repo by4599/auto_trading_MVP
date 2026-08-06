@@ -90,7 +90,7 @@ class TimeCutSchedulerTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
