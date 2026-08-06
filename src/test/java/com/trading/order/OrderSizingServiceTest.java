@@ -51,7 +51,7 @@ class OrderSizingServiceTest {
 
     private static BucketProperties bucketProps(boolean enabled) {
         return new BucketProperties(enabled, "2026-07-20",
-                10_000_000, 10_000_000, 10_000_000, false, false);
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
     }
 
     private OrderSizingService newSut(BucketProperties props) {

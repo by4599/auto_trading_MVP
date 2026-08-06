@@ -59,7 +59,7 @@ class DonchianBreakoutStrategyTest {
     }
 
     @Test
-    @DisplayName("직전 20일 고가 상향 돌파 + 상승추세 → BUY, bucket=VB")
+    @DisplayName("직전 20일 고가 상향 돌파 + 상승추세 → BUY, bucket=TREND(A동 전용 칸)")
     void buys_on_breakout_in_uptrend() {
         when(marketDataService.getDailyCandles(anyString(), anyInt())).thenReturn(risingHistory(125, 100));
 
@@ -67,7 +67,10 @@ class DonchianBreakoutStrategyTest {
 
         assertThat(signals).hasSize(1);
         assertThat(signals.get(0).isBuy()).isTrue();
-        assertThat(signals.get(0).getBucket()).isEqualTo(StrategyBucket.VB);
+        // A동은 다일 보유·0.25R·ATR1.0으로 B동(VB)과 값이 정반대라 자기 칸을 써야 한다 —
+        // 같은 칸을 쓰면 자금과 성적이 섞이고 칸별 파라미터도 무의미해진다
+        assertThat(signals.get(0).getBucket()).isEqualTo(StrategyBucket.TREND);
+        assertThat(signals.get(0).getBucket()).isNotEqualTo(StrategyBucket.VB);
     }
 
     @Test

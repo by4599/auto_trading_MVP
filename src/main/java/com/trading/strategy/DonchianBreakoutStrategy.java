@@ -80,7 +80,7 @@ public class DonchianBreakoutStrategy implements Strategy {
         boolean uptrend  = currentPrice > trend.getAsDouble();
 
         if (breakout && uptrend) {
-            return List.of(Signal.buy(stockCode, getName(), StrategyBucket.VB));
+            return List.of(Signal.buy(stockCode, getName(), StrategyBucket.TREND));
         }
         return List.of();
     }

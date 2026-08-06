@@ -33,7 +33,7 @@ public final class BucketTestSupport {
 
     public static BucketProperties disabledProps() {
         return new BucketProperties(false, "2026-07-20",
-                10_000_000, 10_000_000, 10_000_000, false, false);
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
     }
 
     public static BucketAccountService disabledAccounts() {

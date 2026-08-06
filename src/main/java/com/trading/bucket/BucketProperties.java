@@ -23,8 +23,10 @@ public class BucketProperties {
     private final double vbAllocation;
     private final double eventAllocation;
     private final double mixAllocation;
+    private final double trendAllocation;
     private final boolean eventEnabled;
     private final boolean mixEnabled;
+    private final boolean trendEnabled;
 
     public BucketProperties(
             @Value("${trading.bucket.enabled:false}") boolean enabled,
@@ -32,8 +34,10 @@ public class BucketProperties {
             @Value("${trading.bucket.vb-allocation:10000000}") double vbAllocation,
             @Value("${trading.bucket.event-allocation:10000000}") double eventAllocation,
             @Value("${trading.bucket.mix-allocation:10000000}") double mixAllocation,
+            @Value("${trading.bucket.trend-allocation:10000000}") double trendAllocation,
             @Value("${trading.bucket.event-enabled:false}") boolean eventEnabled,
-            @Value("${trading.bucket.mix-enabled:false}") boolean mixEnabled) {
+            @Value("${trading.bucket.mix-enabled:false}") boolean mixEnabled,
+            @Value("${trading.bucket.trend-enabled:false}") boolean trendEnabled) {
         this.enabled = enabled;
         this.experimentStart = LocalDate.parse(experimentStart);
         this.vbAllocation = vbAllocation;
@@ -41,6 +45,8 @@ public class BucketProperties {
         this.mixAllocation = mixAllocation;
         this.eventEnabled = eventEnabled;
         this.mixEnabled = mixEnabled;
+        this.trendAllocation = trendAllocation;
+        this.trendEnabled = trendEnabled;
     }
 
     public boolean isEnabled() {
@@ -56,15 +62,17 @@ public class BucketProperties {
             case VB    -> vbAllocation;
             case EVENT -> eventAllocation;
             case MIX   -> mixAllocation;
+            case TREND -> trendAllocation;
         };
     }
 
-    /** 방식2/3은 재료(B-4 합격 유형) 확보 전까지 잠금 — 방식1만 기본 활성 */
+    /** 방식2/3은 재료 확보 전까지, A동(TREND)은 ADR-001 개정 승인 전까지 잠금 — 방식1만 기본 활성 */
     public boolean isBucketActive(StrategyBucket bucket) {
         return switch (bucket) {
             case VB    -> true;
             case EVENT -> eventEnabled;
             case MIX   -> mixEnabled;
+            case TREND -> trendEnabled;
         };
     }
 }

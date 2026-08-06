@@ -28,7 +28,7 @@ class BucketAccountServiceTest {
     private static BucketProperties props(boolean enabled) {
         // 실험 시작일을 과거로 — TradeResult.live()는 오늘 날짜로 기록되므로 포함되게 한다
         return new BucketProperties(enabled, "2026-01-01",
-                10_000_000, 10_000_000, 10_000_000, false, false);
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
     }
 
     @BeforeEach
@@ -99,5 +99,27 @@ class BucketAccountServiceTest {
                 props(false), positionRepository, tradeResultRepository);
 
         assertThat(off.sizingEquity(StrategyBucket.VB, 52_345_678)).isEqualTo(52_345_678);
+    }
+
+    @Test
+    @DisplayName("A동(TREND) 칸은 자기 배분금·실현손익만 본다 — B동(VB)과 섞이지 않는다")
+    void trend_bucket_is_isolated_from_vb() {
+        BucketProperties props = new BucketProperties(true, "2026-01-01",
+                10_000_000, 10_000_000, 10_000_000, 7_000_000, false, false, true);
+        BucketAccountService sut = new BucketAccountService(
+                props, positionRepository, tradeResultRepository);
+
+        assertThat(sut.equity(StrategyBucket.TREND)).isEqualTo(7_000_000);
+        assertThat(sut.equity(StrategyBucket.VB)).isEqualTo(10_000_000);
+    }
+
+    @Test
+    @DisplayName("A동 칸은 기본 잠금 — ADR-001 개정 승인 전까지 켜지지 않는다")
+    void trend_bucket_locked_by_default() {
+        BucketProperties defaults = new BucketProperties(true, "2026-01-01",
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
+
+        assertThat(defaults.isBucketActive(StrategyBucket.TREND)).isFalse();
+        assertThat(defaults.isBucketActive(StrategyBucket.VB)).isTrue();
     }
 }

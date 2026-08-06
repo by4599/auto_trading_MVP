@@ -21,7 +21,17 @@ public enum StrategyBucket {
     EVENT("방식2·이평선"),
 
     /** 방식3 — 눌림목 반등 스캘핑 (ScalpingStrategy, 검증 없이 가동) */
-    MIX("방식3·스캘핑");
+    MIX("방식3·스캘핑"),
+
+    /**
+     * A동 — 다일 추세추종 (DonchianBreakoutStrategy). ADR-001 Sleeve A에 해당.
+     *
+     * 위 셋(당일 청산)과 성격이 근본적으로 다르다: 며칠 보유하고, 사이징·손절·트레일링
+     * 값이 정반대이며(0.25R·ATR1.0·arm1%/trail3%), 15:15 타임컷에서 제외된다.
+     * 그래서 기존 VB 칸에 얹지 않고 자기 칸을 쓴다 — 얹으면 자금과 성적이 섞인다.
+     * 기본 잠금(trend-enabled=false) — ADR-001 개정 승인 전까지 켜지 않는다.
+     */
+    TREND("A동·추세추종(돈치안)");
 
     private final String displayName;
 

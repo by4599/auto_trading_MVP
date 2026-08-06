@@ -55,7 +55,7 @@ class OrderEngineTest {
         positionRepository = mock(PositionRepository.class);
         // 칸 나누기 OFF — 기존 사이징 동작 유지 (칸 동작은 OrderSizingServiceTest에서 검증)
         BucketProperties bucketProps = new BucketProperties(
-                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, false, false);
+                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
         BucketAccountService bucketAccounts = new BucketAccountService(
                 bucketProps, positionRepository, mock(TradeResultRepository.class));
         sut = new OrderEngine(orderClient, statusManager,
