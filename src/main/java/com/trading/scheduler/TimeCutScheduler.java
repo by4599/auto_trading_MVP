@@ -48,6 +48,7 @@ public class TimeCutScheduler {
     private final TradingStatusManager statusManager;
     private final KisProperties kisProperties;
     private final MarketCalendarService marketCalendarService;
+    private final com.trading.bucket.BucketParameterResolver bucketParams;
 
     public TimeCutScheduler(PositionRepository positionRepository,
                             OrderHistoryRepository orderHistoryRepository,
@@ -56,7 +57,8 @@ public class TimeCutScheduler {
                             OrderEngine orderEngine,
                             TradingStatusManager statusManager,
                             KisProperties kisProperties,
-                            MarketCalendarService marketCalendarService) {
+                            MarketCalendarService marketCalendarService,
+                            com.trading.bucket.BucketParameterResolver bucketParams) {
         this.positionRepository = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionManager = positionManager;
@@ -65,6 +67,7 @@ public class TimeCutScheduler {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.marketCalendarService = marketCalendarService;
+        this.bucketParams = bucketParams;
     }
 
     /** 평일 15:15 KST 1회 실행. 앱이 그 시각에 꺼져 있었으면 해당일 타임컷은 건너뛴다 (운영 문서화). */
@@ -88,11 +91,20 @@ public class TimeCutScheduler {
             return;
         }
 
-        List<Position> holdings = positionRepository.findAll().stream()
+        List<Position> all = positionRepository.findAll().stream()
                 .filter(p -> p.getQuantity() > 0)
                 .toList();
+        // 다일 보유 칸(A동)은 타임컷 대상이 아니다 — 며칠 들고 가는 것이 그 전략의 본체다.
+        // 기본값은 false라 설정을 넣기 전까지 전 보유분이 종전대로 정리된다.
+        List<Position> holdings = all.stream()
+                .filter(p -> !bucketParams.multiDayHold(p.getBucket()))
+                .toList();
+        int kept = all.size() - holdings.size();
+        if (kept > 0) {
+            log.info("[타임컷] 다일 보유 칸 {}종목은 제외 — 이월한다", kept);
+        }
         if (holdings.isEmpty()) {
-            log.info("[타임컷] 보유 포지션 없음 — 정리할 것 없음");
+            log.info("[타임컷] 정리 대상 없음");
             return;
         }
 

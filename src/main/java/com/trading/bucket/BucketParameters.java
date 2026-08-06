@@ -58,6 +58,8 @@ public class BucketParameters {
         private Boolean trailingEnabled;
         private Double trailingArmProfitPct;
         private Double trailingTrailPct;
+        private Boolean multiDayHold;
+        private Integer maxHoldDays;
 
         public Double getRiskFractionPerTrade() { return riskFractionPerTrade; }
         public void setRiskFractionPerTrade(Double v) { this.riskFractionPerTrade = v; }
@@ -73,5 +75,13 @@ public class BucketParameters {
 
         public Double getTrailingTrailPct() { return trailingTrailPct; }
         public void setTrailingTrailPct(Double v) { this.trailingTrailPct = v; }
+
+        /** true면 15:15 타임컷에서 제외된다 (다일 보유 칸) */
+        public Boolean getMultiDayHold() { return multiDayHold; }
+        public void setMultiDayHold(Boolean v) { this.multiDayHold = v; }
+
+        /** 최대 보유 거래일 — 초과하면 종가 청산. null/0 이하면 제한 없음 */
+        public Integer getMaxHoldDays() { return maxHoldDays; }
+        public void setMaxHoldDays(Integer v) { this.maxHoldDays = v; }
     }
 }

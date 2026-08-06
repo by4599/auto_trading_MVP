@@ -48,5 +48,20 @@ public class BucketParameterResolver {
                 o.getTrailingTrailPct()     != null ? o.getTrailingTrailPct()     : g.getTrailPct());
     }
 
+    /**
+     * 이 칸이 다일 보유인가 — true면 15:15 타임컷에서 제외한다.
+     * 기본 false: 지정하지 않은 칸은 종전대로 당일 청산된다.
+     */
+    public boolean multiDayHold(StrategyBucket bucket) {
+        Boolean v = params.forBucket(bucket).getMultiDayHold();
+        return v != null && v;
+    }
+
+    /** 최대 보유 거래일 — 0 이하면 제한 없음(기본) */
+    public int maxHoldDays(StrategyBucket bucket) {
+        Integer v = params.forBucket(bucket).getMaxHoldDays();
+        return v != null ? v : 0;
+    }
+
     public record Trailing(boolean enabled, double armProfitPct, double trailPct) {}
 }
