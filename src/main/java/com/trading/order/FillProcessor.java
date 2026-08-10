@@ -8,10 +8,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 주문 1건의 체결 확인 오케스트레이터.
@@ -33,6 +37,13 @@ public class FillProcessor {
 
     private static final long TIMEOUT_MINUTES       = 10;
     private static final long CANCEL_TIMEOUT_HOURS  = 24;  // P3: CANCEL_REQUESTED 타임아웃
+
+    /** 폴 주기(3초)보다 짧게 — 같은 주기의 주문들만 한 응답을 공유하게 한다 */
+    private static final Duration SNAPSHOT_TTL = Duration.ofMillis(2500);
+
+    private volatile DailyFills cachedFills;
+    /** 건수가 바뀔 때만 로그 — 3초마다 같은 줄을 찍지 않으려는 것 */
+    private volatile int lastReportedFillCount = -1;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -159,6 +170,39 @@ public class FillProcessor {
      * FillQueryStatus.API_ERROR                     : 네트워크/KIS 오류 (다음 폴 재시도)
      */
     private FillResult inquireFill(String orderNo) {
+        DailyFills fills = dailyFills();
+        if (fills.apiError()) return FillResult.apiError();
+        return fills.byOrderNo().getOrDefault(orderNo, FillResult.notFilled());
+    }
+
+    /**
+     * 당일 체결 내역을 <b>주문번호 필터 없이</b> 한 번 받아 주문번호로 색인한다.
+     *
+     * <p>바뀐 이유 둘:
+     * <ol>
+     *   <li><b>ODNO 필터가 체결을 놓쳤다.</b> 주문번호로 조회하면 실제 체결된 주문에도
+     *       {@code rt_cd=0 · output1=[]}가 돌아왔다(2026-07-28~30 진단). 그 결과 매도 체결
+     *       38건 중 37건이 체결가 없이 종결됐고(2026-08-07 실측), 실현손익·슬리피지 측정이
+     *       모두 막혔다. 필터를 빼고 당일 전체를 받아 앱에서 매칭한다.</li>
+     *   <li><b>호출 수.</b> 예전에는 대기 주문 N개마다 3초 주기로 N번 호출해 모의 유량
+     *       (1건/초)을 통째로 먹었다. 이제 주기당 1번이면 된다.</li>
+     * </ol>
+     *
+     * <p>스냅샷은 짧게(폴 주기보다 조금 짧게) 재사용한다 — 같은 주기 안의 주문들이
+     * 같은 응답을 공유하게 하려는 것이지 캐싱이 목적이 아니다.
+     */
+    private DailyFills dailyFills() {
+        DailyFills snapshot = cachedFills;
+        if (snapshot != null && Instant.now().isBefore(snapshot.expiresAt())) {
+            return snapshot;
+        }
+        DailyFills fresh = fetchDailyFills();
+        cachedFills = fresh;
+        return fresh;
+    }
+
+    private DailyFills fetchDailyFills() {
+        Instant expiry = Instant.now().plus(SNAPSHOT_TTL);
         try {
             String today = LocalDate.now().format(DATE_FMT);
             String[] acnt = split(kisApiClient.getProps().getAccountNo());
@@ -174,7 +218,7 @@ public class FillProcessor {
                             .queryParam("PDNO",             "")
                             .queryParam("CCLD_DVSN",       "00")
                             .queryParam("ORD_GNO_BRNO",    "")
-                            .queryParam("ODNO",             orderNo)
+                            .queryParam("ODNO",             "")
                             .queryParam("INQR_DVSN_3",     "00")
                             .queryParam("INQR_DVSN_1",     "")
                             .queryParam("CTX_AREA_FK100",   "")
@@ -185,28 +229,39 @@ public class FillProcessor {
                     .retrieve()
                     .body(FillResponse.class);
 
-            if (resp == null) return FillResult.apiError();
-
+            if (resp == null) return DailyFills.error(expiry);
             if (!resp.isSuccess()) {
-                log.error("체결조회 API 오류: rt_cd={} msg={} ordNo={}", resp.rtCd(), resp.msg1(), orderNo);
-                return FillResult.apiError();
+                log.error("체결조회 API 오류: rt_cd={} msg={}", resp.rtCd(), resp.msg1());
+                return DailyFills.error(expiry);
             }
-
-            if (resp.output1() == null || resp.output1().isEmpty()) {
-                return FillResult.notFilled();
+            Map<String, FillResult> indexed = index(resp.output1());
+            if (indexed.size() != lastReportedFillCount) {
+                lastReportedFillCount = indexed.size();
+                log.info("[체결조회] 당일 체결 {}건 (주문번호 {})", indexed.size(), indexed.keySet());
             }
-
-            // output1[0]을 사용하는 이유:
-            // VTTC8001R 응답에서 tot_ccld_qty(총체결수량)는 모든 행에 동일한 누적 합계로 반환된다.
-            // 복수 행은 체결 이벤트 이력이며, 첫 행(최신)의 tot_ccld_qty 만으로 충분하다.
-            // KIS 공식 샘플도 output1[0]만 참조한다.
-            FillItem item = resp.output1().get(0);
-            return FillResult.filled(parseInt(item.totCcldQty()), parseDouble(item.avgPrvs()));
+            return DailyFills.of(expiry, indexed);
 
         } catch (Exception e) {
-            log.error("체결조회 HTTP 실패: ordNo={}", orderNo, e);
-            return FillResult.apiError();
+            log.error("체결조회 HTTP 실패 — 당일 전체 조회", e);
+            return DailyFills.error(expiry);
         }
+    }
+
+    /**
+     * 응답 행들을 주문번호별로 접는다. tot_ccld_qty는 행마다 같은 누적값이라 첫 행이면
+     * 충분하지만, 안전하게 가장 큰 값을 취한다(부분 체결 이력이 섞여 와도 누적이 줄지 않게).
+     */
+    private Map<String, FillResult> index(List<FillItem> rows) {
+        Map<String, FillResult> byOrderNo = new HashMap<>();
+        if (rows == null) return byOrderNo;
+        for (FillItem item : rows) {
+            if (item.ordNo() == null || item.ordNo().isBlank()) continue;
+            int qty = parseInt(item.totCcldQty());
+            double price = parseDouble(item.avgPrvs());
+            byOrderNo.merge(item.ordNo(), FillResult.filled(qty, price),
+                    (a, b) -> a.totalFilledQty() >= b.totalFilledQty() ? a : b);
+        }
+        return byOrderNo;
     }
 
     // ── 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -224,6 +279,16 @@ public class FillProcessor {
 
     private static int    parseInt(String s)    { return (s == null || s.isBlank()) ? 0   : Integer.parseInt(s.trim()); }
     private static double parseDouble(String s) { return (s == null || s.isBlank()) ? 0.0 : Double.parseDouble(s.trim()); }
+
+    /** 당일 체결 스냅샷 — 폴 주기 안의 주문들이 한 번의 응답을 공유한다 */
+    private record DailyFills(Instant expiresAt, Map<String, FillResult> byOrderNo, boolean apiError) {
+        static DailyFills of(Instant expiresAt, Map<String, FillResult> byOrderNo) {
+            return new DailyFills(expiresAt, byOrderNo, false);
+        }
+        static DailyFills error(Instant expiresAt) {
+            return new DailyFills(expiresAt, Map.of(), true);
+        }
+    }
 
     // ── 내부 타입 ─────────────────────────────────────────────────────────────
 
