@@ -36,13 +36,13 @@ class LowVolCrashBacktesterTest {
     @DisplayName("로그수익률 모표준편차: 수익률 [0.1, 0.2] → 0.05")
     void logReturnStdev_knownSequence() {
         List<Double> closes = List.of(100.0, 100.0 * Math.exp(0.1), 100.0 * Math.exp(0.3));
-        assertThat(LowVolCrashBacktester.logReturnStdev(closes)).isCloseTo(0.05, within(1e-9));
+        assertThat(CrashVolCalculations.logReturnStdev(closes)).isCloseTo(0.05, within(1e-9));
     }
 
     @Test
     @DisplayName("수익률 2개 미만이면 표준편차 0")
     void logReturnStdev_tooFew() {
-        assertThat(LowVolCrashBacktester.logReturnStdev(List.of(100.0, 110.0)))
+        assertThat(CrashVolCalculations.logReturnStdev(List.of(100.0, 110.0)))
                 .isCloseTo(0.0, within(1e-12));
     }
 
@@ -55,7 +55,7 @@ class LowVolCrashBacktesterTest {
         String[] syms = {"a", "b", "c", "d", "e", "f", "g", "h", "i"};
         for (int i = 0; i < syms.length; i++) vol.put(syms[i], (double) (i + 1));
 
-        Buckets b = LowVolCrashBacktester.terciles(vol);
+        Buckets b = CrashVolCalculations.terciles(vol);
 
         assertThat(b.low()).containsExactly("a", "b", "c");
         assertThat(b.mid()).containsExactly("d", "e", "f");
@@ -73,7 +73,7 @@ class LowVolCrashBacktesterTest {
         vol.put("high2", 8.0);
         vol.put("mid2", 4.0);
 
-        Buckets b = LowVolCrashBacktester.terciles(vol); // edge = 6/3 = 2
+        Buckets b = CrashVolCalculations.terciles(vol); // edge = 6/3 = 2
 
         assertThat(b.low()).containsExactly("low1", "low2");
         assertThat(b.high()).containsExactly("high2", "high1");
@@ -92,7 +92,7 @@ class LowVolCrashBacktesterTest {
         closes.set(32, 92.0);
         // 33부터 회복 → 이후 트레일링 수익률은 양(+)이라 미돌파
 
-        List<Integer> anchors = LowVolCrashBacktester.detectAnchorIndices(
+        List<Integer> anchors = CrashVolCalculations.detectAnchorIndices(
                 closes, -0.07, 10, 20);
 
         assertThat(anchors).containsExactly(30); // 31,32는 쿨다운(20)으로 병합 제외
@@ -106,7 +106,7 @@ class LowVolCrashBacktesterTest {
         closes.set(30, 92.0); // 첫 앵커
         closes.set(55, 92.0); // 55-30=25 ≥ 쿨다운 20 → 별도 앵커
 
-        List<Integer> anchors = LowVolCrashBacktester.detectAnchorIndices(
+        List<Integer> anchors = CrashVolCalculations.detectAnchorIndices(
                 closes, -0.07, 10, 20);
 
         assertThat(anchors).containsExactly(30, 55);
@@ -118,16 +118,16 @@ class LowVolCrashBacktesterTest {
     @DisplayName("전방 수익률: 앵커 종가 대비 D+N 종가 비율 − 1")
     void forwardReturn_exact() {
         List<Double> closes = List.of(100.0, 110.0, 120.0, 90.0);
-        assertThat(LowVolCrashBacktester.forwardReturn(closes, 0, 2)).isCloseTo(0.20, within(1e-9));
-        assertThat(LowVolCrashBacktester.forwardReturn(closes, 0, 3)).isCloseTo(-0.10, within(1e-9));
+        assertThat(CrashVolCalculations.forwardReturn(closes, 0, 2)).isCloseTo(0.20, within(1e-9));
+        assertThat(CrashVolCalculations.forwardReturn(closes, 0, 3)).isCloseTo(-0.10, within(1e-9));
     }
 
     @Test
     @DisplayName("데이터가 모자란 호라이즌·0 진입가는 null")
     void forwardReturn_outOfRange() {
         List<Double> closes = List.of(100.0, 110.0, 120.0);
-        assertThat(LowVolCrashBacktester.forwardReturn(closes, 2, 5)).isNull();
-        assertThat(LowVolCrashBacktester.forwardReturn(List.of(0.0, 100.0), 0, 1)).isNull();
+        assertThat(CrashVolCalculations.forwardReturn(closes, 2, 5)).isNull();
+        assertThat(CrashVolCalculations.forwardReturn(List.of(0.0, 100.0), 0, 1)).isNull();
     }
 
     // ── 표본 접기 (핵심) ───────────────────────────────────────────────────────
@@ -146,8 +146,8 @@ class LowVolCrashBacktesterTest {
             universe.put("s" + k, stock(dates, k, fwd[k]));
         }
 
-        List<HorizonStat> stats = LowVolCrashBacktester.aggregate(
-                List.of(10), kospiCloses, dates, universe, W3, 3, List.of(5));
+        List<HorizonStat> stats = CrashVolCalculations.aggregate(List.of(10),
+                new CrashVolScope(kospiCloses, dates, universe, W3, 3, List.of(5)));
 
         HorizonStat d5 = stats.get(0);
         assertThat(d5.horizon()).isEqualTo(5);
@@ -171,8 +171,8 @@ class LowVolCrashBacktesterTest {
         Map<String, StockSeries> universe = new LinkedHashMap<>();
         for (int k = 0; k < 6; k++) universe.put("s" + k, stock(dates, k, 0.10));
 
-        List<HorizonStat> stats = LowVolCrashBacktester.aggregate(
-                List.of(10), kospiCloses, dates, universe, W3, 3, List.of(5));
+        List<HorizonStat> stats = CrashVolCalculations.aggregate(List.of(10),
+                new CrashVolScope(kospiCloses, dates, universe, W3, 3, List.of(5)));
 
         assertThat(stats.get(0).events()).isZero();
     }
@@ -206,9 +206,9 @@ class LowVolCrashBacktesterTest {
         // 앵커(40) 직전 10거래일 = 급락 구간(index 31~40)에만 큰 변동
         for (int i = 31; i <= 40; i++) closes.set(i, i % 2 == 0 ? 90.0 : 110.0);
 
-        double pre = LowVolCrashBacktester.logReturnStdev(
+        double pre = CrashVolCalculations.logReturnStdev(
                 LowVolCrashBacktester.PRE_WINDOW.slice(closes, 40));
-        double during = LowVolCrashBacktester.logReturnStdev(
+        double during = CrashVolCalculations.logReturnStdev(
                 LowVolCrashBacktester.DURING_WINDOW.slice(closes, 40));
 
         assertThat(pre).isGreaterThan(0.0).isLessThan(0.01); // 급락 전엔 조용했다
@@ -231,7 +231,7 @@ class LowVolCrashBacktesterTest {
         closes.set(55, 92.0);  // 간격 25 < 60 → 쿨다운으로 제외 (전방창이 겹치므로)
         closes.set(95, 92.0);  // 간격 65 ≥ 60 → 별도 앵커
 
-        List<Integer> anchors = LowVolCrashBacktester.detectAnchorIndices(
+        List<Integer> anchors = CrashVolCalculations.detectAnchorIndices(
                 closes, -0.07, 10, LowVolCrashBacktester.COOLDOWN_DAYS);
 
         assertThat(anchors).containsExactly(30, 95);
@@ -250,14 +250,14 @@ class LowVolCrashBacktesterTest {
         closes.set(70, 92.0);                 // to 이후 구간의 급락
         LocalDate to = AXIS0.plusDays(59);    // index 0~59까지가 선언 기간
 
-        int scope = LowVolCrashBacktester.anchorScopeSize(dates, to);
+        int scope = CrashVolCalculations.anchorScopeSize(dates, to);
         assertThat(scope).isEqualTo(60);
 
         // 클램프 적용: to 이후 급락은 앵커에서 제외
-        assertThat(LowVolCrashBacktester.detectAnchorIndices(
+        assertThat(CrashVolCalculations.detectAnchorIndices(
                 closes.subList(0, scope), -0.07, 10, 60)).isEmpty();
         // 클램프가 없었다면 잡혔을 것 (= 데이터가 쌓일수록 결과가 달라짐)
-        assertThat(LowVolCrashBacktester.detectAnchorIndices(closes, -0.07, 10, 60))
+        assertThat(CrashVolCalculations.detectAnchorIndices(closes, -0.07, 10, 60))
                 .containsExactly(70);
     }
 
@@ -266,16 +266,16 @@ class LowVolCrashBacktesterTest {
     @Test
     @DisplayName("표본이 0이면 리포트에 '-'로 찍힌다 (+0.00%로 오독 금지)")
     void emptySample_rendersDash() {
-        assertThat(BacktestReportWriter.signedPct(Quantiles.EMPTY)).isEqualTo("-");
-        assertThat(BacktestReportWriter.signedPct(Quantiles.of(List.of(0.0)))).isEqualTo("+0.00%");
+        assertThat(ReportFormat.signedPct(Quantiles.EMPTY)).isEqualTo("-");
+        assertThat(ReportFormat.signedPct(Quantiles.of(List.of(0.0)))).isEqualTo("+0.00%");
 
         HorizonStat empty = new HorizonStat(60, Quantiles.EMPTY, Quantiles.EMPTY,
                 Quantiles.EMPTY, Quantiles.EMPTY, 0);
-        assertThat(BacktestReportWriter.lowMinusHighText(empty)).isEqualTo("-");
+        assertThat(ReportFormat.lowMinusHighText(empty)).isEqualTo("-");
 
         HorizonStat measured = new HorizonStat(5, Quantiles.of(List.of(0.02)),
                 Quantiles.EMPTY, Quantiles.of(List.of(-0.01)), Quantiles.of(List.of(-0.05)), 1);
-        assertThat(BacktestReportWriter.lowMinusHighText(measured)).isEqualTo("+3.00%");
+        assertThat(ReportFormat.lowMinusHighText(measured)).isEqualTo("+3.00%");
     }
 
     // ── 픽스처 ────────────────────────────────────────────────────────────────

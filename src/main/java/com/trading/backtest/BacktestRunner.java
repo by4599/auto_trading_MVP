@@ -41,6 +41,7 @@ public class BacktestRunner {
 
     private final BacktestMarketDataService market;
     private final DailyBarSimulator simulator;
+    private final DailyBarExitSimulator exitSimulator;
     private final BacktestOrderClient orderClient;
     private final BacktestPositionManager positionManager;
     private final PositionRepository positionRepository;
@@ -54,6 +55,7 @@ public class BacktestRunner {
 
     public BacktestRunner(BacktestMarketDataService market,
                           DailyBarSimulator simulator,
+                          DailyBarExitSimulator exitSimulator,
                           BacktestOrderClient orderClient,
                           BacktestPositionManager positionManager,
                           PositionRepository positionRepository,
@@ -66,6 +68,7 @@ public class BacktestRunner {
                           ExitLabProperties exitLab) {
         this.market = market;
         this.simulator = simulator;
+        this.exitSimulator = exitSimulator;
         this.orderClient = orderClient;
         this.positionManager = positionManager;
         this.positionRepository = positionRepository;
@@ -140,7 +143,7 @@ public class BacktestRunner {
             if (todayIndex - entryIndex < exitLab.getMaxHoldDays()) continue;
             Double close = closeOf(pos.getStockCode(), date);
             if (close == null) continue; // 당일 봉 없음(거래정지) — 이월
-            simulator.exitAt(pos.getStockCode(), close, EXIT_MAX_HOLD);
+            exitSimulator.exitAt(pos.getStockCode(), close, EXIT_MAX_HOLD);
         }
     }
 
@@ -150,7 +153,7 @@ public class BacktestRunner {
         for (Position pos : heldPositions()) {
             Double close = closeOf(pos.getStockCode(), date);
             if (close == null) continue; // 당일 봉 없음(거래정지) — 이월
-            simulator.exitAt(pos.getStockCode(), close, EXIT_TIMECUT);
+            exitSimulator.exitAt(pos.getStockCode(), close, EXIT_TIMECUT);
         }
     }
 

@@ -111,9 +111,13 @@ class DailyBarSimulatorTest {
 
         scalpingProperties = new ScalpingProperties();
         trailingStopTracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
-        sut = new DailyBarSimulator(market, dispatcher, new RiskEngine(List.of()),
+        RiskEngine riskEngine = new RiskEngine(List.of());
+        DailyBarExitSimulator exits = new DailyBarExitSimulator(market, riskEngine,
                 orderEngine, positionRepository, positionManager, orderClient,
-                trailingStopTracker, clock, scalpingProperties, new RsiProperties());
+                trailingStopTracker, clock, scalpingProperties);
+        sut = new DailyBarSimulator(market, dispatcher, riskEngine,
+                orderEngine, positionRepository, positionManager,
+                trailingStopTracker, exits, clock, new RsiProperties());
 
         market.setSimDate(TODAY);
     }
