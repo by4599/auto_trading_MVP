@@ -105,7 +105,13 @@
   리팩터 전/후 계산 결과 원 단위 일치(git worktree 대조, RR1 PF 1.96·MDD 9.87% 동일).
 - 재검토 시점: Phase B(라이브 체결 경로 3개 파일)는 다음 세션에 사용자 지시 시.
 
-## [2026-08-17] 백테스트 재현성 결함 — 백필 7일 슬랙이 판정 창 끝자락을 빈 데이터로 채점
+## [2026-08-17] ✅ 해소 — 백테스트 재현성 결함(백필 7일 슬랙)
+> 2026-08-17 해소. 슬랙은 유지하되 **고정 판정 창의 끝만 예외**로 두고(`needsTailFill`),
+> 채점 전 **커버리지 관문**(`CandleCoverageChecker`)을 추가했다 — `write-baseline=true` 실행은
+> 미달 시 예외로 중단, 그 외는 경고+리포트 기재. 함께 회귀 앵커 자동 대조(`BaselineDriftReporter`)도
+> 넣어 기준선 yml이 정본이 됐다. 검증: 543/543 통과 · risk-lab 원 단위 재현 · 관문 실차단 확인
+> (`_workspace/8_impl`·`9_audit`·`10_verify_anchor-sot-and-coverage.md`).
+> **남은 사각지대는 아래 별도 항목으로 등재.**
 - 내용: `CandleBackfillService.missingRanges()`의 뒤쪽 공백 규칙
   `if (storedTo.isBefore(to.minusDays(7)))`이 7일 이내 공백을 "커버리지 충족"으로 보고 스킵한다.
   고정 판정 창(`candidate-to`)과 실행일 기준 `rangeTo()`의 간격이 이 슬랙 안에 들어가면
@@ -124,3 +130,39 @@
 - 왜 지금 안 하는지: 고치면 산출물 문자열이 바뀌어 2026-08-14 리팩터링의 "동작 불변" 검증 전제가 깨진다.
   리팩터링 커밋과 분리해야 한다.
 - 재검토 시점: 리팩터링 커밋 확정 후 별건 커밋으로
+
+## [2026-08-17] 기준선 기록 경로가 커버리지 관문을 우회하는 곳 2군데
+- 내용: `FullBacktestLab.java:138-141`·`SingleStrategyLab.java:112-114`가 `judgment.pass()`만 참이면
+  **`write-baseline` opt-in 확인도, 커버리지 검사도 없이** `docs/BACKTEST-BASELINE(.yml/-MA/-SCALPING)`을
+  덮어쓴다. 관문은 `CandidateLabRouter.prepareCandidateUniverse`에만 걸려 있는데 full·ma-breakout·
+  scalping 모드는 라우터를 지나지 않는다(`BacktestModeRunner.java:76-80`).
+- 지적: risk-auditor (`_workspace/9_audit_anchor-sot-and-coverage.md` MEDIUM 1)
+- 왜 지금 안 하는지: **pre-existing 결함**이며 2026-08-17 변경이 만든 것이 아니다. 릴리즈 체크리스트
+  8항목에 해당 없음. 다만 "오염된 기준선이 조용히 굳는" 실패 모드가 이 경로에는 아직 열려 있다.
+- 재검토 시점: full/ma-breakout/scalping 모드로 기준선을 새로 찍기 전 (반드시 선행)
+
+## [2026-08-17] 부동 창 모드의 꼬리 결측 — 슬랙 예외가 고정 창에만 걸린다
+- 내용: 부동 창 모드(판정 창 끝 = `rangeTo()` = 실행일−1)는 `needsTailFill`이 고정 창
+  (`mustCoverThrough`)만 보므로, 고정 창이 이미 채워져 있으면 슬랙 안에서 **`storedTo`가 최대
+  7달력일(≈5거래일) 뒤처진 채 채점**될 수 있다. §14.1을 망친 것과 같은 결함 구조다.
+- 지적: risk-auditor (MEDIUM 2). 구현자 보고 §6.2의 "부동 창 모드는 구조적으로 어긋남이 없다"는
+  **반증됨** — 두 문서를 모두 남겨 뒀다(`10_verify` §8).
+- 왜 지금 안 하는지: 위 항목과 같은 경로에서만 기준선으로 굳는다. 사용자 판단 대기.
+- 재검토 시점: 위 항목과 함께
+
+## [2026-08-17] 커버리지 관문이 종목별 부분 결측을 못 본다
+- 내용: `CandleCoverageChecker`가 프런티어를 전 종목 **max**로 잡아, 54종목 중 1종목만 최신이면
+  `sufficient=true`가 된다. 그런데 `CandleBackfillService.backfillExtra`는 종목별 예외를 잡아
+  warn만 남기고 계속하므로, **30종목 백필이 실패해도 strict 실행이 통과**해 오염된 기준선이 굳을 수 있다.
+- 지적: risk-auditor (MEDIUM 3). §14.1 사고는 전 종목 동일 결측이라 이 사각지대에 걸리지 않았다.
+- 왜 지금 안 하는지: 이번 관문이 잡는 주 실패 모드(전 종목 꼬리 결측)는 막았고, 부분 결측은
+  아직 실제로 겪지 않았다. 고치려면 종목별 커버리지 판정이 필요해 범위가 커진다.
+- 재검토 시점: 백필이 종목 단위로 실패한 로그가 실제로 관측되면 즉시
+
+## [2026-08-17] 다른 모드의 과거 기준선·앵커가 같은 슬랙에 걸렸는지 미점검
+- 내용: exit-lab·regime-lab·donchian-*·crash-vol의 **이미 기록된** 기준선·앵커도 §14.1처럼
+  판정 창 끝자락이 빈 상태에서 찍혔을 수 있다. 앞으로의 실행에는 두 안전장치가 걸리지만
+  과거 기록은 그대로다.
+- 왜 지금 안 하는지: 작업 A·B 범위 밖으로 명시 제외했다. 점검하려면 각 모드의 기록 시점
+  DB 커버리지를 되짚어야 해(§7_quant가 쓴 방법) 모드당 실행 비용이 든다.
+- 재검토 시점: 해당 모드의 결과를 인용해 판단하기 전 / 그 모드 기준선을 갱신할 때

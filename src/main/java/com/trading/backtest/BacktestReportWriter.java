@@ -176,6 +176,9 @@ public class BacktestReportWriter {
     /** 합격 시에만 호출 — 거버넌스가 소비하는 기준선 (버전 관리 대상) */
     public Path writeBaseline(ReportData data, List<FilterVariant> adoptedFilters) {
         BacktestMetrics v = data.baseline().aggregateValidation();
+        // 기록 포맷·파일명 규칙은 BaselineSnapshot/BaselineStore와 공유한다 —
+        // 판독부(회귀 앵커 대조)가 같은 자릿수·같은 파일을 보게 하려는 것이다(출력은 종전과 동일).
+        BaselineSnapshot snapshot = BaselineSnapshot.of(data.from(), data.to(), v);
         StringBuilder yml = new StringBuilder();
         yml.append("# 백테스트 기준선 (B-3) — 거버넌스 강등 판정의 분모 (PERFORMANCE-GOVERNANCE §2)\n");
         yml.append("# 자동 생성: BacktestReportWriter — 수동 편집 금지\n");
@@ -183,19 +186,17 @@ public class BacktestReportWriter {
         yml.append(String.format("period: %s ~ %s%n", data.from(), data.to()));
         yml.append("method: daily-bar-approximation-v1\n");
         yml.append("validation:   # Walk-Forward 검증 구간 집계 (비용 차감 후)\n");
-        yml.append(String.format("  trades: %d%n", v.tradeCount()));
-        yml.append(String.format("  profit-factor: %.3f%n", v.profitFactor()));
-        yml.append(String.format("  expectancy-pct: %.4f%n", v.expectancyPct()));
-        yml.append(String.format("  max-drawdown: %.4f%n", v.maxDrawdown()));
-        yml.append(String.format("  win-rate: %.4f%n", v.winRate()));
+        yml.append(String.format("  trades: %d%n", snapshot.trades()));
+        yml.append(String.format("  profit-factor: %s%n", snapshot.profitFactor()));
+        yml.append(String.format("  expectancy-pct: %s%n", snapshot.expectancyPct()));
+        yml.append(String.format("  max-drawdown: %s%n", snapshot.maxDrawdown()));
+        yml.append(String.format("  win-rate: %s%n", snapshot.winRate()));
         yml.append(String.format("chosen-k-per-window: %s%n", data.baseline().chosenKs()));
         yml.append(String.format("adopted-filters: %s%n",
                 adoptedFilters.stream().map(FilterVariant::name).toList()));
 
         try {
-            String filename = data.fileSlug().isEmpty()
-                    ? "BACKTEST-BASELINE.yml" : "BACKTEST-BASELINE-" + data.fileSlug() + ".yml";
-            Path file = Path.of("docs", filename);
+            Path file = Path.of("docs", BaselineStore.fileName(data.fileSlug()));
             Files.writeString(file, yml.toString());
             log.info("[Report] 기준선 저장: {}", file.toAbsolutePath());
             return file;

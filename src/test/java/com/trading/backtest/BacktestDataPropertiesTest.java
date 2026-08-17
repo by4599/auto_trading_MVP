@@ -179,6 +179,33 @@ class BacktestDataPropertiesTest {
         assertThat(p.getCandidateTo()).isEqualTo(LocalDate.parse("2026-07-21"));
     }
 
+    // ── 커버리지 하한 (2026-08-17, 백필 슬랙 결함) ──
+
+    @Test
+    @DisplayName("requiredCoverageThrough는 세 판정 창 끝 중 가장 늦은 날이다")
+    void requiredCoverageThrough_returnsLatestWindowEnd() {
+        BacktestDataProperties p = new BacktestDataProperties();
+        // 기본값은 셋 다 같은 날 — 그대로 그 날이 하한
+        assertThat(p.requiredCoverageThrough()).isEqualTo(LocalDate.parse("2026-07-21"));
+
+        p.setStressTo(LocalDate.parse("2026-08-10"));
+        assertThat(p.requiredCoverageThrough()).isEqualTo(LocalDate.parse("2026-08-10"));
+
+        p.setCrashVolTo(LocalDate.parse("2026-09-01"));
+        assertThat(p.requiredCoverageThrough()).isEqualTo(LocalDate.parse("2026-09-01"));
+    }
+
+    @Test
+    @DisplayName("커버리지 하한을 계산해도 세 창의 판정 설정은 서로 영향받지 않는다 (독립성 회귀)")
+    void requiredCoverageThrough_doesNotCoupleWindows() {
+        BacktestDataProperties p = new BacktestDataProperties();
+        p.setStressTo(LocalDate.parse("2026-08-10"));
+
+        assertThat(p.requiredCoverageThrough()).isEqualTo(LocalDate.parse("2026-08-10"));
+        assertThat(p.getCandidateTo()).isEqualTo(LocalDate.parse("2026-07-21"));
+        assertThat(p.getCrashVolTo()).isEqualTo(LocalDate.parse("2026-07-21"));
+    }
+
     @Test
     @DisplayName("application-backtest.yml이 backfill-from·crash-vol 창을 바인딩한다")
     void backtestYaml_bindsBackfillAndCrashVolWindow() {

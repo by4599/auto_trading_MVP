@@ -6,6 +6,8 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * 백테스트 설정 (B-1/B-2).
@@ -196,4 +198,19 @@ public class BacktestDataProperties {
 
     public boolean isWriteBaseline() { return writeBaseline; }
     public void setWriteBaseline(boolean writeBaseline) { this.writeBaseline = writeBaseline; }
+
+    /**
+     * 캔들 저장이 반드시 도달해야 하는 날 = 고정 판정 창들의 끝 중 가장 늦은 날.
+     *
+     * <p>여기서 max를 취하는 것은 <b>저장 요구</b>일 뿐이다 — 어느 모드를 돌리든 그 창 끝까지는
+     * 캔들이 있어야 한다는 뜻이며, 한 창의 설정이 다른 창의 <b>판정</b>에 끼어들지 않는다
+     * (candidate/crash-vol/stress 세 창의 독립성은 그대로다). 백필의 7일 슬랙이 이 날짜를
+     * 삼켜 창 끝자락이 데이터 없이 채점되던 결함을 막는 데 쓴다.
+     */
+    public LocalDate requiredCoverageThrough() {
+        return Stream.of(candidateTo, crashVolTo, stressTo)
+                .filter(Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .orElse(null);
+    }
 }

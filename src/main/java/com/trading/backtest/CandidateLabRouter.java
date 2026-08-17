@@ -24,6 +24,7 @@ public class CandidateLabRouter {
 
     private final BacktestDataProperties properties;
     private final CandleBackfillService backfillService;
+    private final CandleCoverageChecker coverageChecker;
     private final StrategyToggles toggles;
     private final RiskLab riskLab;
     private final CostLab costLab;
@@ -34,6 +35,7 @@ public class CandidateLabRouter {
 
     public CandidateLabRouter(BacktestDataProperties properties,
                               CandleBackfillService backfillService,
+                              CandleCoverageChecker coverageChecker,
                               StrategyToggles toggles,
                               RiskLab riskLab,
                               CostLab costLab,
@@ -43,6 +45,7 @@ public class CandidateLabRouter {
                               VbFilterLab vbFilterLab) {
         this.properties = properties;
         this.backfillService = backfillService;
+        this.coverageChecker = coverageChecker;
         this.toggles = toggles;
         this.riskLab = riskLab;
         this.costLab = costLab;
@@ -235,11 +238,16 @@ public class CandidateLabRouter {
      * §14.1 후보 유니버스(54종목)를 idempotent 백필하고, 이번 실행이 부동 날짜가 아닌 고정 후보
      * 설정으로 도는 재현성 실행임을 로그로 남긴다. targetSymbols는 건드리지 않으므로
      * (backfillExtra는 추가 표본만 적재) VB 유니버스는 오염되지 않는다.
+     *
+     * <p>백필 직후 <b>채점 전 커버리지 검사</b>를 통과시킨다 — 창 끝까지 캔들이 없는 채로
+     * 채점되어 그 값이 기준선으로 굳던 결함(2026-07 §14.1) 차단. 기준선을 쓰는 실행
+     * (write-baseline=true)은 미달이면 여기서 중단된다.
      */
     private List<String> prepareCandidateUniverse(String mode, LocalDate from, LocalDate to) {
         List<String> candidateSymbols = properties.getCandidateSymbols();
         int extra = backfillService.backfillExtra(candidateSymbols);
         log.info("[Orchestrator] {} 후보 유니버스 백필: 신규 {}건 (idempotent — 기존은 스킵)", mode, extra);
+        coverageChecker.verify(mode, candidateSymbols, to, properties.isWriteBaseline());
         log.info("[Orchestrator] {} 후보 고정 설정 사용(candidate-symbols {}개, 기간 {}~{}) — 재현성 실행",
                 mode, candidateSymbols.size(), from, to);
         return candidateSymbols;

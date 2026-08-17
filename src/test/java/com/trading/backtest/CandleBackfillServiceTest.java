@@ -198,6 +198,66 @@ class CandleBackfillServiceTest {
                 CandleBackfillService.COVERAGE_MIN_WEEKDAYS, 0)).isTrue();
     }
 
+    // ── 판정 창 끝 슬랙 결함 (2026-08-17, _workspace/7_quant_baseline-drift.md) ──
+
+    @Test
+    @DisplayName("판정 창 끝이 아직 안 채워졌으면 7일 슬랙 안이어도 증분 수취한다")
+    void missingRanges_judgingWindowEndUncovered_fillsDespiteSlack() {
+        // 2026-07-24 앵커 실행 재현: 저장 최신 07-16, to=07-23, 판정 창 끝 07-21
+        // 옛 규칙(storedTo < to-7)은 07-16 < 07-16 = false로 "충족"이라 판정해 창 끝 2거래일을
+        // 비운 채 채점하게 했다.
+        LocalDate storedTo = LocalDate.of(2026, 7, 16);
+        LocalDate to = LocalDate.of(2026, 7, 23);
+        properties.setCandidateTo(LocalDate.of(2026, 7, 21));
+        LocalDate from = LocalDate.of(2023, 7, 22);
+        stubStoredRange("005930", from, storedTo);
+
+        List<CandleBackfillService.DateRange> gaps = sut.missingRanges("005930", from, to);
+
+        assertThat(gaps).hasSize(1);
+        assertThat(gaps.get(0).from()).isEqualTo(LocalDate.of(2026, 7, 17));
+        assertThat(gaps.get(0).to()).isEqualTo(to);
+    }
+
+    @Test
+    @DisplayName("판정 창 끝이 이미 채워졌으면 최근 며칠은 슬랙대로 스킵한다 (불필요한 API 호출 억제 유지)")
+    void missingRanges_judgingWindowEndCovered_keepsSlack() {
+        LocalDate to = LocalDate.of(2026, 8, 16);
+        LocalDate storedTo = LocalDate.of(2026, 8, 12);   // to-4일 = 슬랙 이내
+        properties.setCandidateTo(LocalDate.of(2026, 7, 21));
+        properties.setCrashVolTo(LocalDate.of(2026, 7, 21));
+        properties.setStressTo(LocalDate.of(2026, 7, 21));
+        LocalDate from = LocalDate.of(2023, 7, 22);
+        stubStoredRange("005930", from, storedTo);
+
+        assertThat(sut.missingRanges("005930", from, to)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("needsTailFill: 슬랙 초과는 항상 수취, 슬랙 이내는 판정 창 끝 미달일 때만 수취")
+    void needsTailFill_rules() {
+        LocalDate to = LocalDate.of(2026, 7, 23);
+        LocalDate windowEnd = LocalDate.of(2026, 7, 21);
+
+        // 슬랙(7일) 초과 — 판정 창과 무관하게 수취
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 1), to, windowEnd, 7)).isTrue();
+        // 슬랙 이내지만 판정 창 끝(07-21)에 못 미침 — 예외적으로 수취
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 16), to, windowEnd, 7)).isTrue();
+        // 슬랙 이내이고 판정 창 끝을 이미 덮음 — 스킵
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 21), to, windowEnd, 7)).isFalse();
+        // 상한(to)까지 이미 저장 — 스킵
+        assertThat(CandleBackfillService.needsTailFill(to, to, windowEnd, 7)).isFalse();
+        // 판정 창 끝이 to보다 미래(=아직 받을 수 없는 구간)면 예외를 적용하지 않는다
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 21), to, LocalDate.of(2026, 12, 31), 7)).isFalse();
+        // 판정 창 설정이 없으면 옛 슬랙 규칙 그대로
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 16), to, null, 7)).isFalse();
+    }
+
     private void stubStoredRange(String code, LocalDate storedFrom, LocalDate storedTo) {
         CandleHistory first = CandleHistory.ofDaily(code,
                 new Candle(storedFrom, 1, 1, 1, 1, 1));

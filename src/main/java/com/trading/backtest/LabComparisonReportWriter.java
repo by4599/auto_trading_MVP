@@ -28,9 +28,15 @@ public class LabComparisonReportWriter {
     private static final Logger log = LoggerFactory.getLogger(LabComparisonReportWriter.class);
 
     private final BacktestReportWriter baselineWriter;
+    private final BaselineDriftReporter driftReporter;
+    private final CandleCoverageChecker coverageChecker;
 
-    public LabComparisonReportWriter(BacktestReportWriter baselineWriter) {
+    public LabComparisonReportWriter(BacktestReportWriter baselineWriter,
+                                     BaselineDriftReporter driftReporter,
+                                     CandleCoverageChecker coverageChecker) {
         this.baselineWriter = baselineWriter;
+        this.driftReporter = driftReporter;
+        this.coverageChecker = coverageChecker;
     }
 
     public Path writeExitLabReport(LabScope scope, List<ExitLabRow> rows) {
@@ -64,6 +70,8 @@ public class LabComparisonReportWriter {
 
         List<ExitLabRow> passers = rows.stream().filter(r -> r.judgment().pass()).toList();
         appendRegimeConsistency(md, passers);
+        appendCoverage(md);
+        appendBaselineDrift(md, scope, passers, baselineSlug);
 
         md.append("## 판독 지침\n\n");
         for (String line : template.readingGuide()) md.append(line).append('\n');
@@ -132,6 +140,24 @@ public class LabComparisonReportWriter {
             }
             md.append('\n');
         }
+    }
+
+    /** 채점 전 커버리지 검사 결과 — 창 끝까지 캔들이 있었는지를 리포트에 못 박는다 */
+    private void appendCoverage(StringBuilder md) {
+        coverageChecker.lastReport().ifPresent(c -> md.append(c.markdownLine()));
+    }
+
+    /**
+     * 회귀 앵커 대조 — 기준선 yml(정본)과 이번 실행을 맞춰 본다. 대조 대상은 기준선이 기록될
+     * 프로필과 같은 규칙(첫 합격 프로필)이라 "찍었다면 이 값이 들어갔을 것"과 정확히 대응한다.
+     * 앵커 파일을 덮어쓰기(save 이후 writeBaselineIfRequested) <b>전에</b> 읽는다.
+     */
+    private void appendBaselineDrift(StringBuilder md, LabScope scope,
+                                     List<ExitLabRow> passers, String baselineSlug) {
+        ExitLabRow anchorRow = passers.isEmpty() ? null : passers.get(0);
+        md.append(driftReporter.render(baselineSlug, scope.from(), scope.to(),
+                anchorRow == null ? null : anchorRow.profileName(),
+                anchorRow == null ? null : anchorRow.result().aggregateValidation()));
     }
 
     private Path save(String markdown, ComparisonTemplate template, LabScope scope) {

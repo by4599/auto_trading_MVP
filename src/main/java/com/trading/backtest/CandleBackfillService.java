@@ -194,13 +194,38 @@ public class CandleBackfillService {
         LocalDate storedTo   = latest.get().getCandleDate();
 
         // 앞쪽 공백 — 휴장일 여유 7일: 저장 최초일이 from+7 이내면 이미 커버로 간주
-        if (storedFrom.isAfter(from.plusDays(7))) {
+        if (storedFrom.isAfter(from.plusDays(SLACK_DAYS))) {
             gaps.add(new DateRange(from, storedFrom.minusDays(1)));
         }
-        // 뒤쪽 공백 — 최신 저장일 이후 7일 넘게 비면 증분 수취
-        if (storedTo.isBefore(to.minusDays(7))) {
+        if (needsTailFill(storedTo, to, properties.requiredCoverageThrough(), SLACK_DAYS)) {
             gaps.add(new DateRange(storedTo.plusDays(1), to));
         }
         return gaps;
+    }
+
+    /** 뒤쪽 공백 슬랙 (달력일) — 매일 실행할 때 최근 며칠 때문에 매번 API를 때리지 않기 위한 여유 */
+    static final int SLACK_DAYS = 7;
+
+    /**
+     * 뒤쪽 공백을 수취해야 하는가.
+     *
+     * <p>슬랙은 유지한다 — 목적(매일 실행 시 불필요한 API 호출 억제)이 여전히 유효하다.
+     * 다만 <b>고정 판정 창의 끝({@code mustCoverThrough})은 슬랙의 예외</b>로 둔다:
+     * 판정 창 끝은 저장소에 못 박힌 날짜인데 {@code to}(= 실행일−1)는 실행일 따라 움직여,
+     * 둘의 간격이 슬랙 안에 들어간 날 기준선을 찍으면 창 끝자락이 캔들 없이 채점된다
+     * (2026-07 §14.1 드리프트, `_workspace/7_quant_baseline-drift.md`). 한 번 채우면
+     * {@code storedTo ≥ mustCoverThrough}가 되어 추가 호출은 더 이상 생기지 않는다.
+     *
+     * <p>{@code mustCoverThrough}가 {@code to}보다 미래면(=아직 받을 수 없는 구간) 이 예외는
+     * 적용하지 않는다 — 못 채우는 것을 매번 시도할 이유가 없고, 그 상태는
+     * {@link CandleCoverageChecker}가 채점 전에 잡는다.
+     */
+    static boolean needsTailFill(LocalDate storedTo, LocalDate to,
+                                 LocalDate mustCoverThrough, int slackDays) {
+        if (!storedTo.isBefore(to)) return false;
+        if (storedTo.isBefore(to.minusDays(slackDays))) return true;
+        return mustCoverThrough != null
+                && !mustCoverThrough.isAfter(to)
+                && storedTo.isBefore(mustCoverThrough);
     }
 }
