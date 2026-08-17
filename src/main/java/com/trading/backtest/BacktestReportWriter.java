@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * B-3 결과 리포트 + 거버넌스 기준선 파일 (설계 문서 §4).
@@ -35,6 +36,15 @@ public class BacktestReportWriter {
     static final double MIN_PF            = 1.3;
     static final double MAX_MDD           = 0.15;
     static final double MIN_ADJACENT_PF   = 1.15;
+
+    private final BacktestDataProperties properties;
+    private final CandleCoverageChecker coverageChecker;
+
+    public BacktestReportWriter(BacktestDataProperties properties,
+                                CandleCoverageChecker coverageChecker) {
+        this.properties = properties;
+        this.coverageChecker = coverageChecker;
+    }
 
     public record FilterVariant(String name, WalkForwardEngine.WalkForwardResult result,
                                 boolean adopted, String verdictNote) {}
@@ -173,8 +183,17 @@ public class BacktestReportWriter {
         md.append("- 생존 편향: 현 유니버스(대형주)는 영향 작음 — 유니버스 확대 시 재평가 (§2.2)\n");
     }
 
-    /** 합격 시에만 호출 — 거버넌스가 소비하는 기준선 (버전 관리 대상) */
+    /**
+     * 합격 시에만 호출 — 거버넌스가 소비하는 기준선 (버전 관리 대상).
+     *
+     * @return 기록한 파일 경로. {@link #baselineRefusalReason() 관문}에 막히면 {@code null}
+     */
     public Path writeBaseline(ReportData data, List<FilterVariant> adoptedFilters) {
+        String refusal = baselineRefusalReason();
+        if (refusal != null) {
+            log.warn("[Report] 기준선 미기록 — {}", refusal);
+            return null;
+        }
         BacktestMetrics v = data.baseline().aggregateValidation();
         // 기록 포맷·파일명 규칙은 BaselineSnapshot/BaselineStore와 공유한다 —
         // 판독부(회귀 앵커 대조)가 같은 자릿수·같은 파일을 보게 하려는 것이다(출력은 종전과 동일).
@@ -203,6 +222,32 @@ public class BacktestReportWriter {
         } catch (IOException e) {
             throw new UncheckedIOException("기준선 저장 실패", e);
         }
+    }
+
+    /**
+     * 기준선 기록 관문 — 거버넌스 파일은 이 검사를 통과해야만 바뀐다.
+     *
+     * <p>두 조건을 모두 만족해야 쓴다. ① {@code --backtest.write-baseline=true} 명시
+     * (2026-07-23 결정 — 대조 실행이 기준선을 조용히 덮어쓰던 사고 차단) ② 채점 창의 캔들
+     * 커버리지 검사 통과(2026-08-17 §14.5 — 창 끝이 빈 채로 찍힌 기준선이 §14.1 드리프트를 낳았다).
+     *
+     * <p>검사를 호출부마다 흩어 두면 새 랩이 생길 때 또 빠진다 — 실제로 {@code FullBacktestLab}·
+     * {@code SingleStrategyLab}이 둘 다 빠져 있었다. 기록 지점 한곳에서 막는 이유다.
+     *
+     * @return 막아야 할 사유, 통과면 {@code null}
+     */
+    private String baselineRefusalReason() {
+        if (!properties.isWriteBaseline()) {
+            return "--backtest.write-baseline=true 가 아니다 (기본 OFF — 기준선 갱신은 명시 행위)";
+        }
+        Optional<CandleCoverage> coverage = coverageChecker.lastReport();
+        if (coverage.isEmpty()) {
+            return "채점 전 커버리지 검사를 거치지 않았다 — 창 끝이 비었는지 확인되지 않은 결과다";
+        }
+        if (!coverage.get().sufficient()) {
+            return "커버리지 미달: " + coverage.get().summary();
+        }
+        return null;
     }
 
     private static String metricsRow(String label, BacktestMetrics m) {

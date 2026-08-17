@@ -36,20 +36,30 @@ public class FullBacktestLab {
     private final BacktestReportWriter reportWriter;
     private final StrategyToggles toggles;
     private final ExecutionKnobs knobs;
+    private final CandleCoverageChecker coverageChecker;
+    private final BacktestDataProperties properties;
 
     public FullBacktestLab(BacktestRunner runner,
                            WalkForwardEngine walkForwardEngine,
                            BacktestReportWriter reportWriter,
                            StrategyToggles toggles,
-                           ExecutionKnobs knobs) {
+                           ExecutionKnobs knobs,
+                           CandleCoverageChecker coverageChecker,
+                           BacktestDataProperties properties) {
         this.runner = runner;
         this.walkForwardEngine = walkForwardEngine;
         this.reportWriter = reportWriter;
         this.toggles = toggles;
         this.knobs = knobs;
+        this.coverageChecker = coverageChecker;
+        this.properties = properties;
     }
 
     public void run(List<String> symbols, LocalDate from, LocalDate to) {
+        // 채점 전 커버리지 검사 — full 모드는 후보 랩 라우터를 지나지 않아 관문이 빠져 있었다
+        // (§14.5). 창이 부동(rangeTo)이라 백필 슬랙만큼 꼬리가 밀릴 수 있다.
+        coverageChecker.verify("full", symbols, to, properties.isWriteBaseline());
+
         // VB(방식1) 기준 실행 — 방식2·3이 같이 켜져 신호가 섞이지 않도록 명시적으로 끈다
         toggles.enableVbOnly();
 

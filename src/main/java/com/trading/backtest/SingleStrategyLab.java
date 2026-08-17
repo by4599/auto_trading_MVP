@@ -26,18 +26,34 @@ public class SingleStrategyLab {
     private final WalkForwardEngine walkForwardEngine;
     private final BacktestReportWriter reportWriter;
     private final StrategyToggles toggles;
+    private final CandleCoverageChecker coverageChecker;
+    private final BacktestDataProperties properties;
 
     public SingleStrategyLab(WalkForwardEngine walkForwardEngine,
                              BacktestReportWriter reportWriter,
-                             StrategyToggles toggles) {
+                             StrategyToggles toggles,
+                             CandleCoverageChecker coverageChecker,
+                             BacktestDataProperties properties) {
         this.walkForwardEngine = walkForwardEngine;
         this.reportWriter = reportWriter;
         this.toggles = toggles;
+        this.coverageChecker = coverageChecker;
+        this.properties = properties;
+    }
+
+    /**
+     * 채점 전 커버리지 검사 — ma-breakout·scalping은 후보 랩 라우터를 지나지 않아 관문이
+     * 빠져 있었다(§14.5). 창이 부동(rangeTo)이라 백필 슬랙만큼 꼬리가 밀릴 수 있다.
+     */
+    private void verifyCoverage(LabScope scope) {
+        coverageChecker.verify(scope.slug(), scope.symbols(), scope.to(),
+                properties.isWriteBaseline());
     }
 
     /** 단일 변형 실행(MA돌파 등) — variants는 있으면 "변형 비교" 섹션에 채워진다 */
     public void runSingle(LabScope scope, Runnable enableOnly,
                           List<BacktestReportWriter.FilterVariant> variants) {
+        verifyCoverage(scope);
         enableOnly.run();
         WalkForwardEngine.WalkForwardResult result = walkForward(scope);
         writeSingleStrategyReport(scope, result, variants);
@@ -47,6 +63,7 @@ public class SingleStrategyLab {
     public void runScalping(List<String> symbols, LocalDate from, LocalDate to) {
         LabScope scope = new LabScope(
                 "눌림목 반등 스캘핑(SCALPING_MOMENTUM)", "SCALPING", symbols, from, to);
+        verifyCoverage(scope);
         resetScalpingDefaults();
         WalkForwardEngine.WalkForwardResult baseline = walkForward(scope);
 
