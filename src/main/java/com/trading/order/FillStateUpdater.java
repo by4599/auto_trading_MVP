@@ -289,17 +289,22 @@ public class FillStateUpdater {
             }
             positionRepository.save(pos);
         } else {
-            // applySell 전에 기록 — 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
-            tradeResultTracker.recordSellFill(
-                    order.getStockCode(), newlyFilled, fillPrice, pos.getAveragePrice());
+            // 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
+            double realized = (fillPrice - pos.getAveragePrice()) * newlyFilled;
             // 실현손익 영속화 (실적 대시보드) — 라이브 경로 전용, 같은 트랜잭션에서 커밋.
             // 칸 귀속은 보유 포지션의 칸이 원천 (매도 신호가 아니라 "누구 돈으로 샀나" 기준)
             tradeResultRepository.save(TradeResult.live(
                     order.getStockCode(), newlyFilled, pos.getAveragePrice(), fillPrice,
                     pos.getBucket()));
+            // 연속손실은 조각이 아니라 매매 1회 단위 — 전량 청산될 때 합계로 한 번만 판정한다
+            pos.accrueRealized(realized);
             pos.applySell(newlyFilled);
-            if (pos.getQuantity() == 0) positionRepository.delete(pos);
-            else                        positionRepository.save(pos);
+            if (pos.getQuantity() == 0) {
+                tradeResultTracker.recordRoundTrip(order.getStockCode(), pos.getRealizedPnlAccum());
+                positionRepository.delete(pos);
+            } else {
+                positionRepository.save(pos);
+            }
         }
     }
 }

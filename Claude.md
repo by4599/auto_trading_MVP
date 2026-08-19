@@ -216,7 +216,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭 연동) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭, **라운드트립 단위** 2026-08-19) |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
@@ -344,8 +344,10 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
    레이트 조정자(2026-08) 배포로 재현되지 않았다. (항목 번호는 아래 참조 유지를 위해 그대로 둔다)
 2. 지정가 분할(Price Jitter) 미구현 — ADR-001 3장 파라미터(가격 간격·주문 개수) 결정 선행
 3. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 (거래일 캘린더는 `market-calendar.yml`로 해소됨)
-4. 연속손실 기록은 매도 체결 청크 단위 — 부분 체결 매도 시 라운드트립 집계로 전환 필요
-   (R 사이징으로 수량 > 1 매도가 가능해져 발생 확률 상승)
+4. ~~연속손실 기록은 매도 체결 청크 단위~~ ✅ **해소 (2026-08-19)** — 라운드트립(진입~전량 청산)
+   단위로 전환. 조각 손익은 `Position.realizedPnlAccum`에 쌓이고 보유 수량이 0이 되는 순간
+   합계로 1회만 판정한다(부분 축소는 세지 않는다). 백테스트 결과는 불변 —
+   매도는 항상 전량이라 조각=전체이며, risk-lab 리포트가 실행 시각 외 바이트 동일로 재현됐다
 5. **체결누락 — 진단 종결, 모의 환경 한정 결함으로 확정 (2026-08-10)** — 모의 체결조회
    (VTTC8001R)는 주문번호 필터를 빼고 하루 단위로 조회해도 **실제 체결에 빈 목록**을 준다
    (rt_cd=0인데 count=0. 8/4~8/7 우리 DB 체결 52건 대비 브로커 조회 0건 — BACKTEST-DESIGN §16.6).

@@ -135,10 +135,11 @@ public class BacktestOrderClient implements KisOrderClient {
         order.markFilled(quantity, fillPrice);
         orderHistoryRepository.save(order);
 
-        // applySell 전에 기록 — 평단가는 매도 반영 전 값 (FillStateUpdater와 동일 순서, F-5)
-        tradeResultTracker.recordSellFill(stockCode, quantity, fillPrice, pos.getAveragePrice());
+        // 평단가는 매도 반영 전 값 (FillStateUpdater와 동일 순서, F-5)
+        pos.accrueRealized((fillPrice - pos.getAveragePrice()) * quantity);
         pos.applySell(quantity);
         if (pos.getQuantity() == 0) {
+            tradeResultTracker.recordRoundTrip(stockCode, pos.getRealizedPnlAccum());
             positionRepository.delete(pos);
         } else {
             positionRepository.save(pos);
