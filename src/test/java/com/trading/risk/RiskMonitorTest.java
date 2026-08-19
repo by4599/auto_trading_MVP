@@ -5,6 +5,7 @@ import com.trading.market.KisProperties;
 import com.trading.market.MarketCalendarProperties;
 import com.trading.market.MarketCalendarService;
 import com.trading.position.Account;
+import com.trading.position.NoOpPeakEquityCalibrator;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionManager;
 import com.trading.position.ShadowPortfolio;
@@ -45,7 +46,9 @@ class RiskMonitorTest {
     void setUp() {
         monitorPm = mock(PositionManager.class);
         shadowPm  = mock(PositionManager.class);
-        shadowPortfolio = new ShadowPortfolio(shadowPm, mock(PortfolioStateRepository.class));
+        // 전고점 검증은 이 테스트의 관심사가 아니므로 무검증 구현체로 조립한다 (기존 동작 그대로).
+        shadowPortfolio = new ShadowPortfolio(shadowPm, mock(PortfolioStateRepository.class),
+                new NoOpPeakEquityCalibrator());
 
         BrokerageApiClient brokerageClient = mock(BrokerageApiClient.class);
         when(brokerageClient.getActualAccountAsset()).thenReturn(new ActualAccountInfo(List.of()));

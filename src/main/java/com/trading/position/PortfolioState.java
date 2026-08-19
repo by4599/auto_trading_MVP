@@ -15,6 +15,8 @@ import jakarta.persistence.Table;
 public class PortfolioState {
 
     public static final String KEY_PEAK_EQUITY = "PEAK_EQUITY";
+    /** 실측 검증으로 전고점을 낮추기 직전의 원값 — 오염 원인 조사용 보존 (최근 1회) */
+    public static final String KEY_PEAK_EQUITY_RAW_BEFORE_CALIBRATION = "PEAK_EQUITY_RAW_BEFORE_CALIBRATION";
     public static final String KEY_CONSECUTIVE_LOSS_COUNT = "CONSECUTIVE_LOSS_COUNT";
     // 연속 무중단 가동 기록 (릴리즈 검증 항목) — RunStreakRecorder가 거래일마다 갱신
     public static final String KEY_RUN_STREAK_DAYS = "RUN_STREAK_DAYS";

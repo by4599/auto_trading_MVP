@@ -19,32 +19,64 @@ public class ShadowPortfolio {
 
     private final PositionManager positionManager;
     private final PortfolioStateRepository stateRepository;
+    private final PeakEquityCalibrator calibrator;
     private volatile double peakEquity = 0.0;
 
     public ShadowPortfolio(PositionManager positionManager,
-                           PortfolioStateRepository stateRepository) {
+                           PortfolioStateRepository stateRepository,
+                           PeakEquityCalibrator calibrator) {
         this.positionManager = positionManager;
         this.stateRepository = stateRepository;
+        this.calibrator = calibrator;
     }
 
+    /**
+     * 저장된 전고점을 복원하되, 실측 근거(daily_equity)상 불가능한 값이면 교정해서 다시 저장한다.
+     * peakEquity는 단조 증가라 스스로 낮아지지 못하므로 오염이 영구화된다 —
+     * 기동 시 한 번 실측과 대조하는 것이 유일한 복구 지점이다 (2026-08-12 사고).
+     */
     @PostConstruct
     void restore() {
         stateRepository.findById(PortfolioState.KEY_PEAK_EQUITY)
                 .ifPresent(state -> {
-                    peakEquity = state.getStateValue();
-                    log.info("[ShadowPortfolio] peakEquity 복원: {}", peakEquity);
+                    double stored = state.getStateValue();
+                    double calibrated = calibrator.calibrate(stored);
+                    peakEquity = calibrated;
+                    if (calibrated < stored) {
+                        stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY, calibrated));
+                        log.error("[ShadowPortfolio] 오염된 peakEquity 교정: {} → {} (실측 근거로 정정, 영속화 완료)",
+                                stored, calibrated);
+                    } else {
+                        log.info("[ShadowPortfolio] peakEquity 복원: {}", peakEquity);
+                    }
                 });
     }
 
     @Scheduled(fixedRate = 1000)
     public void tick() {
         try {
-            double current = positionManager.snapshotAccount().getTotalAssetValue();
-            if (current > peakEquity) {
-                peakEquity = current;
-                stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY, current));
-                log.debug("[ShadowPortfolio] peakEquity 갱신: {}", peakEquity);
+            Account account = positionManager.snapshotAccount();
+
+            // 낡은(폴백) 스냅샷으로는 전고점을 갱신하지 않는다 — RiskMonitor·StopLossMonitor와 같은
+            // 데이터 품질 게이트. 전고점은 리셋이 없어 한 번 잘못 올리면 영구히 남는다.
+            if (!account.isFresh()) {
+                log.debug("[ShadowPortfolio] 계좌 스냅샷이 낡음(잔고 API 폴백) — peakEquity 갱신 건너뜀");
+                return;
             }
+
+            double current = account.getTotalAssetValue();
+            if (current <= 0 || current <= peakEquity) return;
+
+            // 신선한 값이어도 실측 근거상 불가능하게 크면 갱신하지 않는다 (잔고 오독 1회 → 영구 오염 차단)
+            if (calibrator.isImplausible(current)) {
+                log.warn("[ShadowPortfolio] 총자산 {}이 실측 근거상 비정상 — peakEquity 갱신 건너뜀 (현재값={})",
+                        current, peakEquity);
+                return;
+            }
+
+            peakEquity = current;
+            stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY, current));
+            log.debug("[ShadowPortfolio] peakEquity 갱신: {}", peakEquity);
         } catch (Exception e) {
             log.warn("[ShadowPortfolio] tick 오류 — peakEquity 유지 (현재값={}): {}", peakEquity, e.getMessage());
         }
