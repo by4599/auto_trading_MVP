@@ -125,8 +125,16 @@ class TradingControllerTest {
     }
 
     private TradingController newController(RiskEngine riskEngine, Environment environment) {
-        return new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier,
-                portfolioStateRepository, riskEngine, orderEngine, positionManager, environment);
+        return newController(riskEngine, environment, kisProperties);
+    }
+
+    /** 리허설 판정은 DrillService가 한다 — 컨트롤러는 확인 문자열만 보고 넘긴다 */
+    private TradingController newController(RiskEngine riskEngine, Environment environment,
+                                            KisProperties props) {
+        DrillOperations drill = new DrillService(props, statusManager, riskEngine, orderEngine,
+                positionManager, positionRepository, liquidationService, environment);
+        return new TradingController(statusManager, props, liquidationService, reconciler, notifier,
+                portfolioStateRepository, drill);
     }
 
     private static KisProperties configuredProps() {
@@ -185,9 +193,8 @@ class TradingControllerTest {
     @Test
     @DisplayName("KIS 자격증명 미설정 → /start 거부")
     void start_rejected_when_not_configured() {
-        TradingController unconfigured = new TradingController(
-                statusManager, new KisProperties(), liquidationService, reconciler, notifier,
-                portfolioStateRepository, passingRiskEngine(), orderEngine, positionManager, paperEnvironment);
+        TradingController unconfigured =
+                newController(passingRiskEngine(), paperEnvironment, new KisProperties());
 
         Map<String, Object> res = unconfigured.start();
 
@@ -319,9 +326,8 @@ class TradingControllerTest {
     @Test
     @DisplayName("KIS 자격증명 미설정 → 거부")
     void manual_buy_drill_rejected_when_not_configured() {
-        TradingController unconfigured = new TradingController(
-                statusManager, new KisProperties(), liquidationService, reconciler, notifier,
-                portfolioStateRepository, passingRiskEngine(), orderEngine, positionManager, paperEnvironment);
+        TradingController unconfigured =
+                newController(passingRiskEngine(), paperEnvironment, new KisProperties());
 
         Map<String, Object> res = unconfigured.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
 

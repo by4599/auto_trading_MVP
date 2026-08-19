@@ -21,6 +21,9 @@ public class PortfolioState {
     // 연속 무중단 가동 기록 (릴리즈 검증 항목) — RunStreakRecorder가 거래일마다 갱신
     public static final String KEY_RUN_STREAK_DAYS = "RUN_STREAK_DAYS";
     public static final String KEY_RUN_STREAK_LAST_DATE = "RUN_STREAK_LAST_DATE";  // yyyyMMdd 숫자
+    // 예약 청산 리허설 진행 표시 — 같은 날 중복 발동을 막는다 (둘 다 yyyyMMdd 숫자)
+    public static final String KEY_DRILL_BUY_DATE  = "DRILL_BUY_DATE";
+    public static final String KEY_DRILL_DONE_DATE = "DRILL_DONE_DATE";
 
     @Id
     @Column(name = "state_key", nullable = false, length = 50)

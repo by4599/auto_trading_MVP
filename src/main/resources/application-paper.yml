@@ -56,6 +56,16 @@ trading:
     rebound-pct: 0.003
     take-profit-pct: 0.008
 
+  # 예약 청산 리허설 (OPERATIONS §7) — 사람이 그 시각에 버튼을 못 눌러도 훈련이 진행되게 한다.
+  # 기본 꺼짐. 켤 때는 date를 콕 집는다 — 상시 반복은 매매 자체를 막는다(리허설은 전량 매도 후 중지).
+  # at에 앱이 꺼져 있었어도 deadline까지는 다시 시도한다. deadline은 타임컷(15:15)보다 앞에 둔다.
+  drill:
+    enabled: false
+    date: ""          # 예: 2026-08-20
+    at: "10:00"
+    deadline: "14:00"
+    buy-if-flat: true # 보유가 없으면 005930 10주를 먼저 사서 청산 대상을 만든다
+
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
 # ./trading-db.mv.db 파일이 생성된다. .gitignore에 반드시 추가할 것.
