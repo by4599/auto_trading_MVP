@@ -2,20 +2,28 @@ package com.trading.control;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.order.OrderEngine;
+import com.trading.position.Account;
 import com.trading.position.PortfolioState;
 import com.trading.position.PortfolioStateRepository;
+import com.trading.position.PositionManager;
 import com.trading.position.ShadowPortfolioReconciler;
 import com.trading.risk.LiquidationService;
+import com.trading.risk.RiskEngine;
+import com.trading.risk.RiskResult;
 import com.trading.risk.TradingMode;
 import com.trading.risk.TradingStatusManager;
 import com.trading.scheduler.RunStreakRecorder;
+import com.trading.signal.Signal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -34,6 +42,10 @@ public class TradingController {
 
     private static final Logger log = LoggerFactory.getLogger(TradingController.class);
     private static final String RESUME_CONFIRM = "CONFIRM_RESUME";
+    private static final String MANUAL_BUY_CONFIRM = "CONFIRM_MANUAL_BUY";
+    /** 리허설 전용 고정값 — 범용 수동 매수 도구가 아니다 (수량·종목을 파라미터로 열지 않는다) */
+    private static final String MANUAL_BUY_STOCK_CODE = "005930";
+    private static final int    MANUAL_BUY_QUANTITY   = 10;
 
     private final TradingStatusManager statusManager;
     private final KisProperties        kisProperties;
@@ -41,19 +53,31 @@ public class TradingController {
     private final ShadowPortfolioReconciler reconciler;
     private final NotificationService  notifier;
     private final PortfolioStateRepository portfolioStateRepository;
+    private final RiskEngine           riskEngine;
+    private final OrderEngine          orderEngine;
+    private final PositionManager      positionManager;
+    private final Environment          environment;
 
     public TradingController(TradingStatusManager statusManager,
                               KisProperties        kisProperties,
                               LiquidationService   liquidationService,
                               ShadowPortfolioReconciler reconciler,
                               NotificationService  notifier,
-                              PortfolioStateRepository portfolioStateRepository) {
+                              PortfolioStateRepository portfolioStateRepository,
+                              RiskEngine           riskEngine,
+                              OrderEngine          orderEngine,
+                              PositionManager      positionManager,
+                              Environment          environment) {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.liquidationService = liquidationService;
         this.reconciler = reconciler;
         this.notifier = notifier;
         this.portfolioStateRepository = portfolioStateRepository;
+        this.riskEngine = riskEngine;
+        this.orderEngine = orderEngine;
+        this.positionManager = positionManager;
+        this.environment = environment;
     }
 
     /**
@@ -143,6 +167,51 @@ public class TradingController {
         liquidationService.triggerForceLiquidation();
         return result(true, "강제청산 개시 — 진행 상황은 텔레그램/로그 확인, 종료 후 EMERGENCY_STOPPED 유지",
                 statusManager.getCurrentMode());
+    }
+
+    /**
+     * 강제청산 리허설용 포지션 확보 — 005930 정확히 10주 시장가 매수 (모의계좌 전용).
+     * 전략 신호를 기다리지 않고 청산 리허설을 돌리기 위한 테스트 장치이며,
+     * 리스크 룰은 그대로 통과시킨다 (막히면 사유를 그대로 돌려주고 강제로 뚫지 않는다).
+     * 수량 사이징(R 역산)만 우회한다 — OrderEngine.executeManualBuy.
+     */
+    @PostMapping("/manual-buy-drill")
+    public Map<String, Object> manualBuyDrill(@RequestBody Map<String, String> body) {
+        TradingMode mode = statusManager.getCurrentMode();
+        if (!isPaperProfile()) {
+            return result(false, "모의투자(paper) 프로필에서만 사용할 수 있는 리허설 기능입니다", mode);
+        }
+        if (!MANUAL_BUY_CONFIRM.equals(body.get("confirm"))) {
+            return result(false,
+                    "확인 문자열 불일치 — body에 {\"confirm\":\"" + MANUAL_BUY_CONFIRM + "\"}를 보내야 합니다",
+                    mode);
+        }
+        if (!kisProperties.isConfigured()) {
+            return result(false, "KIS 자격증명 미설정", mode);
+        }
+        if (mode != TradingMode.RUNNING) {
+            return result(false,
+                    "현재 모드(" + mode + ")에서는 신규 매수가 차단됩니다 — /api/trading/start로 RUNNING 전환 후 다시 시도하세요",
+                    mode);
+        }
+
+        Signal signal = Signal.buy(MANUAL_BUY_STOCK_CODE, "MANUAL_DRILL");
+        Account account = positionManager.snapshotAccount();
+        RiskResult risk = riskEngine.check(signal, account);
+        if (!risk.isPass()) {
+            log.warn("[TradingController] 수동 매수 리허설 차단 — {}", risk.getReason());
+            return result(false, "리스크 룰이 매수를 막았습니다 — " + risk.getReason(), mode);
+        }
+
+        log.warn("[TradingController] 수동 매수 리허설 개시 — {} {}주 시장가",
+                MANUAL_BUY_STOCK_CODE, MANUAL_BUY_QUANTITY);
+        orderEngine.executeManualBuy(signal, MANUAL_BUY_QUANTITY);
+        return result(true, MANUAL_BUY_STOCK_CODE + " " + MANUAL_BUY_QUANTITY
+                + "주 시장가 매수를 접수했습니다 — 체결은 3초 주기 체결확인이 반영합니다", mode);
+    }
+
+    private boolean isPaperProfile() {
+        return Arrays.asList(environment.getActiveProfiles()).contains("paper");
     }
 
     /**
