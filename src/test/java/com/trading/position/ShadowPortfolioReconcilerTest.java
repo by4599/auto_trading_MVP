@@ -1,6 +1,8 @@
 package com.trading.position;
 
 import com.trading.NotificationService;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.risk.ActualAccountInfo;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
@@ -10,6 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,9 +55,39 @@ class ShadowPortfolioReconcilerTest {
     }
 
     private ShadowPortfolioReconciler sut() {
-        return new ShadowPortfolioReconciler(statusManager, liquidationService,
-                balanceClient, positionRepository, brokerageClient, notifier);
+        return sut(inHours());
     }
+
+    private ShadowPortfolioReconciler sut(MarketCalendarService cal) {
+        return new ShadowPortfolioReconciler(statusManager, liquidationService,
+                balanceClient, positionRepository, brokerageClient, notifier, cal, stopLossArmer());
+    }
+
+    /** StopLossArmer는 구체 클래스 — 인터페이스(MarketDataService·PositionRepository)만 목으로 실조립 */
+    private com.trading.risk.StopLossArmer stopLossArmer() {
+        com.trading.market.MarketDataService marketData = mock(com.trading.market.MarketDataService.class);
+        when(marketData.getDailyCandles(anyString(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(atrCandles);
+        return new com.trading.risk.StopLossArmer(marketData, new com.trading.market.AtrCalculator(),
+                positionRepository, com.trading.bucket.BucketTestSupport.defaultParams());
+    }
+
+    /** ATR 14 산출용 일봉 15개 — TR=10 고정이라 ATR=10, 손절폭 = 10 × 1.5 = 15 */
+    private final List<com.trading.market.Candle> atrCandles = java.util.stream.IntStream.range(0, 15)
+            .mapToObj(i -> new com.trading.market.Candle(
+                    LocalDate.of(2026, 7, 1).plusDays(i), 100, 105, 95, 100, 1000))
+            .map(c -> (com.trading.market.Candle) c)
+            .toList();
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 2026-07-15(수) 평일 + 지정 시각 고정 캘린더 */
+    private static MarketCalendarService cal(LocalTime t) {
+        Clock fixed = Clock.fixed(
+                LocalDateTime.of(LocalDate.of(2026, 7, 15), t).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+    private static MarketCalendarService inHours()  { return cal(LocalTime.NOON); }
+    private static MarketCalendarService offHours() { return cal(LocalTime.of(17, 0)); }
 
     private static Position dbHolding(String code, int qty, double avg) {
         Position p = Position.empty(code);
@@ -110,6 +147,50 @@ class ShadowPortfolioReconcilerTest {
         verify(balanceClient, never()).fetchBalance();
     }
 
+    @Test
+    @DisplayName("불일치가 2주기 연속 지속 → 브로커 기준 자동 보정")
+    void reconcile_corrects_after_mismatch_persists_two_cycles() {
+        Position drifted = dbHolding("005930", 10, 70_000);
+        when(positionRepository.findAll()).thenReturn(List.of(drifted));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))));
+
+        ShadowPortfolioReconciler r = sut();
+        r.reconcile();  // 1차 — 알림만, 보정 없음
+        verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
+
+        r.reconcile();  // 2차 — 2주기 지속 → 자동 보정
+        assertThat(drifted.getQuantity()).isEqualTo(5);
+        verify(positionRepository).save(drifted);
+    }
+
+    @Test
+    @DisplayName("불일치가 다음 주기에 사라지면 → 자동 보정 안 함 (일시 오류 보호)")
+    void reconcile_transient_mismatch_not_corrected() {
+        Position pos = dbHolding("005930", 10, 70_000);
+        when(positionRepository.findAll()).thenReturn(List.of(pos));
+        when(balanceClient.fetchBalance()).thenReturn(
+                new BalanceClient.BalanceSnapshot(1_000_000,
+                        List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))),   // 1차: 불일치
+                new BalanceClient.BalanceSnapshot(1_000_000,
+                        List.of(new BalanceClient.Holding("005930", 10, 70_000, 71_000))));  // 2차: 일치
+
+        ShadowPortfolioReconciler r = sut();
+        r.reconcile();  // 불일치 감지 — 알림만
+        r.reconcile();  // 일치 회복 — previousMismatchStocks 클리어, 보정 없음
+
+        verify(positionRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(positionRepository, never()).delete(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("장 시간 외 → 재동기화 자체를 건너뜀 (낡은 데이터 배제)")
+    void reconcile_skips_outside_market_hours() {
+        sut(offHours()).reconcile();
+
+        verify(balanceClient, never()).fetchBalance();
+    }
+
     // ── 기동 재동기화 — 브로커 기준 자동 보정 후 자동 가동(RUNNING) ────────────────
 
     @Test
@@ -148,6 +229,43 @@ class ShadowPortfolioReconcilerTest {
         verify(positionRepository).save(org.mockito.ArgumentMatchers.argThat(
                 p -> p.getStockCode().equals("005930") && p.getQuantity() == 7 && p.getAveragePrice() == 68_000));
         verify(notifier).sendCritical(anyString());
+    }
+
+    @Test
+    @DisplayName("보정으로 만든 포지션에도 손절선이 장착된다 — 무방비 보유 방지(2026-08-04 실측 결함)")
+    void correction_arms_stop_loss_on_created_position() {
+        // 브로커에만 있는 보유분 → 신규 생성. 생성분이 findAll에 보이도록 저장을 반영한다.
+        List<Position> store = new java.util.ArrayList<>();
+        when(positionRepository.findAll()).thenAnswer(inv -> List.copyOf(store));
+        when(positionRepository.save(org.mockito.ArgumentMatchers.any(Position.class)))
+                .thenAnswer(inv -> { Position p = inv.getArgument(0);
+                                     if (!store.contains(p)) store.add(p); return p; });
+        when(positionRepository.findByStockCode("005930"))
+                .thenAnswer(inv -> store.stream().filter(p -> p.getStockCode().equals("005930")).findFirst());
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
+
+        sut().correctFromBroker();
+
+        Position created = store.stream().filter(p -> p.getStockCode().equals("005930")).findFirst().orElseThrow();
+        // 평균단가 68,000 − ATR(10) × 1.5 = 67,985
+        assertThat(created.getStopPrice()).isNotNull();
+        assertThat(created.getStopPrice()).isEqualTo(67_985.0);
+    }
+
+    @Test
+    @DisplayName("이미 손절선이 있으면 건드리지 않는다 — 임의로 옮기면 방어선이 느슨해질 수 있으므로")
+    void correction_keeps_existing_stop_loss() {
+        Position held = dbHolding("005930", 7, 68_000);
+        held.armStopLoss(60_000);
+        when(positionRepository.findAll()).thenReturn(List.of(held));
+        when(positionRepository.findByStockCode("005930")).thenReturn(java.util.Optional.of(held));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+                List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
+
+        sut().correctFromBroker();
+
+        assertThat(held.getStopPrice()).isEqualTo(60_000);
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.trading.position;
 
 import com.trading.bucket.StrategyBucket;
 import jakarta.persistence.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -42,6 +43,24 @@ public class Position {
     @Column(name = "bucket", length = 10)
     private StrategyBucket bucket;
 
+    /**
+     * 최초 진입일 — 다일 보유 칸의 최대 보유일 판정 기준.
+     * 엔티티가 시스템 시계를 직접 읽지 않도록 여기서 채우지 않는다 — 주입된 Clock을 가진
+     * {@code MaxHoldScheduler}가 처음 관측한 거래일에 도장을 찍고 그때부터 센다.
+     * 브로커 보정으로 생긴 행처럼 실제 진입일을 모르는 경우도 같은 경로로 처리되며,
+     * 모르는 과거를 추정해 앞당겨 파는 것보다 늦게 파는 쪽이 안전하다.
+     */
+    @Column(name = "entry_date")
+    private LocalDate entryDate;
+
+    /**
+     * 이번 라운드트립(진입~전량 청산)에서 지금까지 확정된 실현손익 합계.
+     * 매도가 여러 조각으로 체결돼도 연속손실은 매매 1회로 세야 하므로, 조각마다 여기 더해
+     * 수량이 0이 되는 순간 합계로 판정한다. 새로 진입할 때 0에서 다시 시작한다.
+     */
+    @Column(name = "realized_pnl_accum", nullable = false)
+    private double realizedPnlAccum = 0.0;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -58,11 +77,19 @@ public class Position {
 
     /** 매수 체결 반영 — 수량 누적, 가중평균 단가 재계산 */
     public void applyBuy(int filledQty, double filledPrice) {
+        if (this.quantity == 0) {
+            this.realizedPnlAccum = 0.0;   // 새 라운드트립 시작 — 앞 매매의 손익을 물려받지 않는다
+        }
         double totalCost = (double) this.quantity * this.averagePrice
                 + (double) filledQty * filledPrice;
         this.quantity     += filledQty;
         this.averagePrice  = totalCost / this.quantity;
         this.updatedAt     = LocalDateTime.now();
+    }
+
+    /** 매도 조각의 실현손익을 이번 라운드트립 합계에 더한다 (판정은 전량 청산 시 1회) */
+    public void accrueRealized(double realizedPnl) {
+        this.realizedPnlAccum += realizedPnl;
     }
 
     /** 체결가 기준 ATR 손절선 장착 (방법론 §4.1 — 신호 시점가가 아닌 실제 체결가로 계산) */
@@ -93,6 +120,9 @@ public class Position {
                     filledQty, this.quantity, this.stockCode));
         }
         this.quantity -= filledQty;
+        if (this.quantity == 0) {
+            this.entryDate = null;   // 라운드트립 종료 — 재진입 시 새로 센다
+        }
         this.updatedAt = LocalDateTime.now();
     }
 
@@ -105,5 +135,15 @@ public class Position {
     public double getAveragePrice()  { return averagePrice; }
     public Double getStopPrice()     { return stopPrice; }
     public StrategyBucket getBucket() { return bucket; }
+    public LocalDate getEntryDate()  { return entryDate; }
+    public double getRealizedPnlAccum() { return realizedPnlAccum; }
+
+    /** 진입일을 모르는 보유분에 관측일을 도장 찍는다 — 이미 있으면 건드리지 않는다 */
+    public void stampEntryDateIfAbsent(LocalDate date) {
+        if (this.entryDate == null) {
+            this.entryDate = date;
+            this.updatedAt = LocalDateTime.now();
+        }
+    }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

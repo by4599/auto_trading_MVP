@@ -66,7 +66,9 @@ class KisApiClientTest {
     }
 
     private KisApiClient sut() {
-        return new KisApiClient(props, statusManager, notifier, tokenBuilder, apiBuilder);
+        // 테스트는 한도 대기가 무의미하도록 빠른 레이트리미터(10000/초)를 쓴다
+        return new KisApiClient(props, statusManager, notifier,
+                new KisRateLimiter(10_000), tokenBuilder, apiBuilder);
     }
 
     // ── 토큰 발급 재시도 ──────────────────────────────────────────────────────
@@ -157,6 +159,38 @@ class KisApiClientTest {
         assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.RUNNING);
         verify(notifier, never()).sendCritical(anyString());
         apiMock.verify();
+    }
+
+    // ── 토큰 만료가 HTTP 500(EGW00123)로 오는 경우 ───────────────────────────────
+
+    @Test
+    @DisplayName("토큰 만료가 HTTP 500(EGW00123)로 와도 재발급 후 재시도 — SAFE_MODE 안 걸림")
+    void expired_token_as_500_refreshes_and_retries() {
+        // 최초 발급 + 만료 감지 후 재발급 = 토큰 2회
+        tokenMock.expect(ExpectedCount.once(), requestTo("/oauth2/tokenP"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withSuccess(TOKEN_JSON, MediaType.APPLICATION_JSON));
+        tokenMock.expect(ExpectedCount.once(), requestTo("/oauth2/tokenP"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withSuccess(TOKEN_JSON, MediaType.APPLICATION_JSON));
+        // 첫 호출: 토큰 만료를 401이 아니라 500 본문으로 반환 (KIS 실제 동작)
+        apiMock.expect(ExpectedCount.once(), requestTo("/test"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\",\"msg1\":\"기간이 만료된 token 입니다.\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        // 재발급 후 재시도: 성공
+        apiMock.expect(ExpectedCount.once(), requestTo("/test"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess());
+
+        KisApiClient sut = sut();
+        sut.getClient().get().uri("/test").retrieve().toBodilessEntity();
+
+        assertThat(statusManager.getCurrentMode()).isEqualTo(TradingMode.RUNNING);
+        verify(notifier, never()).sendCritical(anyString());
+        apiMock.verify();
+        tokenMock.verify();
     }
 
     // ── 연결 회복 시 자동 재개 ──────────────────────────────────────────────────

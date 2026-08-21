@@ -1,27 +1,52 @@
 package com.trading.control;
 
 import com.trading.NotificationService;
+import com.trading.bucket.BucketAccountService;
+import com.trading.bucket.BucketProperties;
+import com.trading.bucket.StrategyBucket;
+import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
+import com.trading.order.KisOrderClient;
+import com.trading.order.OrderEngine;
+import com.trading.order.OrderSizingService;
+import com.trading.position.Account;
 import com.trading.position.BalanceClient;
+import com.trading.position.NoOpPeakEquityCalibrator;
+import com.trading.position.PortfolioState;
 import com.trading.position.PortfolioStateRepository;
+import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
+import com.trading.position.ShadowPortfolio;
 import com.trading.position.ShadowPortfolioReconciler;
+import com.trading.position.TradeResultRepository;
 import com.trading.risk.ActualAccountInfo;
 import com.trading.risk.BrokerageApiClient;
 import com.trading.risk.LiquidationService;
+import com.trading.risk.RiskEngine;
+import com.trading.risk.RiskLimitsProperties;
+import com.trading.risk.RiskResult;
+import com.trading.risk.RiskRule;
 import com.trading.risk.TradingMode;
 import com.trading.risk.TradingStatusManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.env.Environment;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +68,11 @@ class TradingControllerTest {
     private PositionRepository positionRepository;
     private PortfolioStateRepository portfolioStateRepository;
     private NotificationService notifier;
+    private KisOrderClient orderClient;
+    private PositionManager positionManager;
+    private OrderEngine orderEngine;
+    private MockEnvironment paperEnvironment;
+    private ShadowPortfolio shadowPortfolio;
     private TradingController sut;
 
     @BeforeEach
@@ -61,11 +91,58 @@ class TradingControllerTest {
         when(positionRepository.findAll()).thenReturn(List.of());
         BrokerageApiClient reconcilerBrokerClient = mock(BrokerageApiClient.class);
         reconciler = new ShadowPortfolioReconciler(statusManager, liquidationService, balanceClient,
-                positionRepository, reconcilerBrokerClient, mock(NotificationService.class));
+                positionRepository, reconcilerBrokerClient, mock(NotificationService.class),
+                new MarketCalendarService(new MarketCalendarProperties(), java.time.Clock.systemDefaultZone()),
+                new com.trading.risk.StopLossArmer(mock(com.trading.market.MarketDataService.class),
+                        new com.trading.market.AtrCalculator(), positionRepository,
+                        com.trading.bucket.BucketTestSupport.defaultParams()));
 
         portfolioStateRepository = mock(PortfolioStateRepository.class);
-        sut = new TradingController(statusManager, kisProperties, liquidationService, reconciler, notifier,
-                portfolioStateRepository);
+
+        orderClient = mock(KisOrderClient.class);
+        positionManager = mock(PositionManager.class);
+        when(positionManager.snapshotAccount()).thenReturn(new Account(10_000_000, 0.0, 0, List.of()));
+        orderEngine = newOrderEngine();
+        paperEnvironment = new MockEnvironment();
+        paperEnvironment.setActiveProfiles("paper");
+        // 전고점 소유자 — 미검증 표시 해제(peak-equity-ack) 경로에 필요. 실객체 + 인터페이스 목.
+        shadowPortfolio = new ShadowPortfolio(positionManager, portfolioStateRepository,
+                new NoOpPeakEquityCalibrator());
+
+        sut = newController(passingRiskEngine(), paperEnvironment);
+    }
+
+    /** RiskEngine·OrderEngine은 구체 클래스 — 인터페이스 의존성만 목킹해 실객체로 조립한다 */
+    private OrderEngine newOrderEngine() {
+        BucketProperties bucketProps = new BucketProperties(
+                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
+        OrderSizingService sizing = new OrderSizingService(
+                mock(com.trading.market.MarketDataService.class), positionManager, new AtrCalculator(),
+                new RiskLimitsProperties(), bucketProps,
+                new BucketAccountService(bucketProps, positionRepository, mock(TradeResultRepository.class)),
+                com.trading.bucket.BucketTestSupport.defaultParams());
+        return new OrderEngine(orderClient, statusManager, sizing, positionRepository);
+    }
+
+    private static RiskEngine passingRiskEngine() {
+        return new RiskEngine(List.of());
+    }
+
+    private static RiskEngine rejectingRiskEngine(String reason) {
+        return new RiskEngine(List.<RiskRule>of((signal, account) -> RiskResult.reject(reason)));
+    }
+
+    private TradingController newController(RiskEngine riskEngine, Environment environment) {
+        return newController(riskEngine, environment, kisProperties);
+    }
+
+    /** 리허설 판정은 DrillService가 한다 — 컨트롤러는 확인 문자열만 보고 넘긴다 */
+    private TradingController newController(RiskEngine riskEngine, Environment environment,
+                                            KisProperties props) {
+        DrillOperations drill = new DrillService(props, statusManager, riskEngine, orderEngine,
+                positionManager, positionRepository, liquidationService, environment);
+        return new TradingController(statusManager, props, liquidationService, reconciler, notifier,
+                portfolioStateRepository, drill, shadowPortfolio);
     }
 
     private static KisProperties configuredProps() {
@@ -124,9 +201,8 @@ class TradingControllerTest {
     @Test
     @DisplayName("KIS 자격증명 미설정 → /start 거부")
     void start_rejected_when_not_configured() {
-        TradingController unconfigured = new TradingController(
-                statusManager, new KisProperties(), liquidationService, reconciler, notifier,
-                portfolioStateRepository);
+        TradingController unconfigured =
+                newController(passingRiskEngine(), paperEnvironment, new KisProperties());
 
         Map<String, Object> res = unconfigured.start();
 
@@ -228,5 +304,97 @@ class TradingControllerTest {
 
         assertThat(res.get("success")).isEqualTo(true);
         assertThat(liquidationService.isAnyLiquidationInProgress()).isTrue();
+    }
+
+    // ── /manual-buy-drill (리허설용 고정 수량 매수) ─────────────────────────────
+
+    @Test
+    @DisplayName("확인 문자열 불일치 → 수동 매수 거부, 주문 없음")
+    void manual_buy_drill_rejects_wrong_confirm() {
+        Map<String, Object> res = sut.manualBuyDrill(Map.of("confirm", "WRONG"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("paper 프로필이 아니면 거부 (실전 오발동 차단)")
+    void manual_buy_drill_rejected_outside_paper_profile() {
+        MockEnvironment realEnv = new MockEnvironment();
+        realEnv.setActiveProfiles("real");
+        TradingController realController = newController(passingRiskEngine(), realEnv);
+
+        Map<String, Object> res = realController.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        assertThat(String.valueOf(res.get("message"))).contains("paper");
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("KIS 자격증명 미설정 → 거부")
+    void manual_buy_drill_rejected_when_not_configured() {
+        TradingController unconfigured =
+                newController(passingRiskEngine(), paperEnvironment, new KisProperties());
+
+        Map<String, Object> res = unconfigured.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("RUNNING이 아니면 거부 (SAFE_MODE는 신규 매수 금지)")
+    void manual_buy_drill_rejected_when_not_running() {
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+
+        Map<String, Object> res = sut.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("리스크 룰이 막으면 그 사유를 그대로 돌려주고 주문하지 않는다")
+    void manual_buy_drill_reports_risk_rejection_reason() {
+        TradingController blocked = newController(rejectingRiskEngine("칸 예산 소진"), paperEnvironment);
+
+        Map<String, Object> res = blocked.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        assertThat(String.valueOf(res.get("message"))).contains("칸 예산 소진");
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    // ── /peak-equity-ack (전고점 미검증 표시 해제) ─────────────────────────────
+
+    @Test
+    @DisplayName("확인 문자열 불일치 → 미검증 표시 해제 거부")
+    void peak_equity_ack_rejects_wrong_confirm() {
+        Map<String, Object> res = sut.acknowledgePeakEquity(Map.of("confirm", "WRONG"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        verify(notifier, never()).sendCritical(anyString());
+    }
+
+    @Test
+    @DisplayName("보류 중인 표시가 없으면 해제할 것도 없다고 답한다 (오해 방지)")
+    void peak_equity_ack_reports_nothing_to_release() {
+        // 미검증 표시가 저장돼 있지 않은 상태 (portfolioStateRepository 목 기본값 = 빈 Optional)
+        Map<String, Object> res = sut.acknowledgePeakEquity(Map.of("confirm", "CONFIRM_PEAK_EQUITY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        assertThat(String.valueOf(res.get("message"))).contains("보류 중인");
+        verify(portfolioStateRepository, never())
+                .save(argThat(s -> PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED.equals(s.getStateKey())));
+    }
+
+    @Test
+    @DisplayName("정상: 005930 정확히 10주 시장가 매수 접수")
+    void manual_buy_drill_orders_exactly_ten_shares() {
+        Map<String, Object> res = sut.manualBuyDrill(Map.of("confirm", "CONFIRM_MANUAL_BUY"));
+
+        assertThat(res.get("success")).isEqualTo(true);
+        verify(orderClient).buy("005930", 10, StrategyBucket.VB);
     }
 }

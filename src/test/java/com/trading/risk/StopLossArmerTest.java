@@ -37,7 +37,7 @@ class StopLossArmerTest {
     void setUp() {
         marketDataService = mock(MarketDataService.class);
         positionRepository = mock(PositionRepository.class);
-        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository, new RiskLimitsProperties());
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository, com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     private void givenAtr(double range) {

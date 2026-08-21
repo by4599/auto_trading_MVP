@@ -224,6 +224,57 @@ public class FillStateUpdater {
                 order.getStockCode(), order.getOrderNo(), order.getCancelRequestedAt());
     }
 
+    /**
+     * 취소가 "잔량 없음"으로 거부된 주문을 실제 잔고 기준으로 종결한다.
+     *
+     * 배경: 개장 무렵 체결된 주문을 체결조회(VTTC8001R)가 빈 응답으로 놓치면,
+     * 취소도 "정정/취소할 수량이 없습니다"로 거부돼 주문이 영원히 폴링에 갇히고
+     * DB에 포지션이 안 생긴다(브로커-DB desync). 취소 거부가 곧 "이미 체결됨"의
+     * 확정 신호이므로, 그 종목을 실잔고로 정렬하고 주문을 FILLED로 종결해 폴링을 끊는다.
+     *
+     * 주기 Reconciler의 "자동보정 안 함(코퍼레이트 액션 오인 방지, §5.3)"과 달리,
+     * 이건 KIS의 "취소 불가=체결됨" 확정 신호에 의한 주문 단위 타깃 보정이다.
+     *
+     * @param brokerQty 해당 종목의 실제 브로커 보유 수량(0이면 이미 매도 등으로 정리된 상태)
+     */
+    @Retryable(
+            retryFor = ObjectOptimisticLockingFailureException.class,
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100, multiplier = 2.0)
+    )
+    @Transactional
+    public void reconcileFilledFromBalance(Long orderId, int brokerQty, double brokerAvgPrice) {
+        OrderHistory order = orderHistoryRepository.findById(orderId).orElseThrow();
+
+        OrderStatus current = order.getStatus();
+        if (current != OrderStatus.ACCEPTED && current != OrderStatus.PARTIAL_FILLED) {
+            log.warn("reconcileFilledFromBalance 무시 — 이미 처리된 주문: status={} orderId={}", current, orderId);
+            return;
+        }
+
+        // 1. 종목 포지션을 브로커 실잔고로 정렬
+        Position pos = positionRepository.findByStockCode(order.getStockCode())
+                .orElse(Position.empty(order.getStockCode()));
+        int before = pos.getQuantity();
+        if (brokerQty <= 0) {
+            if (before > 0) positionRepository.delete(pos);
+        } else {
+            pos.reconcileTo(brokerQty, brokerAvgPrice);
+            if (order.getBucket() != null) pos.assignBucketIfAbsent(order.getBucket());
+            positionRepository.save(pos);
+            // 새로 인식된(늘어난) 보유 → 손절 장착. 매도로 줄어든 경우는 제외.
+            if (brokerQty > before) {
+                eventPublisher.publishEvent(new OrderPartialFilledEvent(
+                        order.getSide(), order.getStockCode(), brokerQty, brokerAvgPrice));
+            }
+        }
+
+        // 2. 주문 종결 — 브로커에 잔량 없음(=체결됨). markFilled로 폴링을 끊는다.
+        order.markFilled(order.getQuantity(), brokerAvgPrice);
+        log.warn("[체결 대사] 취소불가(잔량없음)=체결로 판정 — 실잔고 정렬: ordNo={} 종목={} 브로커보유={}주 → 주문 종결(FILLED)",
+                order.getOrderNo(), order.getStockCode(), brokerQty);
+    }
+
     // ── Position 갱신 ─────────────────────────────────────────────────────────
 
     private void updatePosition(OrderHistory order, int newlyFilled, double fillPrice) {
@@ -238,17 +289,22 @@ public class FillStateUpdater {
             }
             positionRepository.save(pos);
         } else {
-            // applySell 전에 기록 — 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
-            tradeResultTracker.recordSellFill(
-                    order.getStockCode(), newlyFilled, fillPrice, pos.getAveragePrice());
+            // 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
+            double realized = (fillPrice - pos.getAveragePrice()) * newlyFilled;
             // 실현손익 영속화 (실적 대시보드) — 라이브 경로 전용, 같은 트랜잭션에서 커밋.
             // 칸 귀속은 보유 포지션의 칸이 원천 (매도 신호가 아니라 "누구 돈으로 샀나" 기준)
             tradeResultRepository.save(TradeResult.live(
                     order.getStockCode(), newlyFilled, pos.getAveragePrice(), fillPrice,
                     pos.getBucket()));
+            // 연속손실은 조각이 아니라 매매 1회 단위 — 전량 청산될 때 합계로 한 번만 판정한다
+            pos.accrueRealized(realized);
             pos.applySell(newlyFilled);
-            if (pos.getQuantity() == 0) positionRepository.delete(pos);
-            else                        positionRepository.save(pos);
+            if (pos.getQuantity() == 0) {
+                tradeResultTracker.recordRoundTrip(order.getStockCode(), pos.getRealizedPnlAccum());
+                positionRepository.delete(pos);
+            } else {
+                positionRepository.save(pos);
+            }
         }
     }
 }

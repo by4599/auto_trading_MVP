@@ -86,16 +86,63 @@ class TimeCutSchedulerTest {
         return new MarketCalendarService(new MarketCalendarProperties(), fixed);
     }
 
+    /** 다일 보유로 지정된 칸을 가진 스케줄러 — 타임컷 제외 검증용 */
+    private TimeCutScheduler schedulerWithMultiDay(com.trading.bucket.StrategyBucket bucket) {
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        com.trading.bucket.BucketParameters.Overrides o = new com.trading.bucket.BucketParameters.Overrides();
+        o.setMultiDayHold(true);
+        params.getOverrides().put(bucket, o);
+        com.trading.bucket.BucketParameterResolver resolver = new com.trading.bucket.BucketParameterResolver(
+                params, new RiskLimitsProperties(), new com.trading.strategy.FilterProperties());
+        OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
+                new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(),
+                        new RiskLimitsProperties(),
+                        com.trading.bucket.BucketTestSupport.disabledProps(),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), resolver),
+                positionRepository);
+        return new TimeCutScheduler(
+                positionRepository, orderHistoryRepository, positionManager,
+                new RiskEngine(List.of()), orderEngine,
+                statusManager, kisProperties, marketCalendarService, resolver);
+    }
+
+    private static Position holdingIn(String stockCode, com.trading.bucket.StrategyBucket bucket) {
+        Position pos = Position.empty(stockCode);
+        pos.assignBucketIfAbsent(bucket);
+        pos.applyBuy(1, 72500.0);
+        return pos;
+    }
+
+    @Test
+    @DisplayName("다일 보유 칸(A동)은 15:15 타임컷에서 제외된다 — 며칠 들고 가는 것이 그 전략의 본체")
+    void multi_day_bucket_is_excluded_from_timecut() {
+        givenHoldings(holdingIn("005930", com.trading.bucket.StrategyBucket.VB));
+
+        schedulerWithMultiDay(com.trading.bucket.StrategyBucket.VB).executeTimeCut();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("다일 보유로 지정되지 않은 칸은 종전대로 정리된다")
+    void other_buckets_still_time_cut() {
+        givenHoldings(holdingIn("000660", com.trading.bucket.StrategyBucket.MIX));
+
+        schedulerWithMultiDay(com.trading.bucket.StrategyBucket.VB).executeTimeCut();
+
+        verify(orderClient).sell("000660", 1);
+    }
+
     private TimeCutScheduler scheduler(List<RiskRule> rules) {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(rules), orderEngine,
-                statusManager, kisProperties, marketCalendarService);
+                statusManager, kisProperties, marketCalendarService, com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     private static Position holding(String stockCode, int quantity, double price) {

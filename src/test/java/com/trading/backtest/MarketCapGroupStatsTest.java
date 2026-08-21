@@ -14,8 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * §8 재검증 로직. large-benchmark/6종목은 LARGE, 나머지 chain류는 MIDSMALL로
  * 태깅되는지, semi-anchor(중복 종목)가 이미 태깅된 값을 덮어쓰지 않는지 검증.
  */
-@DisplayName("EventBacktestPipeline — 시가총액 그룹 태깅")
-class EventBacktestPipelineGroupTest {
+@DisplayName("MarketCapGroupStats — 시가총액 그룹 태깅")
+class MarketCapGroupStatsTest {
 
     private BacktestDataProperties properties;
 
@@ -34,7 +34,7 @@ class EventBacktestPipelineGroupTest {
     @Test
     @DisplayName("B-3 6종목 + large-benchmark → LARGE")
     void tags_large_symbols() {
-        Map<String, String> group = EventBacktestPipeline.buildGroupTags(properties);
+        Map<String, String> group = MarketCapGroupStats.buildGroupTags(properties);
 
         assertThat(group.get("005930")).isEqualTo("LARGE");
         assertThat(group.get("068270")).isEqualTo("LARGE");
@@ -45,7 +45,7 @@ class EventBacktestPipelineGroupTest {
     @Test
     @DisplayName("semi-chain/battery 등 chain류 → MIDSMALL")
     void tags_midsmall_symbols() {
-        Map<String, String> group = EventBacktestPipeline.buildGroupTags(properties);
+        Map<String, String> group = MarketCapGroupStats.buildGroupTags(properties);
 
         assertThat(group.get("036930")).isEqualTo("MIDSMALL");
         assertThat(group.get("240810")).isEqualTo("MIDSMALL");
@@ -55,7 +55,7 @@ class EventBacktestPipelineGroupTest {
     @Test
     @DisplayName("semi-anchor 중복 종목(005930/000660)은 이미 LARGE로 태깅되어 있어 그대로 유지")
     void anchor_duplicates_stay_large() {
-        Map<String, String> group = EventBacktestPipeline.buildGroupTags(properties);
+        Map<String, String> group = MarketCapGroupStats.buildGroupTags(properties);
 
         assertThat(group.get("005930")).isEqualTo("LARGE");
         assertThat(group.get("000660")).isEqualTo("LARGE");
@@ -64,6 +64,6 @@ class EventBacktestPipelineGroupTest {
     @Test
     @DisplayName("어느 목록에도 없는 종목은 태깅되지 않는다")
     void untagged_symbol_absent() {
-        assertThat(EventBacktestPipeline.buildGroupTags(properties)).doesNotContainKey("999999");
+        assertThat(MarketCapGroupStats.buildGroupTags(properties)).doesNotContainKey("999999");
     }
 }

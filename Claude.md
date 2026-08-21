@@ -20,12 +20,28 @@ Spring Boot 기반 국내주식 자동매매 시스템. 한국투자증권(KIS) 
   대화 중 필수 항목이 새로 드러나면 표에 바로 넣지 말고 먼저 사용자에게 확인한다.
 - 깊은 코드 대조가 필요하면 `scope-guardian` 서브에이전트를 호출한다.
 
+## 하네스: 자동매매 개발·운영
+
+**목표:** 전략 판정·안전장치 감사·구현·증거 검증을 분리된 역할로 교차 확인시켜,
+검증되지 않은 변경이 모의투자·실전으로 새지 않게 한다.
+
+**트리거:** 이 프로젝트의 실질적 작업(전략 추가·수정, 백테스트 검증, 리스크 룰 변경,
+주문·체결 파이프라인 수정, 운영 신뢰성 개선, 릴리즈 갭 해소)을 요청받으면
+`trading-orchestrator` 스킬을 사용한다. 단순 질문·설명 요청은 직접 답한다.
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-07-22 | 초기 구성 (에이전트 4 + 스킬 5) | `.claude/agents/`, `.claude/skills/` | 하네스 도입 — 기존 `scope-guardian`은 문지기로 재사용 |
+| 2026-07-22 | 자동 적용 설정 (SessionStart 훅 + 커밋 전 점검 훅 + `TRADING_BUILD_DIR`) | `.claude/settings.json`, `.claude/hooks/` | 매 세션 수동 상기 없이 하네스가 걸리도록. 빌드 경로 미설정으로 테스트가 전부 죽는 사고를 구조적으로 차단 |
+
 ## 빌드 · 실행 · 테스트 명령
 
-프로젝트 경로에 한글(`개발`)이 포함되어 있어 Gradle test worker가 클래스패스를
-percent-encode하지 못해 깨진다. 두 가지를 항상 지킬 것:
+예전에는 프로젝트 경로에 한글(`개발`)이 포함돼 Gradle test worker가 클래스패스를
+percent-encode하지 못해 깨졌다. **2026-07 부모 폴더를 `workspace`(ASCII)로 rename해
+근본 원인이 해소됐다** — 이제 아래 1번은 필수가 아니다(무해한 안전망). 2번은 그대로 유효:
 
-1. **빌드 출력 경로**를 ASCII 경로로 강제 (`build.gradle`이 이미 처리 —
+1. **빌드 출력 경로** ASCII 강제 (`build.gradle`이 이미 처리 — 더는 필수 아님, 안전망 —
    `TRADING_BUILD_DIR` 환경변수 또는 기본값 `C:/Users/SAMSUNG/auto_trading-build`)
 2. **`./gradlew.bat`이 이 환경(Git Bash)에서 걸릴 수 있다** — 걸리면 아래처럼
    캐시된 Gradle 배포본을 직접 호출한다 (배포본 경로는 `gradle-wrapper.properties`의
@@ -52,8 +68,9 @@ REM 백테스트 실행 (엔진은 com.trading.backtest, 별도 backtest-db 사�
 .\gradlew.bat bootRun --args="--spring.profiles.active=backtest"
 ```
 
-- `TRADING_BUILD_DIR` 미설정 시 한글 경로로 폴백되어 **테스트가 전부
-  `ClassNotFoundException`으로 죽는다** — 반드시 설정할 것.
+- 경로가 ASCII가 된 지금은 `TRADING_BUILD_DIR` 미설정이어도 테스트가 정상 동작한다
+  (예전엔 미설정 시 한글 경로 폴백으로 **테스트가 전부 `ClassNotFoundException`으로
+  죽었다** — 만약 그 증상이 재현되면 이 설정부터 확인).
 - Java 25 + 인라인 Mockito는 구체 클래스(예: `TradingUniverseService`) 목킹이
   불안정하다 → 테스트는 리포지토리 등 **인터페이스를 목**으로, 서비스는 실객체로
   구성하는 패턴을 따른다 (`mock(XxxRepository.class)` — 기존 테스트 다수가 이 패턴).
@@ -103,17 +120,87 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
   모의투자는 파이프라인 검증 목적으로만 계속 운영.
   ⚠ **3방식 재검증도 기각 (2026-07-20)**: VB 유니버스 확장(중소형 33종목 추가)은
   PF 0.60·MDD 61.4%로 오히려 악화, EVENT 시가총액 세분화(LARGE/MIDSMALL)도
-  42조합 전부 CANDIDATE 미달 — 방식1/2/3 실매매 구현 여전히 보류 (BACKTEST-DESIGN §12)
+  42조합 전부 CANDIDATE 미달 — 원래의 EVENT/MIX(공시 기반) 재료는 실매매 승격 불가로
+  폐기 (BACKTEST-DESIGN §12). 같은 날 사용자 판단으로 방식2·3을 다른 전략으로
+  교체했고, 2026-07-22 소급 백테스트 결과도 둘 다 불합격 — 아래 지갑 칸 항목 참고
 - 계좌: 한투 **모의투자** 계좌 (`@Profile("paper")`, 실전 전환은
   `docs/TRADING-RULES-AUDIT.md`의 CRITICAL 4건 해소 후)
 - 주문: 시장가, 수량은 R 사이징(`OrderSizingService` — 1R=계좌 1% ÷ ATR 손절폭, 단주 내림).
   지정가 분할(Price Jitter)은 ADR-001 미결정 파라미터 해소 후
 - 지갑 칸 실험 (2026-07-19, `com.trading.bucket`): 방식별 자금 칸 분리 —
-  VB(방식1·돌파)/EVENT(방식2·이벤트)/MIX(방식3·혼합) 각 1,000만원 한도.
+  VB(방식1·돌파)/EVENT(방식2)/MIX(방식3) 각 1,000만원 한도.
   paper 전용(`trading.bucket.enabled` — **backtest에서 켜지 말 것**, B-3 결정성).
   칸 ON이면 R 사이징의 "계좌"가 칸 자산(배분금+실현손익)으로 바뀌고 칸 가용 현금으로
   수량 캡. 이름표 흐름: Signal→OrderHistory→Position→TradeResult (null=VB 레거시).
-  EVENT/MIX는 B-4 합격 재료 확보 후 사람이 yml에서 켠다 (게이트 G2)
+  ⚠ **2026-07-20 방식2·3 전략 교체 (커밋 c2ce60e)**: 원래의 공시 이벤트(EVENT)·혼합(MIX)
+  재료가 B-4에서 전량 기각되자, 사용자 판단으로 방식2를 **이동평균 정배열 돌파**
+  (`MovingAverageBreakoutStrategy` — MA5>MA20>MA60>MA120 정배열 + MA20 상향 돌파),
+  방식3을 **눌림목 반등 스캘핑**(`ScalpingStrategy` — 롤링창 고점 대비 pullback 후
+  rebound 시 진입, 목표익절 `takeProfitPct`)으로 교체해 모의투자에 가동했다.
+  (enum 상수명 EVENT/MIX는 DB 컬럼 호환 때문에 그대로 유지 — displayName만 새 의미.)
+  ⚠ **2026-07-22 소급 백테스트 완료 — 둘 다 불합격 (BACKTEST-DESIGN §13)**:
+  MA돌파 PF 0.55(591건), 스캘핑 PF 0.33·MDD 68.4%(1,062건, 파라미터 4종 ±20%
+  민감도도 전부 PF 0.25~0.36 — 구제 불가). VB 회귀 확인도 PF 0.71로 재불합격.
+  **3방식 전부 실전 승격 불가(게이트 G2 미발동)** — 파이프라인 검증 목적의
+  모의투자만 계속하며, 세 전략 재설계 여부는 사용자 판단 대기.
+  ⚠ **2026-07-22 Exit Lab / Risk Lab — 손익비 재설계 (BACKTEST-DESIGN §14)**: 진입 고정,
+  출구를 다일 보유+트레일링으로 바꿔 스윕(`--backtest.mode=exit-lab`). 손익비가 뒤집혀
+  MA 정배열 진입은 넓은 54종목·수백 건에서 PF 1.48~1.53·기대값 양(+)의 **실재 엣지**를
+  보였으나 MDD ~21%로 불합격(막힌 곳은 기대값이 아니라 리스크). VB 돌파는 넓은 유니버스에서
+  붕괴. → **Risk Lab(`--backtest.mode=risk-lab`)에서 사이징 축소로 해소**: MA 정배열 진입 +
+  다일 트레일링(ATR1.0·최대20일·트레일 arm1%/trail3%) + **0.5R·동시5** 프로필이 **PF 1.96·
+  기대값 +1.30%·MDD 9.9%·781건으로 §4 첫 통과**(10창 중 8창 양(+), 레짐 편중 아님). 기준선
+  `docs/BACKTEST-BASELINE-EXITLAB-MA-P3.yml` 기록.
+  ⚠ **회귀 앵커의 정본은 문서가 아니라 `docs/BACKTEST-BASELINE-EXITLAB-MA-P3.yml`이다 (2026-08-17)**
+  — 앵커 수치를 문서·코드에 복제하지 말고 그 파일을 볼 것. risk-lab 실행이 이 파일을 읽어
+  **자동 대조**하고 리포트의 `## 회귀 앵커 대조` 절에 일치/드리프트를 찍는다(`BaselineDriftReporter`).
+  드리프트가 나오면 창·유니버스·비용을 바꾼 실행인지 먼저 보고, 같은 조건인데 다르면
+  데이터 커버리지를 의심할 것. 기준을 갱신할 일이 생기면 **그 yml만 다시 찍으면 된다**
+  (`--backtest.write-baseline=true`, 손으로 편집 금지).
+  ⚠ 사고 기록: 최초 앵커(07-22·07-24)는 캔들이 판정 창 끝보다 2거래일 모자란 채로 찍혀
+  780건·총수익 129.36%였다 → 2026-08-17 완전한 데이터로 재기록(781건·124.28%, PF·MDD·§4 판정 불변).
+  원인인 백필 7일 슬랙은 **해소**됐다(커버리지 관문 `CandleCoverageChecker` — 기준선을 쓰는
+  실행은 데이터가 모자라면 채점 전에 중단). 근거 `_workspace/7_quant_baseline-drift.md`.
+  ⚠⚠ **2026-07-25 약세장 스트레스에서 이 후보는 기각됐다 (BACKTEST-DESIGN §14.3)**:
+  캔들을 2019-04까지 소급 확장하고 판정 창을 3년→6.5년(2020-01~2026-07, 24창)으로 넓히자
+  **RR1이 PF 1.96→1.26·MDD 9.9%→33.5%로 붕괴, 5개 프로필 전원 불합격**. 파괴자는 2022 금리
+  쇼크(4분기 연속 손실 합성 -30%, 같은 기간 KOSPI -24.9%보다 더 잃음, 약 21개월 침수).
+  게다가 **코로나(2020-03)는 채점조차 안 됐다** — 6/3/3 워크포워드가 폭락을 학습 구간으로
+  흡수(채점 최초일 2020-07-01), 즉 최악 구간을 빼고도 불합격이다. 사이징 축소는 약세장
+  MDD를 못 잡고(1R 축소만 부분 효과 36→23.1%), **동시보유 축소는 역효과**(동시5→2에서
+  33.5→37.9%) — §14.1의 "집중이 안전"은 레짐 착시였다. 결론: **엣지가 없는 게 아니라
+  하락 추세 레짐에서 뒤집힌다**(2024~2026 상승장이 §14.1 성적을 견인). 한계는 전부 낙관
+  방향(생존편향: 2020~2022 상장폐지 0건).
+  ⚠ **비용 민감도(§14.2)**: 버티는 한계 왕복 0.50%, 실전 슬리피지 여유 0.045%p로 얇음.
+  → **§14.1 기준선 yml은 3년 창 기록으로 그대로 두되, 실전 후보로 취급하지 말 것.**
+  ⚠ **2026-07-25 지수 추세 필터로 부분 회생 (BACKTEST-DESIGN §14.4)**: §14.3의 사인(하락 추세
+  휩쏘)을 정면 조준해 **"지수가 MA120 아래면 신규 진입 금지"**(신규 `IndexTrendRule` — `RiskRule`
+  구현체, `RiskEngine` 무수정, 기본 OFF)를 A/B했다. 같은 6.5년 창에서 **G1(MA120): PF 1.26→1.51 ·
+  MDD 33.5%→13.3% · 총수익 +62%→+122%**로 §4 통과(G0 회귀 앵커 24창 전부 정확 재현, 선견편향
+  감사 검산 완료). 2022 4연속 손실(-30%)이 -4.41%로 끊겼고, **과필터 아님**(트레이드 -25%에 그치고
+  2024~26 상승 수익은 오히려 +7.2%p 증가). MA200(G2)은 반등 초입을 놓쳐 MDD 16.9%로 불합격.
+  ⚠ **단 "조건부·잠정"** — 남은 MDD 13.3%는 사실상 2024-08-05 급락 한 창이고(필터가 못 막는 종류,
+  한도까지 여유 1.7%p), §4 민감도(±20%) 미측정, 유효 표본은 1192건보다 작다.
+  ⚠ **부수 발견**: 기존 갭다운 지수 필터는 B-3 최초 실행부터 **무발동**이었다(러너가 KOSPI를
+  메모리에 안 올려 항상 판단 불가) → BACKTEST-DESIGN §7의 "지수 레짐 기각" 판정 무효. paper는
+  켠 적 없어 실계좌 영향 없음.
+  남은 미검증: 분봉 정밀 · 민감도 ±20% · 크래시형 MDD. **실전 전환은 ADR-001(다일 보유) 재논의 +
+  게이트 G2(사람) 선행**. paper 기본값·리스크 룰·지갑 칸 불변.
+- 진입 교체 트랙 (2026-08-03, BACKTEST-DESIGN §15) — §13에서 3방식이 전부 불합격하자 **진입만
+  고전 기법으로 교체**해 §14 검증 경로(출구 P3 + 사이징 + 약세장 창 + 지수 필터)에 그대로 태웠다:
+  전략1(VB) → `DonchianBreakoutStrategy`(직전 20일 고가 돌파 + 종가>MA120),
+  전략3(스캘핑) → `RsiMeanReversionStrategy`(+`RsiCalculator`, 추세 안 RSI(2)<10 과매도, **종가 진입**).
+  둘 다 기본 OFF(`trading.donchian.enabled`/`trading.rsi.enabled`) — 백테스트에서만 켠다.
+  ⚠ RSI(2)는 `DailyBarSimulator`에 **종가 진입 경로**(`checkMeanReversionEntry`)를 새로 요구했다 —
+  기존 진입은 돌파 전용(고가 발화·이분탐색)이라 평균회귀 신호를 못 잡는다. 당일 진입분은 종가
+  매수라 당일 손절·트레일 판정을 하지 않는다(선견편향 차단).
+  ⚠ **판정 (§15.5)**: **돈치안 = 조건부·잠정 통과** — 약세장 6.5년·24창에서 지수 MA120 필터와 함께
+  PF 1.90 · 기대값 +1.36% · MDD 14.4% · 총수익 +358%(과필터 아님: 트레이드 -26%인데 수익 증가).
+  **RSI(2) = 보류** — MA200 한 곳만 턱걸이(MDD 14.2%)이고 총수익이 +63%로 자릿수가 달라 전략3
+  후보 근거 없음. **돈치안도 실전 후보 아님**: 모든 불합격의 단일 원인이 MDD 한도(15%) 근접이고
+  여유 0.6%p뿐 — 파라미터 ±20%는 4/5(종목 추세96에서 22.9%), 비용은 왕복 +0.09%p만 얹어도 탈락
+  (§14.2 MA보다 얇음). 엣지(PF 1.5~2.0)는 전 축에서 강건. 다음: 사이징 재스윕 · 추세기간 지도 ·
+  **실측 슬리피지**(로드맵 1.3 선행). 실전은 ADR-001 재논의 + 게이트 G2(사람) 선행.
 - 알림: 텔레그램 (체결/에러/청산)
 - 뉴스(`research` 패키지): 수집·분류·**추천 표시**까지 — 매매 미연동 (연동은 Phase 3)
 - 공시(DART): 유니버스∪워치리스트 대상 30분 주기 수집·표시 전용.
@@ -129,12 +216,16 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭 연동) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭, **라운드트립 단위** 2026-08-19) |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
-> 단, **모의계좌 청산 리허설 1회 성공 전까지 Gate 2 완료 판정 아님**
+> **모의계좌 리허설 깨끗한 1회 성공으로 Gate 2 완료 (2026-08-19)**
 > (`POST /api/trading/liquidation-drill`). F-번호와 상세 근거는 `docs/TRADING-RULES-AUDIT.md` 참고.
+>
+> **데이터 품질 게이트 (2026-08)**: `RiskMonitor`(청산 트리거)·`StopLossMonitor`(손절/익절)는
+> 잔고 API 실패로 낡은 스냅샷일 때 판정을 건너뛴다(`Account.isFresh()`) — 옛 값 헛발동 방지.
+> 매수 차단 룰은 낡으면 보수적 차단이라 예외. 모든 KIS 호출은 `KisRateLimiter`가 초당 한도로 균등 배분.
 
 ## 패키지 구조 및 큰 흐름
 
@@ -156,11 +247,13 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
   `universe` 매매 대상 관리(게이트 G1) / `research` 뉴스·DART 공시 수집·분류
   (매매 미연동) / `bucket` 지갑 칸(방식별 자금 분리, paper 전용) /
   `backtest` 백테스트 엔진(`@Profile("backtest")`, 전용 DB·Clock) /
-  `dashboard`·`settings`·`control`(웹 운영 도구, localhost:8080)
+  `dashboard`·`settings`·`control`(웹 운영 도구, localhost:8080) /
+  `mirror` 운영 상태 거울(Supabase로 5분마다 스냅샷 복사 — paper 전용, 기본 OFF, 매매 미연동)
 - 각 KIS 연동 인터페이스(`MarketDataService`, `KisOrderClient`, `PositionManager`,
   `BrokerageApiClient` 등)는 `paper`/`real`/`backtest` 프로필별로 구현체를
   갈아끼운다 — 새 구현체를 추가할 때도 인터페이스 시그니처는 고정.
-- `KisApiClient`가 모든 KIS REST 연동(OAuth 토큰 포함)이 공유하는 공통 HTTP 클라이언트.
+- `KisApiClient`가 모든 KIS REST 연동(OAuth 토큰 포함)이 공유하는 공통 HTTP 클라이언트 —
+  모든 호출은 `KisRateLimiter`(초당 한도 균등 배분, `market`)를 통과한다.
 - 문서 지도: 로드맵·구현 현황은 `README.md`, 투자 판단 방법론은
   `docs/INVESTMENT-METHODOLOGY.md`, 백테스트 엔진·합격 기준은
   `docs/BACKTEST-DESIGN.md`, 장애 대응·재가동은 `docs/OPERATIONS.md`,
@@ -186,6 +279,12 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
 - `TradeResultTracker` (Gate 3) — 매도 체결 실현손익 → 연속손실 카운터 (`portfolio_state` 영속화)
 - `RecommendationService` (`research`) — 관심 종목 뉴스 감성 집계 →
   매수 후보/관망/주의 추천 (대시보드 표시 전용, 매매 미연동)
+- 운영 상태 거울 (2026-08-20, `com.trading.mirror`) — 운전 상태·총자산·오늘 등락률·연속손실·
+  연속 가동일·보유 종목(손절선·지갑칸)을 5분마다 Supabase 한 행에 덮어쓴다(밖에서 조회용).
+  **매매 경로 무변경** — 전송 실패는 삼키고, 거래일 09:00~15:30에만 보낸다
+  (장외 전송은 미러 때문에만 잔고 API를 부르게 되고, 그 실패가 `KisApiClient` 연속 실패
+  카운터에 쌓여 아침을 SAFE_MODE로 시작시킨다). 설정은 `SUPABASE_URL`·`SUPABASE_KEY`
+  환경변수 — 미설정이면 스킵. 테이블 SQL은 `docs/supabase-schema.sql`
 - P2-A (2026-07-08) — `AtrCalculator`(ATR 14) + `OrderSizingService`(R 수량 역산) +
   `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
 - `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,
@@ -228,19 +327,54 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
   시가총액 세분화 재집계 추가. 판정은 위 "현재 스코프" 항목 참고 — 둘 다 기각, 게이트 불변.
   이 과정에서 백테스트 텔레그램 격리가 OS 환경변수로 무력화되는 사고 발견 —
   `TradingEventListener`에 `@Profile("!backtest")` 추가로 구조적 차단 (BACKTEST-DESIGN §12)
+- 운영 신뢰성 강화 (2026-08, 브랜치 `backtest/regime-filter-and-validation` 커밋 e1e095d~285a1b9·cb5988d) —
+  데이터·호출 신뢰성 결함 일괄 해소:
+  ① **체결누락 desync 자동복구** — 취소가 "취소할 수량 없음/원주문번호 없음"으로 거부되면
+     (=이미 체결) 실잔고와 대사해 포지션 정렬·주문 종결 (`FillStateUpdater.reconcileFilledFromBalance`,
+     `KisOrderCancelClient.classify`)
+  ② **토큰 만료 인식** — KIS가 만료를 HTTP 500(EGW00123)으로 주는 것을 401과 동일 취급해 즉시 재발급 (`KisApiClient`)
+  ③ **텔레그램 장중 전용** — 거래일 09:00~15:30에만 전송, 장외는 로그만 (`TelegramNotifier` + `MarketCalendarService`)
+  ④ **KIS 전역 레이트 조정자** `KisRateLimiter` — 모든 호출을 초당 한도로 균등 배분해
+     EGW00201·SAFE_MODE 플래핑 근절. **한도는 계좌 단위: 모의 1건/초 · 실전 18건/초 ·
+     토큰발급 1건/초** (KIS 공지 "API 호출 유량 안내" 2026.04.20 기준, 2026-08-04 확인 —
+     예전 값 2/20에서 하향됐다). `kis.rate-limit-per-sec`, paper yml에 1로 명시
+  ⑤ **주기적 안전 재동기화** — `ShadowPortfolioReconciler.reconcile`이 2주기 지속+신선값+장중일 때만
+     브로커 기준 자동 보정, 첫 감지는 알림만 (§5.3 개정)
+  ⑥ **데이터 품질 게이트** — `RiskMonitor`·`StopLossMonitor`는 낡은(폴백) 스냅샷이면 청산/손절 판정
+     스킵 (`Account.isFresh()`, 2026-07-30 -11.19% 헛청산 오판 재발 방지)
 
 ## 미구현 / 알려진 결함 (제안·수정 시 주의)
 
-1. 모의계좌 강제청산 리허설 미실행 — Gate 2 완료 판정 보류 (사용자 실행 필요)
+1. ~~모의계좌 강제청산 리허설~~ ✅ **해소 (2026-08-19) — Gate 2 완료.** 12:26:49 개시 →
+   미체결 취소 → 012330 1주 시장가 매도 접수(ordNo 0000026981) → 12:27:20 EMERGENCY_STOPPED 종결.
+   체결은 12:37:31 실잔고 대사로 확인(브로커 보유 0주). 2026-07-30 실패 원인이던 레이트리밋 폭주는
+   레이트 조정자(2026-08) 배포로 재현되지 않았다. (항목 번호는 아래 참조 유지를 위해 그대로 둔다)
 2. 지정가 분할(Price Jitter) 미구현 — ADR-001 3장 파라미터(가격 간격·주문 개수) 결정 선행
 3. 타임컷은 15:15에 앱이 꺼져 있으면 해당일 건너뜀 (거래일 캘린더는 `market-calendar.yml`로 해소됨)
-4. 연속손실 기록은 매도 체결 청크 단위 — 부분 체결 매도 시 라운드트립 집계로 전환 필요
-   (R 사이징으로 수량 > 1 매도가 가능해져 발생 확률 상승)
+4. ~~연속손실 기록은 매도 체결 청크 단위~~ ✅ **해소 (2026-08-19)** — 라운드트립(진입~전량 청산)
+   단위로 전환. 조각 손익은 `Position.realizedPnlAccum`에 쌓이고 보유 수량이 0이 되는 순간
+   합계로 1회만 판정한다(부분 축소는 세지 않는다). 백테스트 결과는 불변 —
+   매도는 항상 전량이라 조각=전체이며, risk-lab 리포트가 실행 시각 외 바이트 동일로 재현됐다
+5. **체결누락 — 진단 종결, 모의 환경 한정 결함으로 확정 (2026-08-10)** — 모의 체결조회
+   (VTTC8001R)는 주문번호 필터를 빼고 하루 단위로 조회해도 **실제 체결에 빈 목록**을 준다
+   (rt_cd=0인데 count=0. 8/4~8/7 우리 DB 체결 52건 대비 브로커 조회 0건 — BACKTEST-DESIGN §16.6).
+   파라미터 문제가 아니므로 **조회 교정으로는 못 고친다.**
+   ⚠ 귀결: **모의에서는 매도 체결가를 얻을 수 없다** → 실현손익(`trade_result`)·칸별 성적·
+   왕복 슬리피지 측정이 전부 막힌다. 과거분 복구도 불가(브로커 원장 조회가 비어 있음).
+   현재는 ①(취소불가=체결) 자동복구 + 주기적 재동기화가 **유일한 체결 확인 수단**(≈10분 지연).
+   남은 선택지는 실시간 체결통보(WebSocket `H0STCNI9`) 또는 실전 전환 후 재확인 —
+   후자를 택했다(ADR-001 개정 2026-08-10: 슬리피지 관문을 실전 이후로 이관).
 
 해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 · 부분 체결 매수 손절 미장착 (2026-07-20 — `OrderPartialFilledEvent` 신설, 부분 체결분도
   `StopLossArmer`가 장착. 릴리즈 검증용 `RunStreakRecorder`(연속 무중단 가동일 기록,
   `GET /api/trading/run-streak`)도 같은 날 추가)
+· 체결누락 브로커-DB desync 복구·레이트리밋 플래핑·낡은데이터 헛청산 (2026-08 — 위 "구현 완료된 부분"
+  운영 신뢰성 강화 참고. 단 체결누락 뿌리는 위 5번으로 잔존)
+· **보정 포지션 손절선 누락** (2026-08-04 — `ShadowPortfolioReconciler.armMissingStops()`:
+  브로커 기준 보정은 체결 이벤트가 없어 `StopLossArmer` 경로를 안 타 `stopPrice=null`로 남았다
+  (실측: 034020 13주 무방비, 그날 신규 생성 3회). 이제 대조할 때마다 "보유분은 반드시 손절선을
+  갖는다"를 불변식으로 강제한다 — 기준가는 브로커 평균단가, 기존 손절선은 건드리지 않는다)
 
 Sprint 3 작업 순서는 `README.md`의 "다음 작업" 섹션 기준.
 

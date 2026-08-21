@@ -2,20 +2,30 @@ package com.trading.risk;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.Account;
+import com.trading.position.NoOpPeakEquityCalibrator;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionManager;
 import com.trading.position.ShadowPortfolio;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,7 +48,9 @@ class RiskMonitorTest {
     void setUp() {
         monitorPm = mock(PositionManager.class);
         shadowPm  = mock(PositionManager.class);
-        shadowPortfolio = new ShadowPortfolio(shadowPm, mock(PortfolioStateRepository.class));
+        // 전고점 검증은 이 테스트의 관심사가 아니므로 무검증 구현체로 조립한다 (기존 동작 그대로).
+        shadowPortfolio = new ShadowPortfolio(shadowPm, mock(PortfolioStateRepository.class),
+                new NoOpPeakEquityCalibrator());
 
         BrokerageApiClient brokerageClient = mock(BrokerageApiClient.class);
         when(brokerageClient.getActualAccountAsset()).thenReturn(new ActualAccountInfo(List.of()));
@@ -47,8 +59,19 @@ class RiskMonitorTest {
         liquidationService = new LiquidationService(brokerageClient, statusManager, notifier);
 
         sut = new RiskMonitor(monitorPm, shadowPortfolio, liquidationService,
-                statusManager, configuredProps(), notifier, new RiskLimitsProperties());
+                statusManager, configuredProps(), notifier, new RiskLimitsProperties(), inHours());
     }
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** 2026-07-15(수) 평일 + 지정 시각으로 고정된 캘린더 */
+    private static MarketCalendarService cal(LocalTime t) {
+        Clock fixed = Clock.fixed(
+                LocalDateTime.of(LocalDate.of(2026, 7, 15), t).atZone(KST).toInstant(), KST);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+    private static MarketCalendarService inHours()  { return cal(LocalTime.NOON); }        // 12:00 장중
+    private static MarketCalendarService offHours() { return cal(LocalTime.of(17, 0)); }   // 17:00 장외
 
     private static KisProperties configuredProps() {
         KisProperties p = new KisProperties();
@@ -115,6 +138,51 @@ class RiskMonitorTest {
         assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
     }
 
+    // ── 전고점 미검증(클램프 교정) — MDD 자동청산만 보류 (감사 2026-08-21 MEDIUM) ──
+
+    /**
+     * 클램프된 전고점으로 조립한 감시기. 표시 자체의 상태머신은 ShadowPortfolioTest가 검증하므로
+     * 여기서는 판정 입력만 갈아끼운다 (Java 25 목킹 제약 — 익명 하위 클래스).
+     */
+    private RiskMonitor monitorWithUnverifiedPeak(double peak) {
+        ShadowPortfolio unverified = new ShadowPortfolio(shadowPm,
+                mock(PortfolioStateRepository.class), new NoOpPeakEquityCalibrator()) {
+            @Override
+            public boolean isPeakUnverified() {
+                return true;
+            }
+        };
+        when(shadowPm.snapshotAccount()).thenReturn(account(peak, 0.0));
+        unverified.tick();
+        assertThat(unverified.getPeakEquity()).isEqualTo(peak);
+        return new RiskMonitor(monitorPm, unverified, liquidationService, statusManager,
+                configuredProps(), notifier, new RiskLimitsProperties(), inHours());
+    }
+
+    @Test
+    void unverified_peak_holds_mdd_liquidation_and_notifies_once() {
+        RiskMonitor monitor = monitorWithUnverifiedPeak(50_000_000);
+        // peak 5,000만 → 현재 4,000만 = MDD 20% (검증된 전고점이었다면 즉시 청산)
+        when(monitorPm.snapshotAccount()).thenReturn(account(40_000_000, -0.01));
+
+        monitor.monitor();
+        monitor.monitor();   // 1초 주기 — 두 번째 틱에서 알림이 또 나가면 안 된다
+
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+        verify(notifier, times(1)).sendCritical(contains("보류"));
+    }
+
+    @Test
+    void unverified_peak_does_not_hold_daily_loss_liquidation() {
+        RiskMonitor monitor = monitorWithUnverifiedPeak(50_000_000);
+        // 전고점이 미검증이어도 일일 손실 -5% 청산은 전고점과 무관하므로 그대로 발동해야 한다
+        when(monitorPm.snapshotAccount()).thenReturn(account(47_500_000, -0.05));
+
+        monitor.monitor();
+
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.FULL_LIQUIDATING);
+    }
+
     // ── 가드 조건 ─────────────────────────────────────────────────────────────
 
     @Test
@@ -148,11 +216,36 @@ class RiskMonitorTest {
     @Test
     void skips_when_credentials_not_configured() {
         RiskMonitor unconfigured = new RiskMonitor(monitorPm, shadowPortfolio,
-                liquidationService, statusManager, new KisProperties(), notifier, new RiskLimitsProperties());
+                liquidationService, statusManager, new KisProperties(), notifier,
+                new RiskLimitsProperties(), inHours());
 
         unconfigured.monitor();
 
         verify(monitorPm, never()).snapshotAccount();
+    }
+
+    @Test
+    void off_market_hours_skips_monitoring() {
+        RiskMonitor offHoursMonitor = new RiskMonitor(monitorPm, shadowPortfolio,
+                liquidationService, statusManager, configuredProps(), notifier,
+                new RiskLimitsProperties(), offHours());
+
+        offHoursMonitor.monitor();
+
+        // 장외에는 스냅샷 조회도, 청산 판정도 하지 않는다
+        verify(monitorPm, never()).snapshotAccount();
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+    }
+
+    @Test
+    void stale_snapshot_does_not_trigger_liquidation() {
+        // -5% 손실이지만 잔고 API 실패로 낡은(폴백) 스냅샷 → 청산 트리거 금지 (2026-07-30 오판 방지)
+        when(monitorPm.snapshotAccount()).thenReturn(account(47_500_000, -0.05).asStale());
+
+        sut.monitor();
+
+        assertThat(liquidationService.currentPhase()).isEqualTo(LiquidationPhase.IDLE);
+        verify(notifier, never()).sendCritical(anyString());
     }
 
     @Test

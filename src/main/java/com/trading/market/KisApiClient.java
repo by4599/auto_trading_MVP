@@ -17,9 +17,14 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,6 +55,7 @@ public class KisApiClient {
     private final KisProperties props;
     private final TradingStatusManager statusManager;
     private final NotificationService notifier;
+    private final KisRateLimiter rateLimiter;
     // 토큰 발급 전용 — 인터셉터 없음 (순환 참조 방지)
     private volatile RestClient tokenClient;
     // 모든 API 호출용 — 인터셉터(인증 주입 + 401 재시도)가 붙어있음
@@ -62,10 +68,12 @@ public class KisApiClient {
     private final AtomicBoolean pausedByConnectionLoss = new AtomicBoolean(false);
 
     @Autowired
-    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier) {
+    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
+                        KisRateLimiter rateLimiter) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
         // 자격증명 미설정 시 placeholder — 실제 요청 시 getBearerToken()에서 명시적 오류 발생
         buildClients(props.isConfigured() ? props.getBaseUrl() : "https://placeholder.invalid");
     }
@@ -77,10 +85,11 @@ public class KisApiClient {
      * 인터셉터가 빠진 채로 조립돼 아무 것도 검증하지 못한다).
      */
     KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
-                 RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
+                 KisRateLimiter rateLimiter, RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
         this.tokenClient = tokenBuilder.build();
         this.apiClient = apiBuilder.requestInterceptor(this::intercept).build();
     }
@@ -192,15 +201,16 @@ public class KisApiClient {
     private ClientHttpResponse intercept(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
 
-        ClientHttpResponse response = executeTracked(request, body, execution);
+        ClientHttpResponse response = buffer(executeTracked(request, body, execution));
         int status = response.getStatusCode().value();
 
-        // 401: 토큰 만료 → 재발급 후 1회만 재시도
-        if (status == 401) {
-            response.close();
-            log.warn("401 수신 — 토큰 강제 재발급 후 재시도");
+        // 401(표준) 또는 토큰 만료 → 재발급 후 1회만 재시도.
+        // KIS는 토큰 만료를 401이 아니라 HTTP 500 본문(EGW00123 "만료된 token")으로 돌려주므로
+        // 본문까지 확인해야 한다. 이걸 놓치면 죽은 토큰으로 재시도만 하다 SAFE_MODE에 갇힌다.
+        if (status == 401 || isTokenExpiredResponse(status, response)) {
+            log.warn("인증 만료 감지(status={}) — 토큰 강제 재발급 후 재시도", status);
             tokenRef.set(null);
-            response = executeTracked(request, body, execution);
+            response = buffer(executeTracked(request, body, execution));
             recordOutcome(response.getStatusCode().value());
             return response;
         }
@@ -211,15 +221,46 @@ public class KisApiClient {
             long waitMs = (1L << (attempt - 1)) * 1_000L; // 1s, 2s, 4s
             log.warn("HTTP {} 수신 — {}ms 후 재시도 ({}/3)", status, waitMs, attempt);
             sleepQuietly(waitMs);
-            response = executeTracked(request, body, execution);
+            response = buffer(executeTracked(request, body, execution));
             status  = response.getStatusCode().value();
         }
         recordOutcome(status);
         return response;
     }
 
+    /** KIS의 토큰 만료 응답(HTTP 5xx 본문에 EGW00123/"만료된 token")을 401과 동등하게 감지한다. */
+    private boolean isTokenExpiredResponse(int status, ClientHttpResponse response) {
+        if (status / 100 != 5) return false;
+        try {
+            String body = new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
+            return body.contains("EGW00123") || body.contains("만료된 token");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 응답 본문을 바이트로 미리 읽어 재판독 가능한 응답으로 감싼다.
+     * 인터셉터가 본문(토큰 만료 여부)을 들여다봐도 호출 측이 그대로 다시 읽을 수 있게 한다.
+     */
+    private static ClientHttpResponse buffer(ClientHttpResponse original) throws IOException {
+        byte[] bytes = StreamUtils.copyToByteArray(original.getBody());
+        HttpStatusCode statusCode = original.getStatusCode();
+        String statusText = original.getStatusText();
+        HttpHeaders headers = HttpHeaders.readOnlyHttpHeaders(original.getHeaders());
+        original.close();
+        return new ClientHttpResponse() {
+            @Override public HttpStatusCode getStatusCode() { return statusCode; }
+            @Override public String getStatusText()          { return statusText; }
+            @Override public HttpHeaders getHeaders()        { return headers; }
+            @Override public InputStream getBody()           { return new ByteArrayInputStream(bytes); }
+            @Override public void close()                    { /* 버퍼 — 닫을 자원 없음 */ }
+        };
+    }
+
     private ClientHttpResponse executeTracked(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
+        rateLimiter.acquire();  // 초당 한도 준수 — 모든 물리 호출(최초·재시도 포함)이 예산 슬롯을 받는다
         try {
             return execution.execute(withAuth(request), body);
         } catch (IOException e) {

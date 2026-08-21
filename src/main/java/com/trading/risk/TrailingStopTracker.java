@@ -1,6 +1,7 @@
 package com.trading.risk;
 
-import com.trading.strategy.FilterProperties;
+import com.trading.bucket.BucketParameterResolver;
+import com.trading.bucket.StrategyBucket;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -16,11 +17,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class TrailingStopTracker {
 
-    private final FilterProperties filters;
+    private final BucketParameterResolver bucketParams;
     private final Map<String, Double> highSinceEntry = new ConcurrentHashMap<>();
 
-    public TrailingStopTracker(FilterProperties filters) {
-        this.filters = filters;
+    public TrailingStopTracker(BucketParameterResolver bucketParams) {
+        this.bucketParams = bucketParams;
     }
 
     public void updateHigh(String stockCode, double price) {
@@ -41,17 +42,49 @@ public class TrailingStopTracker {
      * @return 청산해야 하면 트레일 가격(고점 × (1−trail)), 아니면 empty
      */
     public java.util.OptionalDouble exitPrice(String stockCode, double currentPrice, double entryPrice) {
-        FilterProperties.TrailingStop cfg = filters.getTrailingStop();
-        if (!cfg.isEnabled()) return java.util.OptionalDouble.empty();
+        return exitPrice(stockCode, currentPrice, entryPrice, null);
+    }
+
+    /** 칸별 트레일 설정 적용 — bucket=null이면 전역값 (레거시·백테스트 경로) */
+    public java.util.OptionalDouble exitPrice(String stockCode, double currentPrice, double entryPrice,
+                                              StrategyBucket bucket) {
+        BucketParameterResolver.Trailing cfg = bucketParams.trailing(bucket);
+        if (!cfg.enabled()) return java.util.OptionalDouble.empty();
 
         Double high = highSinceEntry.get(stockCode);
         if (high == null || entryPrice <= 0) return java.util.OptionalDouble.empty();
-        if (high < entryPrice * (1 + cfg.getArmProfitPct())) return java.util.OptionalDouble.empty();
+        if (high < entryPrice * (1 + cfg.armProfitPct())) return java.util.OptionalDouble.empty();
 
-        double trailLevel = high * (1 - cfg.getTrailPct());
+        double trailLevel = high * (1 - cfg.trailPct());
         if (currentPrice <= trailLevel) {
             return java.util.OptionalDouble.of(trailLevel);
         }
         return java.util.OptionalDouble.empty();
+    }
+
+    /**
+     * 이월(다일 보유) 포지션의 "대기 트레일 손절선" — 저장된 고점(오늘 고가 반영 전 =
+     * 어제까지의 고점)만으로 계산한다. 백테스트(BACKTEST-DESIGN §14)에서 이월 포지션의
+     * 트레일 청산을 선견 없이 모델링하려는 용도: 오늘 고가로 스톱을 올린 뒤 그 스톱을
+     * 같은 날 저가로 때리는 순환(look-ahead)을 막기 위해, 고가 갱신 전에 이 레벨로 먼저 판정한다.
+     * 현재가는 인자로 받지 않는다 — 트리거(갭/저가 관통)는 호출부가 당일 시가·저가로 판정한다.
+     *
+     * @return 트레일이 무장된 상태면 손절 레벨(고점 × (1−trail)), 아니면 empty
+     */
+    public java.util.OptionalDouble exitLevelFromPriorHigh(String stockCode, double entryPrice) {
+        return exitLevelFromPriorHigh(stockCode, entryPrice, null);
+    }
+
+    /** 칸별 트레일 설정 적용 — bucket=null이면 전역값 (레거시·백테스트 경로) */
+    public java.util.OptionalDouble exitLevelFromPriorHigh(String stockCode, double entryPrice,
+                                                           StrategyBucket bucket) {
+        BucketParameterResolver.Trailing cfg = bucketParams.trailing(bucket);
+        if (!cfg.enabled()) return java.util.OptionalDouble.empty();
+
+        Double high = highSinceEntry.get(stockCode);
+        if (high == null || entryPrice <= 0) return java.util.OptionalDouble.empty();
+        if (high < entryPrice * (1 + cfg.armProfitPct())) return java.util.OptionalDouble.empty();
+
+        return java.util.OptionalDouble.of(high * (1 - cfg.trailPct()));
     }
 }

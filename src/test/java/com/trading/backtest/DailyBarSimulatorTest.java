@@ -22,6 +22,8 @@ import com.trading.risk.TradingStatusManager;
 import com.trading.risk.TrailingStopTracker;
 import com.trading.signal.SignalDispatcher;
 import com.trading.strategy.FilterProperties;
+import com.trading.strategy.RsiProperties;
+import com.trading.strategy.ScalpingProperties;
 import com.trading.strategy.StrategyParameters;
 import com.trading.strategy.VolatilityBreakoutStrategy;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +70,9 @@ class DailyBarSimulatorTest {
     private DailyBarSimulator sut;
     private TradeRecorder tradeRecorder;
     private MutableClock clock;
+    private ScalpingProperties scalpingProperties;
+    private FilterProperties filters;
+    private TrailingStopTracker trailingStopTracker;
 
     /** 시나리오별 당일 봉을 갈아끼우는 가변 시리즈 (candle repo 목이 이 리스트를 반환) */
     private final List<CandleHistory> seriesRows = new ArrayList<>();
@@ -93,20 +98,26 @@ class DailyBarSimulatorTest {
                 dailyEquityRepository, tracker, market, properties, clock);
         orderClient = new BacktestOrderClient(orderHistoryRepository, positionRepository,
                 tracker, mock(ApplicationEventPublisher.class), market, positionManager,
-                tradeRecorder, clock);
+                tradeRecorder, clock, new BacktestCostProperties());
 
         OrderEngine orderEngine = new OrderEngine(orderClient, new TradingStatusManager(),
                 new OrderSizingService(market, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
-        FilterProperties filters = new FilterProperties();
+        filters = new FilterProperties();
         SignalDispatcher dispatcher = new SignalDispatcher(
                 List.of(new VolatilityBreakoutStrategy(new StrategyParameters(), filters)));
 
-        sut = new DailyBarSimulator(market, dispatcher, new RiskEngine(List.of()),
+        scalpingProperties = new ScalpingProperties();
+        trailingStopTracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
+        RiskEngine riskEngine = new RiskEngine(List.of());
+        DailyBarExitSimulator exits = new DailyBarExitSimulator(market, riskEngine,
                 orderEngine, positionRepository, positionManager, orderClient,
-                new TrailingStopTracker(filters), clock);
+                trailingStopTracker, clock, scalpingProperties);
+        sut = new DailyBarSimulator(market, dispatcher, riskEngine,
+                orderEngine, positionRepository, positionManager,
+                trailingStopTracker, exits, clock, new RsiProperties());
 
         market.setSimDate(TODAY);
     }
@@ -189,6 +200,72 @@ class DailyBarSimulatorTest {
         sut.simulateDay(CODE, TODAY);
 
         assertThat(positionStore.get(CODE).getQuantity()).isEqualTo(3);
+    }
+
+    // ── 스캘핑(방식3) 목표 익절 (BACKTEST-DESIGN §13) ──────────────────────────
+
+    @Test
+    @DisplayName("스캘핑 켜짐: 당일 고가가 목표가 이상이면 목표가로 익절 청산된다")
+    void takeProfit_exitsAtTarget_whenScalpingEnabled() {
+        scalpingProperties.setEnabled(true);
+        scalpingProperties.setTakeProfitPct(0.05); // +5%
+        givenHeldPosition(3, 100, 50); // 손절가 50 — 오늘 저가로는 안 닿음
+        setTodayBar(new Candle(TODAY, 101, 106, 99, 102, 2000)); // 고가 106 ≥ 목표 105
+
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore).doesNotContainKey(CODE);
+    }
+
+    @Test
+    @DisplayName("스캘핑 꺼짐(기본값): 고가가 목표가를 넘어도 익절 청산되지 않는다")
+    void takeProfit_doesNothing_whenScalpingDisabled() {
+        // scalpingProperties.enabled 기본값 false
+        givenHeldPosition(3, 100, 50);
+        setTodayBar(new Candle(TODAY, 101, 106, 99, 102, 2000));
+
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore.get(CODE).getQuantity()).isEqualTo(3);
+    }
+
+    // ── 이월 트레일링 손절: 보수적 갭 체결 (BACKTEST-DESIGN §14) ────────────────
+
+    @Test
+    @DisplayName("이월 트레일 갭 관통: 시가 ≤ 레벨이면 레벨이 아니라 시가에 체결(보수)")
+    void carriedTrailing_gapThrough_exitsAtOpen() {
+        filters.getTrailingStop().setEnabled(true);
+        filters.getTrailingStop().setArmProfitPct(0.02);
+        filters.getTrailingStop().setTrailPct(0.05);
+        givenHeldPosition(3, 100, 50);              // ATR 손절 50 — 오늘 저가로 안 닿음
+        trailingStopTracker.updateHigh(CODE, 120);  // 어제까지 고점 120 → 레벨 114
+        setTodayBar(new Candle(TODAY, 110, 111, 108, 109, 2000)); // 시가 110 < 레벨 114 (갭)
+
+        double cashBefore = positionManager.getCash();
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore).doesNotContainKey(CODE);
+        // 레벨(114)이 아니라 시가(110)에 체결됐는지 — 현금 유입으로 구분
+        double expectedIn = BacktestCosts.sellCashIn(BacktestCosts.sellFillPrice(110), 3);
+        assertThat(positionManager.getCash() - cashBefore).isCloseTo(expectedIn, within(1e-6));
+    }
+
+    @Test
+    @DisplayName("이월 트레일 장중 터치: 시가 > 레벨, 저가 ≤ 레벨이면 레벨에 체결")
+    void carriedTrailing_intradayTouch_exitsAtLevel() {
+        filters.getTrailingStop().setEnabled(true);
+        filters.getTrailingStop().setArmProfitPct(0.02);
+        filters.getTrailingStop().setTrailPct(0.05);
+        givenHeldPosition(3, 100, 50);
+        trailingStopTracker.updateHigh(CODE, 120);  // 레벨 114
+        setTodayBar(new Candle(TODAY, 116, 118, 112, 113, 2000)); // 시가 116>114, 저가 112<114
+
+        double cashBefore = positionManager.getCash();
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore).doesNotContainKey(CODE);
+        double expectedIn = BacktestCosts.sellCashIn(BacktestCosts.sellFillPrice(114), 3);
+        assertThat(positionManager.getCash() - cashBefore).isCloseTo(expectedIn, within(1e-6));
     }
 
     // ── 픽스처 ────────────────────────────────────────────────────────────────

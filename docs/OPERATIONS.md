@@ -134,6 +134,45 @@ curl -X POST localhost:8080/api/trading/liquidation-drill -H "Content-Type: appl
 > HTS/MTS에서 수동으로 낸 주문은 취소되지 않으므로, 청산 알림을 받으면 수동 주문 여부를
 > HTS에서 함께 확인할 것.
 
+### 7.1 리허설을 누가 실행하는가 — 역할 경계
+
+| 주체 | 하는 일 | 하지 않는 일 |
+|---|---|---|
+| 사람 | 리허설을 할지 결정, 예약을 켜고 날짜를 지정, 실전(real) 전환 승인 | — |
+| 앱(예약 스케줄러) | 지정된 날짜·시각에 매수·청산을 **자동 실행** | 지정 없이 스스로 발동 |
+| Claude(AI 조수) | 사전 점검, 설정·코드 작성, 실행 후 로그·잔고로 결과 검증, 문서 갱신 | **주문·청산 버튼을 대신 누르는 것** |
+
+Claude는 사람 승인이 있어도 매매 실행을 대행하지 않는다. 사람이 그 시각에 자리에 없어
+진행이 막히는 문제는 **대행이 아니라 예약(§7.2)으로 푼다** — 조작 권한의 경계를 흐리면
+실전 전환 뒤에 사고가 난다.
+
+### 7.2 예약 청산 리허설 — 사람이 자리에 없어도 훈련이 돌게
+
+`application-paper.yml`의 `trading.drill`을 켜고 날짜를 지정하면, 앱이 그날 스스로 리허설을
+수행한다. 기본은 꺼져 있고, **날짜를 콕 집지 않으면 절대 발동하지 않는다**(상시 반복 금지 —
+리허설은 보유분을 전부 팔고 매매를 멈추는 조작이라 매일 돌면 매매 자체가 불가능하다).
+
+```yaml
+trading:
+  drill:
+    enabled: true
+    date: "2026-08-20"   # 이 날짜에만 1회
+    at: "10:00"          # 개시 시각
+    deadline: "14:00"    # 이 시각까지는 못 했으면 다시 시도 (타임컷 15:15보다 앞)
+    buy-if-flat: true    # 보유가 없으면 005930 10주를 먼저 사서 대상을 만든다
+```
+
+진행 방식: 개시 시각이 지나면 매 분 조건을 확인해서, 보유가 없으면 **매수만 접수하고 끝낸다**
+(체결은 3초 주기 체결확인이 반영). 다음 분에 보유가 확인되면 그때 청산을 개시한다.
+스레드를 붙잡고 기다리지 않으므로 체결이 늦어도 다음 틱이 이어받는다.
+
+안전장치: 모의 프로필 전용 · 거래일에만 · 매수와 청산 각각 하루 1회 표시를 남겨 중복 발동 차단
+· 실제 조작은 수동 실행과 **같은 관문**(`DrillService`)을 지나므로 리스크 룰이 막으면 그대로 멈춘다
+· 단계마다 텔레그램 보고.
+
+끝난 뒤 상태는 수동 리허설과 같다 — EMERGENCY_STOPPED이며 재가동은 §6 절차를 따른다.
+**리허설이 끝난 날은 그 이후 매매가 멈춘다**는 뜻이므로, 날짜는 그래도 되는 날로 고른다.
+
 ## 8. 구현 매핑 (Phase 2 편입 항목)
 
 | 항목 | 작업 | 우선순위 |
@@ -146,6 +185,57 @@ curl -X POST localhost:8080/api/trading/liquidation-drill -H "Content-Type: appl
 | 거래일 캘린더 + 시각 상수 설정화 | market-calendar.yml + MarketCloseRule 리팩터 | Phase 2 |
 | VI 진입 금지 룰, 권리락 리포트 | 신규 RiskRule / 리포트 확장 | Phase 3 |
 | VPS 이전 | 인프라 작업 + 키 이전 절차 | 실전 전환 직전 |
+
+---
+
+## 9. 데이터 백업 · 복구
+
+**잃으면 되찾을 수 없는 것부터 본다.**
+
+| 데이터 | 파일 | 재취득 |
+|---|---|---|
+| 분봉 (전방 축적) | `trading-db.mv.db` | **불가능** — KIS가 과거 분봉을 소급 제공하지 않는다 (`MinuteCandleCollector` 주석) |
+| 거래 기록 (주문·체결·실현손익) | `trading-db.mv.db` | **불가능** — 실제 계좌 이력 |
+| 일봉 3~7년치 | `backtest-db.mv.db` | 가능하지만 느리다 (모의 레이트리밋 1건/초) |
+
+기존 `backup.sh`는 **같은 디스크의 `backup/`** 에 `trading-db`만 복사한다 — 디스크가
+죽으면 원본과 사본이 함께 죽고, 캔들 DB는 대상에도 없다.
+
+### 9.1 백업 실행
+
+```powershell
+.\backup-to-supabase.ps1                                  # 두 DB 백업 + Supabase 업로드
+.\backup-to-supabase.ps1 -SkipUpload                      # 로컬 zip만
+.\backup-to-supabase.ps1 -MirrorDir "G:\내 드라이브\backup" # 동기화 폴더에도 복사
+```
+
+- **앱을 멈추지 않아도 된다.** H2 `BACKUP TO`로 온라인 스냅샷을 뜨므로 쓰기 도중에도
+  정합성이 보장된다 (단순 파일 복사와 다른 점). 실측: 18MB → 4.5MB zip, 0.6초.
+- 보관 개수는 로컬 5개 · 원격 7개가 기본 (`-KeepLocal` / `-KeepRemote`).
+- `SUPABASE_URL`·`SUPABASE_KEY`(secret key)가 없으면 업로드만 건너뛰고 로컬 zip은 남긴다.
+- **등록 완료 (2026-08-21)**: 예약 작업 `AutoTrading-DB-Backup-2330` — 매일 23:30, PC가 꺼져 있었으면 켜진 뒤 곧바로 실행. 아래는 재등록·다른 PC 이전용 명령이다:
+
+```powershell
+schtasks /create /tn "AutoTrading-DB-Backup-2330" /sc daily /st 23:30 /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Users\SAMSUNG\Desktop\workspace\auto_trading\backup-to-supabase.ps1'"
+```
+
+> ⚠ **예약 작업은 폴더를 옮기거나 이름을 바꾸면 조용히 죽는다.** 2026-08-21에 확인한 실사고:
+> 평일 08:30 기동 작업 `AutoTrading-Paper-0830`이 7월 폴더 rename(`개발`→`workspace`) 이후
+> 옛 경로를 가리킨 채 **한 달 넘게 매일 실패**했고(오류 267 ERROR_DIRECTORY), 그동안 "5거래일
+> 연속 가동" 검증이 시작조차 못 했다. 경로를 바꿨다면 두 작업의 `-File` 경로와 시작 위치를
+> 반드시 함께 고치고, `Get-ScheduledTaskInfo`의 `LastTaskResult`가 0인지 확인한다.
+
+### 9.2 복구 절차
+
+1. 앱을 중지한다 (복구 중 쓰기가 섞이면 안 된다)
+2. 되돌릴 zip을 받는다 — 로컬 `backup/` 또는 Supabase Storage `db-backup` 버킷
+3. zip을 풀면 `trading-db.mv.db`(또는 `backtest-db.mv.db`) 하나가 나온다
+4. 프로젝트 루트의 같은 이름 파일을 **다른 이름으로 옮겨 두고**(사고 시 되돌릴 여지) 교체한다
+5. `trading-db.lock.db` / `*.trace.db`가 남아 있으면 지운다
+6. 앱을 시작하고, SAFE_MODE 기동 시퀀스(§3)가 브로커 실잔고와 대조하는지 확인한다
+
+> 복구 후 첫 기동은 반드시 **개장 전**에 한다 — 개장 후 재시작은 그날의 연속 무중단
+> 가동 기록을 리셋시킨다 (`RunStreakRecorder`).
 
 ---
 

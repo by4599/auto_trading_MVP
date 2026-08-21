@@ -8,6 +8,10 @@ kis:
   appkey: ${KIS_APPKEY}
   secretkey: ${KIS_SECRETKEY}
   account-no: ${KIS_ACCOUNT_NO}   # 예) 50000000-01
+  # KIS 공지 "API 호출 유량 안내"(2026.04.20 기준, 2026-08-04 확인): 모의투자 1건/초.
+  # 계좌 단위 제한이라 매매·잔고·체결·대시보드 호출을 합쳐 이 한도를 넘으면 안 된다.
+  # 실전 전환 시 18 (기존 20에서 하향됨).
+  rate-limit-per-sec: 1
 
 telegram:
   bot-token: ${TELEGRAM_BOT_TOKEN:}   # 비워두면 알림 스킵 (개발 환경)
@@ -18,6 +22,17 @@ dart:
 
 heartbeat:
   url: ${HEARTBEAT_URL:}   # 비워두면 하트비트 스킵 — OPERATIONS §2, healthchecks.io 등 무료 서비스의 ping URL
+
+# 운영 상태 거울 (com.trading.mirror) — 밖에서 폰으로 상태를 보기 위한 읽기 전용 복사본.
+# 매매·기록의 원본은 그대로 로컬 H2다. 전송이 실패해도 매매는 영향받지 않는다.
+# key는 서버 전용 secret key(sb_secret_...)를 환경변수로만 넣는다 —
+# 공개용 publishable key로는 RLS가 켜진 테이블에 쓸 수 없다. 절대 이 파일에 값을 적지 말 것.
+supabase:
+  url: ${SUPABASE_URL:}        # 비워두면 미러 스킵 (예: https://xxxx.supabase.co)
+  key: ${SUPABASE_KEY:}        # 비워두면 미러 스킵
+  table: trading_mirror
+  snapshot-id: paper           # 같은 행을 계속 덮어쓴다 — 히스토리가 아니라 "지금 상태" 한 줄
+  interval-ms: 300000          # 5분. 거래일 09:00~15:30에만 전송한다
 
 # §3.3 A/B 채택 필터 (REPORT-20260713-0735) — 조합이 검증 구간 PF 0.66→0.81,
 # MDD 49.2→27.9%로 동반 우위. 전략 자체는 여전히 불합격(PF<1)이므로 이 필터는
@@ -51,6 +66,16 @@ trading:
     pullback-pct: 0.005
     rebound-pct: 0.003
     take-profit-pct: 0.008
+
+  # 예약 청산 리허설 (OPERATIONS §7) — 사람이 그 시각에 버튼을 못 눌러도 훈련이 진행되게 한다.
+  # 기본 꺼짐. 켤 때는 date를 콕 집는다 — 상시 반복은 매매 자체를 막는다(리허설은 전량 매도 후 중지).
+  # at에 앱이 꺼져 있었어도 deadline까지는 다시 시도한다. deadline은 타임컷(15:15)보다 앞에 둔다.
+  drill:
+    enabled: false
+    date: ""          # 예: 2026-08-20
+    at: "10:00"
+    deadline: "14:00"
+    buy-if-flat: true # 보유가 없으면 005930 10주를 먼저 사서 청산 대상을 만든다
 
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.

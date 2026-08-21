@@ -84,7 +84,7 @@ class TradingSchedulerTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         sut = new TradingScheduler(marketDataService,
                 new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
@@ -98,8 +98,58 @@ class TradingSchedulerTest {
     private static LocalDate weekday() { return LocalDate.of(2026, 7, 15); }
 
     private static MarketCalendarService marketCalendarAt(LocalDate date) {
-        Clock fixed = Clock.fixed(LocalDateTime.of(date, java.time.LocalTime.NOON).atZone(KST).toInstant(), KST);
+        return marketCalendarAt(date, java.time.LocalTime.NOON);
+    }
+
+    private static MarketCalendarService marketCalendarAt(LocalDate date, java.time.LocalTime time) {
+        Clock fixed = Clock.fixed(LocalDateTime.of(date, time).atZone(KST).toInstant(), KST);
         return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+
+    /** 같은 배선에 캘린더만 바꿔 끼운 스케줄러 — 시간 게이트 검증용 */
+    private TradingScheduler schedulerAt(java.time.LocalTime time) {
+        return new TradingScheduler(marketDataService,
+                new SignalDispatcher(List.of(NO_SIGNAL_STRATEGY)),
+                new RiskEngine(List.of()),
+                new OrderEngine(mock(KisOrderClient.class), new TradingStatusManager(),
+                        new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
+                                new RiskLimitsProperties(),
+                                com.trading.bucket.BucketTestSupport.disabledProps(),
+                                com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
+                        mock(PositionRepository.class)),
+                positionManager, new TradingStatusManager(), kisProperties,
+                new TradingUniverseService(universeRepository),
+                marketCalendarAt(weekday(), time));
+    }
+
+    @Test
+    @DisplayName("장 시작 전(05:30) → 루프 진입 안 함 — KIS 유량 낭비·'장시작전' 거부 양산 방지")
+    void skips_loop_before_market_open() {
+        givenUniverse("005930");
+
+        schedulerAt(java.time.LocalTime.of(5, 30)).run();
+
+        verify(marketDataService, never()).getRecentCandles(anyString());
+    }
+
+    @Test
+    @DisplayName("장 마감 후(16:00) → 루프 진입 안 함")
+    void skips_loop_after_market_close() {
+        givenUniverse("005930");
+
+        schedulerAt(java.time.LocalTime.of(16, 0)).run();
+
+        verify(marketDataService, never()).getRecentCandles(anyString());
+    }
+
+    @Test
+    @DisplayName("장중(10:00) → 정상 진입")
+    void runs_during_market_hours() {
+        givenUniverse("005930");
+
+        schedulerAt(java.time.LocalTime.of(10, 0)).run();
+
+        verify(marketDataService).getRecentCandles("005930");
     }
 
     private void givenUniverse(String... codes) {
@@ -152,7 +202,7 @@ class TradingSchedulerTest {
                 new OrderEngine(mock(KisOrderClient.class), new TradingStatusManager(),
                         new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                         mock(PositionRepository.class)),
                 positionManager, new TradingStatusManager(), kisProperties,
                 new TradingUniverseService(universeRepository),

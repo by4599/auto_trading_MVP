@@ -127,6 +127,137 @@ class CandleBackfillServiceTest {
         verify(candleClient).fetchIndexDailyCandles(eq("0001"), any(), any());
     }
 
+    // ── 소급 데이터 확장 (2026-07-24) ──
+
+    @Test
+    @DisplayName("backfill-from 미설정이면 rangeFrom은 기존 공식(now - years - 워밍업 260일) 그대로다")
+    void rangeFrom_withoutOverride_keepsLegacyFormula() {
+        assertThat(properties.getBackfillFrom()).isNull();
+
+        assertThat(sut.rangeFrom()).isEqualTo(
+                TODAY.minusYears(3).minusDays(BacktestMarketDataService.WARMUP_CALENDAR_DAYS));
+    }
+
+    @Test
+    @DisplayName("backfill-from을 설정하면 rangeFrom이 그 값을 그대로 쓴다 (저장 하한만 바뀜)")
+    void rangeFrom_withOverride_returnsConfiguredDate() {
+        properties.setBackfillFrom(LocalDate.of(2019, 4, 1));
+
+        assertThat(sut.rangeFrom()).isEqualTo(LocalDate.of(2019, 4, 1));
+        // rangeTo(판정 창의 끝)와 years는 영향받지 않는다
+        assertThat(sut.rangeTo()).isEqualTo(TODAY.minusDays(1));
+        assertThat(properties.getYears()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("소급 확장 시 앞쪽 공백이 backfill-from까지 잡힌다")
+    void missingRanges_withOverride_coversExtendedHead() {
+        LocalDate extendedFrom = LocalDate.of(2019, 4, 1);
+        LocalDate storedFrom = LocalDate.of(2023, 7, 22);
+        LocalDate to = TODAY.minusDays(1);
+        stubStoredRange("005930", storedFrom, to);
+
+        List<CandleBackfillService.DateRange> gaps =
+                sut.missingRanges("005930", extendedFrom, to);
+
+        assertThat(gaps).hasSize(1);
+        assertThat(gaps.get(0).from()).isEqualTo(extendedFrom);
+        assertThat(gaps.get(0).to()).isEqualTo(storedFrom.minusDays(1));
+    }
+
+    @Test
+    @DisplayName("weekdaysBetween은 양끝 포함 평일 수를 센다 (주말 제외)")
+    void weekdaysBetween_countsInclusiveWeekdays() {
+        // 2026-07-20(월) ~ 2026-07-26(일) = 평일 5일
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2026, 7, 20), LocalDate.of(2026, 7, 26))).isEqualTo(5);
+        // 하루짜리 토요일 = 0
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2026, 7, 25), LocalDate.of(2026, 7, 25))).isZero();
+        // 2020년 전체 = 평일 262일
+        assertThat(CandleBackfillService.weekdaysBetween(
+                LocalDate.of(2020, 1, 1), LocalDate.of(2020, 12, 31))).isEqualTo(262);
+    }
+
+    @Test
+    @DisplayName("긴 구간을 기대 거래일보다 크게 적게 받으면 불완전 수취로 판정한다")
+    void isSuspiciouslyIncomplete_flagsShortFetchOnLongRange() {
+        // 4년치(평일 ~1040일) 요청에 100건만 = KIS 1회 호출 상한에 걸린 전형적 구멍
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(1040, 100)).isTrue();
+        // 공휴일로 평일보다 조금 적은 정상 수취(94%)는 경고하지 않는다
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(1040, 978)).isFalse();
+    }
+
+    @Test
+    @DisplayName("짧은 증분 구간은 연휴로 비어도 불완전 수취로 보지 않는다 (헛경보 방지)")
+    void isSuspiciouslyIncomplete_ignoresShortRanges() {
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(
+                CandleBackfillService.COVERAGE_MIN_WEEKDAYS - 1, 0)).isFalse();
+        // 경계: 최소 길이에 도달하면 판정 대상
+        assertThat(CandleBackfillService.isSuspiciouslyIncomplete(
+                CandleBackfillService.COVERAGE_MIN_WEEKDAYS, 0)).isTrue();
+    }
+
+    // ── 판정 창 끝 슬랙 결함 (2026-08-17, _workspace/7_quant_baseline-drift.md) ──
+
+    @Test
+    @DisplayName("판정 창 끝이 아직 안 채워졌으면 7일 슬랙 안이어도 증분 수취한다")
+    void missingRanges_judgingWindowEndUncovered_fillsDespiteSlack() {
+        // 2026-07-24 앵커 실행 재현: 저장 최신 07-16, to=07-23, 판정 창 끝 07-21
+        // 옛 규칙(storedTo < to-7)은 07-16 < 07-16 = false로 "충족"이라 판정해 창 끝 2거래일을
+        // 비운 채 채점하게 했다.
+        LocalDate storedTo = LocalDate.of(2026, 7, 16);
+        LocalDate to = LocalDate.of(2026, 7, 23);
+        properties.setCandidateTo(LocalDate.of(2026, 7, 21));
+        LocalDate from = LocalDate.of(2023, 7, 22);
+        stubStoredRange("005930", from, storedTo);
+
+        List<CandleBackfillService.DateRange> gaps = sut.missingRanges("005930", from, to);
+
+        assertThat(gaps).hasSize(1);
+        assertThat(gaps.get(0).from()).isEqualTo(LocalDate.of(2026, 7, 17));
+        assertThat(gaps.get(0).to()).isEqualTo(to);
+    }
+
+    @Test
+    @DisplayName("판정 창 끝이 이미 채워졌으면 최근 며칠은 슬랙대로 스킵한다 (불필요한 API 호출 억제 유지)")
+    void missingRanges_judgingWindowEndCovered_keepsSlack() {
+        LocalDate to = LocalDate.of(2026, 8, 16);
+        LocalDate storedTo = LocalDate.of(2026, 8, 12);   // to-4일 = 슬랙 이내
+        properties.setCandidateTo(LocalDate.of(2026, 7, 21));
+        properties.setCrashVolTo(LocalDate.of(2026, 7, 21));
+        properties.setStressTo(LocalDate.of(2026, 7, 21));
+        LocalDate from = LocalDate.of(2023, 7, 22);
+        stubStoredRange("005930", from, storedTo);
+
+        assertThat(sut.missingRanges("005930", from, to)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("needsTailFill: 슬랙 초과는 항상 수취, 슬랙 이내는 판정 창 끝 미달일 때만 수취")
+    void needsTailFill_rules() {
+        LocalDate to = LocalDate.of(2026, 7, 23);
+        LocalDate windowEnd = LocalDate.of(2026, 7, 21);
+
+        // 슬랙(7일) 초과 — 판정 창과 무관하게 수취
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 1), to, windowEnd, 7)).isTrue();
+        // 슬랙 이내지만 판정 창 끝(07-21)에 못 미침 — 예외적으로 수취
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 16), to, windowEnd, 7)).isTrue();
+        // 슬랙 이내이고 판정 창 끝을 이미 덮음 — 스킵
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 21), to, windowEnd, 7)).isFalse();
+        // 상한(to)까지 이미 저장 — 스킵
+        assertThat(CandleBackfillService.needsTailFill(to, to, windowEnd, 7)).isFalse();
+        // 판정 창 끝이 to보다 미래(=아직 받을 수 없는 구간)면 예외를 적용하지 않는다
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 21), to, LocalDate.of(2026, 12, 31), 7)).isFalse();
+        // 판정 창 설정이 없으면 옛 슬랙 규칙 그대로
+        assertThat(CandleBackfillService.needsTailFill(
+                LocalDate.of(2026, 7, 16), to, null, 7)).isFalse();
+    }
+
     private void stubStoredRange(String code, LocalDate storedFrom, LocalDate storedTo) {
         CandleHistory first = CandleHistory.ofDaily(code,
                 new Candle(storedFrom, 1, 1, 1, 1, 1));
