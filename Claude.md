@@ -247,7 +247,8 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
   `universe` 매매 대상 관리(게이트 G1) / `research` 뉴스·DART 공시 수집·분류
   (매매 미연동) / `bucket` 지갑 칸(방식별 자금 분리, paper 전용) /
   `backtest` 백테스트 엔진(`@Profile("backtest")`, 전용 DB·Clock) /
-  `dashboard`·`settings`·`control`(웹 운영 도구, localhost:8080)
+  `dashboard`·`settings`·`control`(웹 운영 도구, localhost:8080) /
+  `mirror` 운영 상태 거울(Supabase로 5분마다 스냅샷 복사 — paper 전용, 기본 OFF, 매매 미연동)
 - 각 KIS 연동 인터페이스(`MarketDataService`, `KisOrderClient`, `PositionManager`,
   `BrokerageApiClient` 등)는 `paper`/`real`/`backtest` 프로필별로 구현체를
   갈아끼운다 — 새 구현체를 추가할 때도 인터페이스 시그니처는 고정.
@@ -278,6 +279,12 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
 - `TradeResultTracker` (Gate 3) — 매도 체결 실현손익 → 연속손실 카운터 (`portfolio_state` 영속화)
 - `RecommendationService` (`research`) — 관심 종목 뉴스 감성 집계 →
   매수 후보/관망/주의 추천 (대시보드 표시 전용, 매매 미연동)
+- 운영 상태 거울 (2026-08-20, `com.trading.mirror`) — 운전 상태·총자산·오늘 등락률·연속손실·
+  연속 가동일·보유 종목(손절선·지갑칸)을 5분마다 Supabase 한 행에 덮어쓴다(밖에서 조회용).
+  **매매 경로 무변경** — 전송 실패는 삼키고, 거래일 09:00~15:30에만 보낸다
+  (장외 전송은 미러 때문에만 잔고 API를 부르게 되고, 그 실패가 `KisApiClient` 연속 실패
+  카운터에 쌓여 아침을 SAFE_MODE로 시작시킨다). 설정은 `SUPABASE_URL`·`SUPABASE_KEY`
+  환경변수 — 미설정이면 스킵. 테이블 SQL은 `docs/supabase-schema.sql`
 - P2-A (2026-07-08) — `AtrCalculator`(ATR 14) + `OrderSizingService`(R 수량 역산) +
   `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
 - `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,

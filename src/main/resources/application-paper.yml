@@ -23,6 +23,17 @@ dart:
 heartbeat:
   url: ${HEARTBEAT_URL:}   # 비워두면 하트비트 스킵 — OPERATIONS §2, healthchecks.io 등 무료 서비스의 ping URL
 
+# 운영 상태 거울 (com.trading.mirror) — 밖에서 폰으로 상태를 보기 위한 읽기 전용 복사본.
+# 매매·기록의 원본은 그대로 로컬 H2다. 전송이 실패해도 매매는 영향받지 않는다.
+# key는 서버 전용 secret key(sb_secret_...)를 환경변수로만 넣는다 —
+# 공개용 publishable key로는 RLS가 켜진 테이블에 쓸 수 없다. 절대 이 파일에 값을 적지 말 것.
+supabase:
+  url: ${SUPABASE_URL:}        # 비워두면 미러 스킵 (예: https://xxxx.supabase.co)
+  key: ${SUPABASE_KEY:}        # 비워두면 미러 스킵
+  table: trading_mirror
+  snapshot-id: paper           # 같은 행을 계속 덮어쓴다 — 히스토리가 아니라 "지금 상태" 한 줄
+  interval-ms: 300000          # 5분. 거래일 09:00~15:30에만 전송한다
+
 # §3.3 A/B 채택 필터 (REPORT-20260713-0735) — 조합이 검증 구간 PF 0.66→0.81,
 # MDD 49.2→27.9%로 동반 우위. 전략 자체는 여전히 불합격(PF<1)이므로 이 필터는
 # "파이프라인 검증용 모의투자의 출혈 축소"이지 실전 승격 근거가 아니다.

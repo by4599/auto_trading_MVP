@@ -188,6 +188,57 @@ trading:
 
 ---
 
+## 9. 데이터 백업 · 복구
+
+**잃으면 되찾을 수 없는 것부터 본다.**
+
+| 데이터 | 파일 | 재취득 |
+|---|---|---|
+| 분봉 (전방 축적) | `trading-db.mv.db` | **불가능** — KIS가 과거 분봉을 소급 제공하지 않는다 (`MinuteCandleCollector` 주석) |
+| 거래 기록 (주문·체결·실현손익) | `trading-db.mv.db` | **불가능** — 실제 계좌 이력 |
+| 일봉 3~7년치 | `backtest-db.mv.db` | 가능하지만 느리다 (모의 레이트리밋 1건/초) |
+
+기존 `backup.sh`는 **같은 디스크의 `backup/`** 에 `trading-db`만 복사한다 — 디스크가
+죽으면 원본과 사본이 함께 죽고, 캔들 DB는 대상에도 없다.
+
+### 9.1 백업 실행
+
+```powershell
+.\backup-to-supabase.ps1                                  # 두 DB 백업 + Supabase 업로드
+.\backup-to-supabase.ps1 -SkipUpload                      # 로컬 zip만
+.\backup-to-supabase.ps1 -MirrorDir "G:\내 드라이브\backup" # 동기화 폴더에도 복사
+```
+
+- **앱을 멈추지 않아도 된다.** H2 `BACKUP TO`로 온라인 스냅샷을 뜨므로 쓰기 도중에도
+  정합성이 보장된다 (단순 파일 복사와 다른 점). 실측: 18MB → 4.5MB zip, 0.6초.
+- 보관 개수는 로컬 5개 · 원격 7개가 기본 (`-KeepLocal` / `-KeepRemote`).
+- `SUPABASE_URL`·`SUPABASE_KEY`(secret key)가 없으면 업로드만 건너뛰고 로컬 zip은 남긴다.
+- **등록 완료 (2026-08-21)**: 예약 작업 `AutoTrading-DB-Backup-2330` — 매일 23:30, PC가 꺼져 있었으면 켜진 뒤 곧바로 실행. 아래는 재등록·다른 PC 이전용 명령이다:
+
+```powershell
+schtasks /create /tn "AutoTrading-DB-Backup-2330" /sc daily /st 23:30 /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Users\SAMSUNG\Desktop\workspace\auto_trading\backup-to-supabase.ps1'"
+```
+
+> ⚠ **예약 작업은 폴더를 옮기거나 이름을 바꾸면 조용히 죽는다.** 2026-08-21에 확인한 실사고:
+> 평일 08:30 기동 작업 `AutoTrading-Paper-0830`이 7월 폴더 rename(`개발`→`workspace`) 이후
+> 옛 경로를 가리킨 채 **한 달 넘게 매일 실패**했고(오류 267 ERROR_DIRECTORY), 그동안 "5거래일
+> 연속 가동" 검증이 시작조차 못 했다. 경로를 바꿨다면 두 작업의 `-File` 경로와 시작 위치를
+> 반드시 함께 고치고, `Get-ScheduledTaskInfo`의 `LastTaskResult`가 0인지 확인한다.
+
+### 9.2 복구 절차
+
+1. 앱을 중지한다 (복구 중 쓰기가 섞이면 안 된다)
+2. 되돌릴 zip을 받는다 — 로컬 `backup/` 또는 Supabase Storage `db-backup` 버킷
+3. zip을 풀면 `trading-db.mv.db`(또는 `backtest-db.mv.db`) 하나가 나온다
+4. 프로젝트 루트의 같은 이름 파일을 **다른 이름으로 옮겨 두고**(사고 시 되돌릴 여지) 교체한다
+5. `trading-db.lock.db` / `*.trace.db`가 남아 있으면 지운다
+6. 앱을 시작하고, SAFE_MODE 기동 시퀀스(§3)가 브로커 실잔고와 대조하는지 확인한다
+
+> 복구 후 첫 기동은 반드시 **개장 전**에 한다 — 개장 후 재시작은 그날의 연속 무중단
+> 가동 기록을 리셋시킨다 (`RunStreakRecorder`).
+
+---
+
 ## 관련 문서
 
 - [TRADING-RULES-AUDIT.md](TRADING-RULES-AUDIT.md) — 일중 안전장치 (시스템이 살아있을 때)
