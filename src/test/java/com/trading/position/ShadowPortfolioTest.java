@@ -235,7 +235,8 @@ class ShadowPortfolioTest {
         sut.restore();
 
         ArgumentCaptor<PortfolioState> saved = ArgumentCaptor.forClass(PortfolioState.class);
-        verify(stateRepository, org.mockito.Mockito.times(2)).save(saved.capture());
+        // 원값 보존 + 미검증 표시 + 교정값 영속화 3건
+        verify(stateRepository, org.mockito.Mockito.times(3)).save(saved.capture());
 
         PortfolioState raw = saved.getAllValues().stream()
                 .filter(s -> PortfolioState.KEY_PEAK_EQUITY_RAW_BEFORE_CALIBRATION.equals(s.getStateKey()))
@@ -282,6 +283,99 @@ class ShadowPortfolioTest {
 
         assertThat(sut.getPeakEquity()).isEqualTo(POLLUTED_PEAK);
         verify(stateRepository, never()).save(any());
+    }
+
+    // ── 클램프 이후: MDD 자동청산 보류 표시 (감사 2026-08-21 MEDIUM) ────────────
+
+    @Nested
+    @DisplayName("클램프하면 전고점을 '미검증'으로 표시한다 — 자동 강제청산만 보류")
+    class UnverifiedMark {
+
+        @Test
+        @DisplayName("클램프가 일어나면 미검증으로 표시하고 그 사실을 영속화한다")
+        void clamp_marks_peak_unverified() {
+            storedPeak(POLLUTED_PEAK);
+
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            assertThat(sut.isPeakUnverified()).isTrue();
+            ArgumentCaptor<PortfolioState> saved = ArgumentCaptor.forClass(PortfolioState.class);
+            verify(stateRepository, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
+            PortfolioState mark = saved.getAllValues().stream()
+                    .filter(s -> PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED.equals(s.getStateKey()))
+                    .findFirst().orElseThrow();
+            assertThat(mark.getStateValue()).isEqualTo(1.0);
+        }
+
+        @Test
+        @DisplayName("클램프된 상한으로도 MDD가 한도(10%)를 넘는다 — 보류가 필요한 이유")
+        void clamped_ceiling_still_exceeds_mdd_limit() {
+            storedPeak(POLLUTED_PEAK);
+
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            double drawdownAtCeiling = (sut.getPeakEquity() - VERIFIED_MAX) / sut.getPeakEquity();
+            assertThat(drawdownAtCeiling).isGreaterThan(0.10);   // 13.04% — 자동청산이 그대로 돌면 헛청산
+            assertThat(sut.isPeakUnverified()).isTrue();
+        }
+
+        @Test
+        @DisplayName("클램프가 없으면 미검증 표시도 없다")
+        void no_clamp_no_mark() {
+            storedPeak(11_000_000.0);
+
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            assertThat(sut.isPeakUnverified()).isFalse();
+        }
+
+        @Test
+        @DisplayName("재시작해도 표시가 유지된다 — 껐다 켜는 것으로 자동청산이 되살아나지 않는다")
+        void mark_survives_restart() {
+            when(stateRepository.findById(PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED))
+                    .thenReturn(Optional.of(PortfolioState.of(
+                            PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED, 1)));
+            storedPeak(CEILING);   // 이미 클램프된 값이 저장돼 있어 이번 기동엔 교정이 안 일어난다
+
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(CEILING);
+            assertThat(sut.isPeakUnverified()).isTrue();
+        }
+
+        @Test
+        @DisplayName("사람이 확인하면 표시를 지우고 그 사실도 영속화한다")
+        void acknowledge_clears_mark() {
+            storedPeak(POLLUTED_PEAK);
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            assertThat(sut.acknowledgePeakEquity()).isTrue();
+
+            assertThat(sut.isPeakUnverified()).isFalse();
+            ArgumentCaptor<PortfolioState> saved = ArgumentCaptor.forClass(PortfolioState.class);
+            verify(stateRepository, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
+            assertThat(saved.getAllValues().stream()
+                    .filter(s -> PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED.equals(s.getStateKey()))
+                    .map(PortfolioState::getStateValue).toList())
+                    .containsExactly(1.0, 0.0);   // 표시 → 해제 순
+            assertThat(sut.getPeakEquity()).isEqualTo(CEILING);   // 확인은 값을 바꾸지 않는다
+        }
+
+        @Test
+        @DisplayName("보류가 없는데 확인하면 아무 일도 하지 않는다")
+        void acknowledge_without_mark_is_noop() {
+            storedPeak(11_000_000.0);
+            ShadowPortfolio sut = sut();
+            sut.restore();
+
+            assertThat(sut.acknowledgePeakEquity()).isFalse();
+            verify(stateRepository, never()).save(any());
+        }
     }
 
     // ── 사고의 최종 증상: 운영 DB에 반영한 실측 교정값이 매수 게이트를 연다 ──────

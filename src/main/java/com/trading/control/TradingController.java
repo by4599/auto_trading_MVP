@@ -4,6 +4,7 @@ import com.trading.NotificationService;
 import com.trading.market.KisProperties;
 import com.trading.position.PortfolioState;
 import com.trading.position.PortfolioStateRepository;
+import com.trading.position.ShadowPortfolio;
 import com.trading.position.ShadowPortfolioReconciler;
 import com.trading.risk.LiquidationService;
 import com.trading.risk.TradingMode;
@@ -35,6 +36,7 @@ public class TradingController {
     private static final Logger log = LoggerFactory.getLogger(TradingController.class);
     private static final String RESUME_CONFIRM = "CONFIRM_RESUME";
     private static final String MANUAL_BUY_CONFIRM = "CONFIRM_MANUAL_BUY";
+    private static final String PEAK_ACK_CONFIRM = "CONFIRM_PEAK_EQUITY";
 
     private final TradingStatusManager statusManager;
     private final KisProperties        kisProperties;
@@ -43,6 +45,7 @@ public class TradingController {
     private final NotificationService  notifier;
     private final PortfolioStateRepository portfolioStateRepository;
     private final DrillOperations      drill;
+    private final ShadowPortfolio      shadowPortfolio;
 
     public TradingController(TradingStatusManager statusManager,
                               KisProperties        kisProperties,
@@ -50,7 +53,8 @@ public class TradingController {
                               ShadowPortfolioReconciler reconciler,
                               NotificationService  notifier,
                               PortfolioStateRepository portfolioStateRepository,
-                              DrillOperations      drill) {
+                              DrillOperations      drill,
+                              ShadowPortfolio      shadowPortfolio) {
         this.statusManager = statusManager;
         this.kisProperties = kisProperties;
         this.liquidationService = liquidationService;
@@ -58,6 +62,7 @@ public class TradingController {
         this.notifier = notifier;
         this.portfolioStateRepository = portfolioStateRepository;
         this.drill = drill;
+        this.shadowPortfolio = shadowPortfolio;
     }
 
     /**
@@ -159,6 +164,31 @@ public class TradingController {
         }
         DrillOperations.Outcome outcome = drill.manualBuy();
         return result(outcome.success(), outcome.message(), mode);
+    }
+
+    /**
+     * 전고점 '미검증' 표시 해제 — MDD 자동 강제청산을 되살리는 <b>사람 확인</b> 신호.
+     *
+     * <p>기동 시 저장된 전고점이 실측 근거상 불가능해 상한으로 낮춰지면(클램프), 낮춘 값도
+     * 여전히 실제보다 높을 수 있어 그 값으로 계산한 MDD는 과대평가다. 그 상태에서 자동 강제청산이
+     * 돌면 헛청산이므로 청산만 보류하고 매수 차단은 유지한다. 사람이 실제 잔고를 확인한 뒤
+     * (필요하면 전고점 값 자체를 바로잡은 뒤) 이 엔드포인트로 보류를 푼다.
+     */
+    @PostMapping("/peak-equity-ack")
+    public Map<String, Object> acknowledgePeakEquity(@RequestBody Map<String, String> body) {
+        TradingMode mode = statusManager.getCurrentMode();
+        if (!PEAK_ACK_CONFIRM.equals(body.get("confirm"))) {
+            return result(false,
+                    "확인 문자열 불일치 — body에 {\"confirm\":\"" + PEAK_ACK_CONFIRM + "\"}를 보내야 합니다",
+                    mode);
+        }
+        if (!shadowPortfolio.acknowledgePeakEquity()) {
+            return result(false,
+                    "보류 중인 전고점 미검증 표시가 없습니다 (MDD 자동 강제청산은 이미 정상 동작 중)", mode);
+        }
+        log.warn("[TradingController] 전고점 미검증 표시 해제 — MDD 자동 강제청산 재개");
+        notifier.sendCritical("✅ [전고점 확인] 사람이 전고점을 확인했습니다 — MDD 자동 강제청산 보류를 해제합니다");
+        return result(true, "전고점 미검증 표시를 해제했습니다 — MDD 자동 강제청산이 다시 동작합니다", mode);
     }
 
     /**

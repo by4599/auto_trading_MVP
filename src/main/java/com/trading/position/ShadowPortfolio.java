@@ -21,6 +21,8 @@ public class ShadowPortfolio {
     private final PortfolioStateRepository stateRepository;
     private final PeakEquityCalibrator calibrator;
     private volatile double peakEquity = 0.0;
+    /** 전고점이 클램프 교정된 뒤 사람 확인을 못 받은 상태 — MDD 자동 강제청산만 보류시킨다 */
+    private volatile boolean peakUnverified = false;
 
     public ShadowPortfolio(PositionManager positionManager,
                            PortfolioStateRepository stateRepository,
@@ -37,12 +39,14 @@ public class ShadowPortfolio {
      */
     @PostConstruct
     void restore() {
+        restoreUnverifiedMark();
         stateRepository.findById(PortfolioState.KEY_PEAK_EQUITY)
                 .ifPresent(state -> {
                     double stored = state.getStateValue();
                     double calibrated = calibrator.calibrate(stored);
                     peakEquity = calibrated;
                     if (calibrated < stored) {
+                        markPeakUnverified();
                         stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY, calibrated));
                         log.error("[ShadowPortfolio] 오염된 peakEquity 교정: {} → {} (실측 근거로 정정, 영속화 완료)",
                                 stored, calibrated);
@@ -50,6 +54,53 @@ public class ShadowPortfolio {
                         log.info("[ShadowPortfolio] peakEquity 복원: {}", peakEquity);
                     }
                 });
+    }
+
+    /**
+     * 미검증 표시는 재시작을 넘어 유지된다 — 클램프는 기동 때 한 번만 일어나므로,
+     * 메모리에만 두면 다음 재시작이 사람 확인 없이 자동청산을 되살린다.
+     */
+    private void restoreUnverifiedMark() {
+        peakUnverified = stateRepository.findById(PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED)
+                .map(s -> s.getStateValue() > 0)
+                .orElse(false);
+        if (peakUnverified) {
+            log.error("[ShadowPortfolio] 전고점이 '미검증'으로 표시돼 있다 — "
+                    + "MDD 자동 강제청산은 사람 확인(/api/trading/peak-equity-ack)까지 보류된다");
+        }
+    }
+
+    private void markPeakUnverified() {
+        peakUnverified = true;
+        stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED, 1));
+    }
+
+    /**
+     * 전고점이 클램프 교정된 미검증 값인가.
+     *
+     * <p>클램프는 "저장된 전고점이 실측 근거로 불가능하다"는 뜻이라, 상한까지 낮춘 값도
+     * 여전히 실제 전고점보다 높을 수 있다(실측: 상한 11,500,000 vs 실자산 10,000,000 → MDD 13.04%).
+     * 그 값으로 계산한 MDD는 <b>과대평가</b>이므로 {@code RiskMonitor}는 자동 강제청산을 보류하고
+     * 사람 확인을 기다린다. 반면 매수 차단({@code GlobalEquityStopRule})은 그대로 둔다 —
+     * 보류가 위험을 늘리지 않도록 신규 진입은 계속 막는 쪽이 보수적이다.
+     */
+    public boolean isPeakUnverified() {
+        return peakUnverified;
+    }
+
+    /**
+     * 사람이 전고점을 확인했다는 신호 (대시보드/API) — 이 신호가 있어야 MDD 자동 강제청산이 복귀한다.
+     * 전고점 값 자체는 건드리지 않는다: 값 정정은 별개의 조작이고, 여기서는 "확인했다"만 기록한다.
+     *
+     * @return 실제로 보류를 해제했으면 true, 원래 보류가 없었으면 false
+     */
+    public boolean acknowledgePeakEquity() {
+        if (!peakUnverified) return false;
+        stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED, 0));
+        peakUnverified = false;
+        log.warn("[ShadowPortfolio] 전고점 미검증 표시 해제(사람 확인) — MDD 자동 강제청산 재개. 현재 전고점={}",
+                peakEquity);
+        return true;
     }
 
     @Scheduled(fixedRate = 1000)

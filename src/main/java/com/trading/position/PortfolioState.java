@@ -17,6 +17,12 @@ public class PortfolioState {
     public static final String KEY_PEAK_EQUITY = "PEAK_EQUITY";
     /** 실측 검증으로 전고점을 낮추기 직전의 원값 — 오염 원인 조사용 보존 (최근 1회) */
     public static final String KEY_PEAK_EQUITY_RAW_BEFORE_CALIBRATION = "PEAK_EQUITY_RAW_BEFORE_CALIBRATION";
+    /**
+     * 전고점이 실측 근거로 클램프 교정돼 아직 사람 확인을 받지 못한 상태 (1=미검증, 0=확인 완료).
+     * 미검증인 동안 MDD 자동 강제청산만 보류한다 — 매수 차단은 유지 (2026-08-21 감사 MEDIUM).
+     * 재시작으로 조용히 풀리면 안 되므로 메모리 플래그가 아니라 여기에 남긴다.
+     */
+    public static final String KEY_PEAK_EQUITY_UNVERIFIED = "PEAK_EQUITY_UNVERIFIED";
     public static final String KEY_CONSECUTIVE_LOSS_COUNT = "CONSECUTIVE_LOSS_COUNT";
     // 연속 무중단 가동 기록 (릴리즈 검증 항목) — RunStreakRecorder가 거래일마다 갱신
     public static final String KEY_RUN_STREAK_DAYS = "RUN_STREAK_DAYS";

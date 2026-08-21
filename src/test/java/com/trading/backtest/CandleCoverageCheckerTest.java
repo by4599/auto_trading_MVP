@@ -56,6 +56,10 @@ class CandleCoverageCheckerTest {
         assertThat(coverage.sufficient()).isTrue();
         assertThat(coverage.coveredThrough()).isEqualTo(WINDOW_END);
         assertThat(coverage.missingTradingDays()).isEmpty();
+        // 검사 결과는 "무엇을 검사했는지"를 달고 다닌다 — 기준선 관문이 채점 대상과 대조한다
+        assertThat(coverage.scope().mode()).isEqualTo("risk-lab");
+        assertThat(coverage.scope().symbols()).isEqualTo(SYMBOLS);
+        assertThat(coverage.scope().windowEnd()).isEqualTo(WINDOW_END);
     }
 
     @Test
@@ -101,13 +105,13 @@ class CandleCoverageCheckerTest {
         LocalDate saturday = LocalDate.of(2026, 7, 25);
         stubCandlesUpTo(LocalDate.of(2026, 7, 24));
 
-        assertThat(sut.check(SYMBOLS, saturday).sufficient()).isTrue();
+        assertThat(sut.check(new CoverageScope("regime-lab", SYMBOLS, saturday)).sufficient()).isTrue();
     }
 
     @Test
     @DisplayName("조회 구간에 캔들이 하나도 없으면 마지막 캔들 없음 + 전 구간 결측으로 본다")
     void check_noCandlesAtAll() {
-        CandleCoverage coverage = sut.check(SYMBOLS, WINDOW_END);
+        CandleCoverage coverage = sut.check(new CoverageScope("full", SYMBOLS, WINDOW_END));
 
         assertThat(coverage.coveredThrough()).isNull();
         assertThat(coverage.sufficient()).isFalse();

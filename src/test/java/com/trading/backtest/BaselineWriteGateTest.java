@@ -29,6 +29,7 @@ class BaselineWriteGateTest {
     private static final LocalDate TO   = LocalDate.of(2026, 7, 21);
     /** 실제 거버넌스 파일을 건드리지 않도록 전용 슬러그를 쓴다 */
     private static final String TEST_SLUG = "TEST-GATE";
+    private static final List<String> SYMBOLS = List.of("005930", "000660");
 
     private Path written;
 
@@ -37,8 +38,14 @@ class BaselineWriteGateTest {
         if (written != null) Files.deleteIfExists(written);
     }
 
+    /** 채점 대상(= reportData)과 같은 스코프를 검사한 결과 */
     private static CandleCoverage coverage(LocalDate coveredThrough, List<LocalDate> missing) {
-        return new CandleCoverage(TO, coveredThrough, missing, 14);
+        return coverage(new CoverageScope("risk-lab", SYMBOLS, TO), coveredThrough, missing);
+    }
+
+    private static CandleCoverage coverage(CoverageScope scope, LocalDate coveredThrough,
+                                           List<LocalDate> missing) {
+        return new CandleCoverage(scope, coveredThrough, missing, 14);
     }
 
     /** lastReport만 갈아끼운 검사기 — 생성자 인자는 이 경로에서 쓰이지 않는다 */
@@ -61,7 +68,7 @@ class BaselineWriteGateTest {
         BacktestMetrics metrics =
                 new BacktestMetrics(781, 0.5186, 1.959, 0.0130, 0.0987, 1.2428, 22_427_654, 2.0, 9.9);
         return new BacktestReportWriter.ReportData(
-                List.of("005930"), FROM, TO, Map.of(),
+                SYMBOLS, FROM, TO, Map.of(),
                 new WalkForwardEngine.WalkForwardResult(List.of(), metrics), List.of(),
                 "관문 테스트", TEST_SLUG);
     }
@@ -93,6 +100,30 @@ class BaselineWriteGateTest {
         assertThat(written).isNull();
     }
 
+    // ── 스코프 대조 (risk-auditor 2026-08-17: lastReport는 실행당 하나뿐인 가변 필드) ──
+
+    @Test
+    @DisplayName("다른 창을 검사한 리포트로는 기록하지 않는다 — 스코프 A 검사 → 스코프 B 기록 차단")
+    void refuses_whenVerifiedWindowDiffers() {
+        CandleCoverage otherWindow = coverage(
+                new CoverageScope("risk-lab", SYMBOLS, TO.minusYears(3)), TO.minusYears(3), List.of());
+
+        written = writerWith(true, otherWindow).writeBaseline(reportData(), List.of());
+
+        assertThat(written).isNull();
+    }
+
+    @Test
+    @DisplayName("다른 종목 집합을 검사한 리포트로는 기록하지 않는다")
+    void refuses_whenVerifiedSymbolsDiffer() {
+        CandleCoverage otherSymbols = coverage(
+                new CoverageScope("full", List.of("005930"), TO), TO, List.of());
+
+        written = writerWith(true, otherSymbols).writeBaseline(reportData(), List.of());
+
+        assertThat(written).isNull();
+    }
+
     @Test
     @DisplayName("opt-in + 커버리지 충족이면 정상 기록한다 — 관문이 정당한 갱신을 막지 않는다")
     void writes_whenOptedInAndCovered() throws IOException {
@@ -102,5 +133,16 @@ class BaselineWriteGateTest {
         assertThat(Files.readString(written))
                 .contains("trades: 781")
                 .contains("period: 2023-07-22 ~ 2026-07-21");
+    }
+
+    @Test
+    @DisplayName("모드 이름만 다르고 데이터가 같으면 기록한다 — withNames·빈 슬러그가 정당한 갱신을 막지 않는다")
+    void writes_whenOnlyModeLabelDiffers() {
+        CandleCoverage sameDataOtherName = coverage(
+                new CoverageScope("donchian-risk-lab", SYMBOLS.reversed(), TO), TO, List.of());
+
+        written = writerWith(true, sameDataOtherName).writeBaseline(reportData(), List.of());
+
+        assertThat(written).isNotNull();
     }
 }

@@ -42,7 +42,11 @@ public class CandleCoverageChecker {
     private final CandleHistoryRepository repository;
     private final MarketCalendarService calendar;
 
-    /** 마지막 검사 결과 — 리포트가 읽어 간다 (백테스트는 단일 스레드 배치 실행) */
+    /**
+     * 마지막 검사 결과 — 리포트가 읽어 간다 (백테스트는 단일 스레드 배치 실행).
+     * 실행당 하나뿐인 가변 필드라 결과에 {@link CoverageScope}를 붙여 둔다:
+     * 기준선 관문이 "이 검사가 지금 채점한 대상을 본 것인가"를 확인할 수 있어야 한다.
+     */
     private CandleCoverage lastReport;
 
     public CandleCoverageChecker(CandleHistoryRepository repository, MarketCalendarService calendar) {
@@ -57,7 +61,7 @@ public class CandleCoverageChecker {
      * @throws IllegalStateException strict 실행에서 커버리지 미달
      */
     public CandleCoverage verify(String mode, List<String> symbols, LocalDate windowEnd, boolean strict) {
-        CandleCoverage coverage = check(symbols, windowEnd);
+        CandleCoverage coverage = check(new CoverageScope(mode, symbols, windowEnd));
         this.lastReport = coverage;
 
         if (coverage.sufficient()) {
@@ -79,11 +83,12 @@ public class CandleCoverageChecker {
         return Optional.ofNullable(lastReport);
     }
 
-    CandleCoverage check(List<String> symbols, LocalDate windowEnd) {
+    CandleCoverage check(CoverageScope scope) {
+        LocalDate windowEnd = scope.windowEnd();
         LocalDate scanFrom = windowEnd.minusDays(LOOKBACK_DAYS);
-        LocalDate frontier = latestCandleDate(symbols, scanFrom, windowEnd);
+        LocalDate frontier = latestCandleDate(scope.symbols(), scanFrom, windowEnd);
         LocalDate after = frontier != null ? frontier : scanFrom.minusDays(1);
-        return new CandleCoverage(windowEnd, frontier,
+        return new CandleCoverage(scope, frontier,
                 tradingDaysBetweenExclusive(after, windowEnd), LOOKBACK_DAYS);
     }
 

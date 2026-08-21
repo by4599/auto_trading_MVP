@@ -18,6 +18,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * 청산 리허설(Gate 2 훈련)의 조작 관문 구현.
@@ -99,6 +100,9 @@ public class DrillService implements DrillOperations {
 
     @Override
     public Outcome liquidate() {
+        if (!isPaperProfile()) {
+            return new Outcome(false, "모의투자(paper) 프로필에서만 사용할 수 있는 리허설 기능입니다");
+        }
         if (!kisProperties.isConfigured()) {
             return new Outcome(false, "KIS 자격증명 미설정");
         }
@@ -113,7 +117,16 @@ public class DrillService implements DrillOperations {
         return positionRepository.findAll().stream().anyMatch(p -> p.getQuantity() > 0);
     }
 
+    /**
+     * 모의계좌 전용 판정 — <b>real이 활성 프로필에 하나라도 있으면 무조건 차단</b>한다.
+     *
+     * 예전 조건("paper 포함")은 {@code paper,real} 동시 활성을 통과시켰다 — 실계좌 주문이
+     * 나갈 수 있는 조합인데 리허설 도구가 열리는 셈이라 순서를 뒤집었다.
+     * paper 명시도 함께 요구한다: 프로필 미설정(빈 배열)이나 알 수 없는 조합에서
+     * 열리지 않게 하는 fail-closed 쪽이 리허설 도구에 맞다.
+     */
     private boolean isPaperProfile() {
-        return Arrays.asList(environment.getActiveProfiles()).contains("paper");
+        List<String> active = Arrays.asList(environment.getActiveProfiles());
+        return !active.contains("real") && active.contains("paper");
     }
 }

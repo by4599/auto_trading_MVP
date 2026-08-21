@@ -13,9 +13,12 @@ import com.trading.order.OrderEngine;
 import com.trading.order.OrderSizingService;
 import com.trading.position.Account;
 import com.trading.position.BalanceClient;
+import com.trading.position.NoOpPeakEquityCalibrator;
+import com.trading.position.PortfolioState;
 import com.trading.position.PortfolioStateRepository;
 import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
+import com.trading.position.ShadowPortfolio;
 import com.trading.position.ShadowPortfolioReconciler;
 import com.trading.position.TradeResultRepository;
 import com.trading.risk.ActualAccountInfo;
@@ -40,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -68,6 +72,7 @@ class TradingControllerTest {
     private PositionManager positionManager;
     private OrderEngine orderEngine;
     private MockEnvironment paperEnvironment;
+    private ShadowPortfolio shadowPortfolio;
     private TradingController sut;
 
     @BeforeEach
@@ -100,6 +105,9 @@ class TradingControllerTest {
         orderEngine = newOrderEngine();
         paperEnvironment = new MockEnvironment();
         paperEnvironment.setActiveProfiles("paper");
+        // 전고점 소유자 — 미검증 표시 해제(peak-equity-ack) 경로에 필요. 실객체 + 인터페이스 목.
+        shadowPortfolio = new ShadowPortfolio(positionManager, portfolioStateRepository,
+                new NoOpPeakEquityCalibrator());
 
         sut = newController(passingRiskEngine(), paperEnvironment);
     }
@@ -134,7 +142,7 @@ class TradingControllerTest {
         DrillOperations drill = new DrillService(props, statusManager, riskEngine, orderEngine,
                 positionManager, positionRepository, liquidationService, environment);
         return new TradingController(statusManager, props, liquidationService, reconciler, notifier,
-                portfolioStateRepository, drill);
+                portfolioStateRepository, drill, shadowPortfolio);
     }
 
     private static KisProperties configuredProps() {
@@ -356,6 +364,29 @@ class TradingControllerTest {
         assertThat(res.get("success")).isEqualTo(false);
         assertThat(String.valueOf(res.get("message"))).contains("칸 예산 소진");
         verify(orderClient, never()).buy(anyString(), anyInt(), any());
+    }
+
+    // ── /peak-equity-ack (전고점 미검증 표시 해제) ─────────────────────────────
+
+    @Test
+    @DisplayName("확인 문자열 불일치 → 미검증 표시 해제 거부")
+    void peak_equity_ack_rejects_wrong_confirm() {
+        Map<String, Object> res = sut.acknowledgePeakEquity(Map.of("confirm", "WRONG"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        verify(notifier, never()).sendCritical(anyString());
+    }
+
+    @Test
+    @DisplayName("보류 중인 표시가 없으면 해제할 것도 없다고 답한다 (오해 방지)")
+    void peak_equity_ack_reports_nothing_to_release() {
+        // 미검증 표시가 저장돼 있지 않은 상태 (portfolioStateRepository 목 기본값 = 빈 Optional)
+        Map<String, Object> res = sut.acknowledgePeakEquity(Map.of("confirm", "CONFIRM_PEAK_EQUITY"));
+
+        assertThat(res.get("success")).isEqualTo(false);
+        assertThat(String.valueOf(res.get("message"))).contains("보류 중인");
+        verify(portfolioStateRepository, never())
+                .save(argThat(s -> PortfolioState.KEY_PEAK_EQUITY_UNVERIFIED.equals(s.getStateKey())));
     }
 
     @Test
