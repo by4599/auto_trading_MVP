@@ -90,3 +90,16 @@ spring:
     hibernate:
       ddl-auto: update      # 재기동 시 스키마를 삭제하지 않고 변경분만 적용
     show-sql: false
+
+# 파일 로그 — 콘솔에만 찍으면 창이 닫히거나 PC가 재시작될 때 그날의 동작 근거가
+# 통째로 사라진다 (2026-08-27 사고 때 연속 가동일이 왜 1로 찍혔는지 끝내 못 밝혔다).
+# logs/ 는 .gitignore 처리되어 있다. paper 전용 — 백테스트 결정성·테스트 속도에 영향 없음.
+logging:
+  file:
+    name: logs/paper.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/paper-%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 20MB
+      max-history: 60
+      total-size-cap: 500MB
