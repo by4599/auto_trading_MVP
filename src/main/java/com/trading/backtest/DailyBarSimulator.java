@@ -38,6 +38,12 @@ public class DailyBarSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(DailyBarSimulator.class);
 
+    // 진입 평가 시각 — 라이브 RiskEngine을 그대로 태우므로 PostTimeCutBuyRule.TIME_CUT_AT(15:15)보다
+    // 반드시 일러야 한다. 넘기면 백테스트 진입이 전량 거부돼 회귀 앵커가 무너진다
+    // (PostTimeCutBuyRuleTest가 이 두 상수를 직접 대조한다).
+    public static final LocalTime BREAKOUT_ENTRY_AT = LocalTime.of(10, 0);
+    public static final LocalTime CLOSE_ENTRY_AT    = LocalTime.of(15, 0);
+
     private final BacktestMarketDataService market;
     private final SignalDispatcher signalDispatcher;
     private final RiskEngine riskEngine;
@@ -100,7 +106,7 @@ public class DailyBarSimulator {
     // ── ③ 진입 ────────────────────────────────────────────────────────────────
 
     private void checkEntry(String stockCode, LocalDate date, Candle bar) {
-        clock.setTo(date, LocalTime.of(10, 0));
+        clock.setTo(date, BREAKOUT_ENTRY_AT);
 
         // 당일 도달 최고가 기준으로 "이 날 발화했는가"를 판정
         market.setSimPrice(stockCode, bar.getHigh());
@@ -129,7 +135,7 @@ public class DailyBarSimulator {
 
     private void checkMeanReversionEntry(String stockCode, LocalDate date, Candle bar) {
         if (heldPosition(stockCode) != null) return; // 이미 보유 — 중복 진입 없음(라이브 PendingOrderRule 대응)
-        clock.setTo(date, LocalTime.of(15, 0));
+        clock.setTo(date, CLOSE_ENTRY_AT);
 
         market.setSimPrice(stockCode, bar.getClose());
         List<Signal> signals = signalDispatcher.dispatch(

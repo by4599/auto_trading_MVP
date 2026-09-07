@@ -218,6 +218,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭, **라운드트립 단위** 2026-08-19) |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
+| `PostTimeCutBuyRule` | 15:15 타임컷 이후 신규 매수 금지 | ✅ 활성 (2026-09-01 신설 — 다일 보유 칸은 면제) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
 > **모의계좌 리허설 깨끗한 1회 성공으로 Gate 2 완료 (2026-08-19)**
