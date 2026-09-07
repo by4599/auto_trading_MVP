@@ -103,7 +103,8 @@ class TimeCutSchedulerTest {
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine,
-                statusManager, kisProperties, marketCalendarService, resolver);
+                statusManager, kisProperties, marketCalendarService, resolver,
+                mock(com.trading.risk.BrokerageApiClient.class), mock(com.trading.NotificationService.class));
     }
 
     private static Position holdingIn(String stockCode, com.trading.bucket.StrategyBucket bucket) {
@@ -142,7 +143,8 @@ class TimeCutSchedulerTest {
         return new TimeCutScheduler(
                 positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(rules), orderEngine,
-                statusManager, kisProperties, marketCalendarService, com.trading.bucket.BucketTestSupport.defaultParams());
+                statusManager, kisProperties, marketCalendarService, com.trading.bucket.BucketTestSupport.defaultParams(),
+                mock(com.trading.risk.BrokerageApiClient.class), mock(com.trading.NotificationService.class));
     }
 
     private static Position holding(String stockCode, int quantity, double price) {
