@@ -57,6 +57,11 @@ class GlobalEquityStopRuleTest {
                 .validate(Signal.buy("005930", "TEST"), account(currentAsset));
     }
 
+    private static RiskResult checkSell(ShadowPortfolio portfolio, double currentAsset) {
+        return new GlobalEquityStopRule(portfolio, new RiskLimitsProperties())
+                .validate(Signal.sell("005930", "TimeCut-1515"), account(currentAsset));
+    }
+
     @Test
     @DisplayName("전고점이 미검증이어도 MDD 한도 초과면 매수를 막는다")
     void rejects_even_when_peak_unverified() {
@@ -80,6 +85,22 @@ class GlobalEquityStopRuleTest {
     @DisplayName("MDD 한도 안이면 미검증이어도 통과시킨다 (과차단 금지)")
     void passes_within_limit() {
         RiskResult result = check(portfolioWithPeak(11_500_000, true), 11_000_000);
+
+        assertThat(result.isPass()).isTrue();
+    }
+
+    @Test
+    @DisplayName("MDD 한도를 넘어도 매도는 막지 않는다 — 낙폭이 클수록 출구가 필요하다")
+    void never_blocks_sell_beyond_limit() {
+        RiskResult result = checkSell(portfolioWithPeak(11_500_000, false), 10_000_000);
+
+        assertThat(result.isPass()).isTrue();
+    }
+
+    @Test
+    @DisplayName("전고점 미검증 + MDD 초과에서도 매도는 통과한다 — 자동청산이 보류되는 분기라 출구가 여기뿐이다")
+    void never_blocks_sell_when_peak_unverified() {
+        RiskResult result = checkSell(portfolioWithPeak(11_500_000, true), 10_000_000);
 
         assertThat(result.isPass()).isTrue();
     }

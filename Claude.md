@@ -215,7 +215,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `MaxPositionCountRule` | 최대 보유 종목 5개 | ✅ 활성 |
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
-| `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 강제청산 | ✅ 활성 (Gate 1 — 현금 포함 equity) |
+| `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 **신규 매수 차단** (강제청산은 `RiskMonitor` 담당) | ✅ 활성 (Gate 1 — 현금 포함 equity). **2026-09-12: 매수 가드 추가** — 14개 룰 중 유일하게 `isBuy()` 검사가 없어 MDD 초과 시 매도까지 거부했다(타임컷·손절·최대보유가 전부 이 경로). 백테스트 A/B로 판정 불변 확인 후 수정 |
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭, **라운드트립 단위** 2026-08-19) |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 | `PostTimeCutBuyRule` | 15:15 타임컷 이후 신규 매수 금지 | ✅ 활성 (2026-09-01 신설 — 다일 보유 칸은 면제) |

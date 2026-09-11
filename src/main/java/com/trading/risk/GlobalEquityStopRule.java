@@ -27,6 +27,9 @@ public class GlobalEquityStopRule implements RiskRule {
 
     @Override
     public RiskResult validate(Signal signal, Account account) {
+        // 매도를 막으면 낙폭이 클수록 출구가 닫힌다 — 타임컷·손절·최대보유가 전부 이 경로다
+        if (!signal.isBuy()) return RiskResult.pass();
+
         double peak = shadowPortfolio.getPeakEquity();
         if (peak <= 0) return RiskResult.pass(); // 초기 상태: peakEquity 미확인
 
