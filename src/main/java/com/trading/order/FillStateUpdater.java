@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 주문/포지션의 DB 상태를 원자적으로 갱신하는 @Transactional 전담 빈.
@@ -50,6 +52,16 @@ public class FillStateUpdater {
     private final ApplicationEventPublisher eventPublisher;
     private final TradeResultTracker tradeResultTracker;
     private final TradeResultRepository tradeResultRepository;
+
+    /**
+     * 체결가를 몰라 실현손익을 건너뛴 라운드트립의 종목코드 (진행 중인 것만).
+     *
+     * <p>Position 컬럼이 아니라 메모리에 두는 이유: 이건 매매 상태가 아니라 "측정이
+     * 가능했나"의 흔적이고, 라운드트립 경계(전량 청산·재진입)에서 함께 지워진다.
+     * 재시작하면 잊지만 그때 최악은 옛 동작(불완전 합계로 1회 판정)으로 돌아가는 것뿐이라
+     * 스키마를 늘리는 대가보다 싸다고 판단했다.
+     */
+    private final Set<String> pnlGapRoundTrips = ConcurrentHashMap.newKeySet();
 
     public FillStateUpdater(OrderHistoryRepository orderHistoryRepository,
                             PositionRepository positionRepository,
@@ -282,6 +294,10 @@ public class FillStateUpdater {
                 .orElse(Position.empty(order.getStockCode()));
 
         if (order.getSide() == OrderSide.BUY) {
+            if (pos.getQuantity() == 0) {
+                // 새 라운드트립 시작 — 앞 매매의 "체결가 미상" 표시를 물려받지 않는다
+                pnlGapRoundTrips.remove(order.getStockCode());
+            }
             pos.applyBuy(newlyFilled, fillPrice);
             // 지갑 칸 귀속 — 주문의 칸을 물려받는다 (칸 미지정 주문은 null→VB 간주)
             if (order.getBucket() != null) {
@@ -289,6 +305,23 @@ public class FillStateUpdater {
             }
             positionRepository.save(pos);
         } else {
+            applySellFill(order, pos, newlyFilled, fillPrice);
+        }
+    }
+
+    /**
+     * 매도 체결 반영 — 수량은 언제나 맞추고, 손익은 <b>체결가를 알 때만</b> 기록한다.
+     *
+     * <p>모의 체결조회(VTTC8001R)는 매도에 빈 응답을 주는 결함이 있어(CLAUDE.md 결함 5)
+     * 체결가가 0으로 들어올 수 있다. 0을 그대로 계산하면 실현손익 = -평단가 x 수량, 즉
+     * <b>전액 손실</b>이 남는다(2026-07-30 실측: 5건 전부 손실·합계 -5,014,000원).
+     * 그 가짜 손실은 ConsecutiveLossRule로 흘러가 실제 매매를 1시간 멈출 수 있다.
+     *
+     * <p>모르면 기록하지 않는다 — 체결가를 모르면 이익인지 손실인지도 모르기 때문이다.
+     * 대신 경고 로그로 사람이 알아채게 남긴다.
+     */
+    private void applySellFill(OrderHistory order, Position pos, int newlyFilled, double fillPrice) {
+        if (fillPrice > 0) {
             // 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
             double realized = (fillPrice - pos.getAveragePrice()) * newlyFilled;
             // 실현손익 영속화 (실적 대시보드) — 라이브 경로 전용, 같은 트랜잭션에서 커밋.
@@ -298,13 +331,25 @@ public class FillStateUpdater {
                     pos.getBucket()));
             // 연속손실은 조각이 아니라 매매 1회 단위 — 전량 청산될 때 합계로 한 번만 판정한다
             pos.accrueRealized(realized);
-            pos.applySell(newlyFilled);
-            if (pos.getQuantity() == 0) {
-                tradeResultTracker.recordRoundTrip(order.getStockCode(), pos.getRealizedPnlAccum());
-                positionRepository.delete(pos);
+        } else {
+            pnlGapRoundTrips.add(order.getStockCode());
+            log.warn("[실현손익] 체결가 미상 — 실현손익 기록 보류 (수량만 반영): 종목={} 수량={}주 ordNo={}",
+                    order.getStockCode(), newlyFilled, order.getOrderNo());
+        }
+
+        pos.applySell(newlyFilled);
+        if (pos.getQuantity() == 0) {
+            // 한 조각이라도 손익을 건너뛴 매매는 합계가 불완전하다 — 그 숫자로 연속손실을
+            // 판정하면 근거 없이 매매를 멈추거나(손실 오판) 실제 손실 스트릭을 지운다(수익 오판).
+            if (pnlGapRoundTrips.remove(order.getStockCode())) {
+                log.warn("[실현손익] 체결가 미상 조각이 섞인 매매 — 연속손실 판정 생략: 종목={}",
+                        order.getStockCode());
             } else {
-                positionRepository.save(pos);
+                tradeResultTracker.recordRoundTrip(order.getStockCode(), pos.getRealizedPnlAccum());
             }
+            positionRepository.delete(pos);
+        } else {
+            positionRepository.save(pos);
         }
     }
 }

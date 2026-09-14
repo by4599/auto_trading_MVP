@@ -86,7 +86,7 @@ class TradingControllerTest {
         liquidationService = new LiquidationService(liquidationBrokerClient, statusManager, notifier);
 
         balanceClient = mock(BalanceClient.class);
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, 0, List.of()));
         positionRepository = mock(PositionRepository.class);
         when(positionRepository.findAll()).thenReturn(List.of());
         BrokerageApiClient reconcilerBrokerClient = mock(BrokerageApiClient.class);

@@ -84,7 +84,7 @@ public class KisPositionManager implements PositionManager {
                 .toList();
 
         double totalAssetValue = balance.totalAssetValue();
-        double dailyPnlPercent = computeDailyPnl(totalAssetValue);
+        double dailyPnlPercent = computeDailyPnl(totalAssetValue, balance.deposit());
 
         log.debug("계좌 스냅샷(KIS): 총자산={} 일일손익={}% 보유종목={}",
                 totalAssetValue, String.format("%.2f", dailyPnlPercent * 100), snapshots.size());
@@ -94,16 +94,21 @@ public class KisPositionManager implements PositionManager {
     }
 
     /**
-     * 당일 첫 스냅샷의 총자산을 daily_equity에 기록하고, 이후 그 기준값 대비
+     * 당일 첫 스냅샷의 총자산·예수금을 daily_equity에 기록하고, 이후 그 기준값 대비
      * 등락률을 반환한다. 날짜 키가 바뀌면 자동으로 새 기준이 잡힌다 (= 일일 리셋).
+     *
+     * 예수금은 등락률 계산에 쓰이지 않는다 — 장 마감 후 값과 짝을 이뤄 그날 현금 증감을
+     * 내기 위한 기록일 뿐이다 (DailyPnlRecorder).
      */
-    private double computeDailyPnl(double currentEquity) {
+    private double computeDailyPnl(double currentEquity, double currentDeposit) {
         if (currentEquity <= 0) return 0.0;
 
         LocalDate today = LocalDate.now();
         DailyEquity start = dailyEquityRepository.findById(today).orElseGet(() -> {
-            DailyEquity created = dailyEquityRepository.save(DailyEquity.of(today, currentEquity));
-            log.info("[DailyEquity] 당일 시작 자산 기록: {} = {}", today, currentEquity);
+            DailyEquity created = dailyEquityRepository.save(
+                    DailyEquity.of(today, currentEquity, currentDeposit));
+            log.info("[DailyEquity] 당일 시작 자산 기록: {} = {} (예수금 {})",
+                    today, currentEquity, currentDeposit);
             return created;
         });
 

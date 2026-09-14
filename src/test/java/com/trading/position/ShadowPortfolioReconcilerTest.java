@@ -102,7 +102,7 @@ class ShadowPortfolioReconcilerTest {
     void reconcile_no_mismatch_no_alert() {
         when(positionRepository.findAll()).thenReturn(List.of(dbHolding("005930", 10, 70_000)));
         when(balanceClient.fetchBalance()).thenReturn(
-                new BalanceClient.BalanceSnapshot(1_000_000,
+                new BalanceClient.BalanceSnapshot(1_000_000, 0,
                         List.of(new BalanceClient.Holding("005930", 10, 70_000, 71_000))));
 
         sut().reconcile();
@@ -117,7 +117,7 @@ class ShadowPortfolioReconcilerTest {
     void reconcile_mismatch_alerts_without_correcting() {
         when(positionRepository.findAll()).thenReturn(List.of(dbHolding("005930", 10, 70_000)));
         when(balanceClient.fetchBalance()).thenReturn(
-                new BalanceClient.BalanceSnapshot(1_000_000,
+                new BalanceClient.BalanceSnapshot(1_000_000, 0,
                         List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))));
 
         sut().reconcile();
@@ -152,7 +152,7 @@ class ShadowPortfolioReconcilerTest {
     void reconcile_corrects_after_mismatch_persists_two_cycles() {
         Position drifted = dbHolding("005930", 10, 70_000);
         when(positionRepository.findAll()).thenReturn(List.of(drifted));
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))));
 
         ShadowPortfolioReconciler r = sut();
@@ -170,9 +170,9 @@ class ShadowPortfolioReconcilerTest {
         Position pos = dbHolding("005930", 10, 70_000);
         when(positionRepository.findAll()).thenReturn(List.of(pos));
         when(balanceClient.fetchBalance()).thenReturn(
-                new BalanceClient.BalanceSnapshot(1_000_000,
+                new BalanceClient.BalanceSnapshot(1_000_000, 0,
                         List.of(new BalanceClient.Holding("005930", 5, 70_000, 71_000))),   // 1차: 불일치
-                new BalanceClient.BalanceSnapshot(1_000_000,
+                new BalanceClient.BalanceSnapshot(1_000_000, 0,
                         List.of(new BalanceClient.Holding("005930", 10, 70_000, 71_000))));  // 2차: 일치
 
         ShadowPortfolioReconciler r = sut();
@@ -197,7 +197,7 @@ class ShadowPortfolioReconcilerTest {
     @DisplayName("기동 시 미체결 주문 전량 취소를 항상 호출한다")
     void onStartup_always_cancels_pending_orders() {
         when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, 0, List.of()));
 
         sut().onStartup();
 
@@ -209,7 +209,7 @@ class ShadowPortfolioReconcilerTest {
     void onStartup_deletes_position_absent_from_broker() {
         Position stale = dbHolding("005930", 10, 70_000);
         when(positionRepository.findAll()).thenReturn(List.of(stale));
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, 0, List.of()));
 
         sut().onStartup();
 
@@ -221,7 +221,7 @@ class ShadowPortfolioReconcilerTest {
     @DisplayName("브로커에는 있는데 DB엔 없음 → 신규 Position 생성 + 보정 알림")
     void onStartup_creates_position_missing_from_db() {
         when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
 
         sut().onStartup();
@@ -242,7 +242,7 @@ class ShadowPortfolioReconcilerTest {
                                      if (!store.contains(p)) store.add(p); return p; });
         when(positionRepository.findByStockCode("005930"))
                 .thenAnswer(inv -> store.stream().filter(p -> p.getStockCode().equals("005930")).findFirst());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
 
         sut().correctFromBroker();
@@ -260,7 +260,7 @@ class ShadowPortfolioReconcilerTest {
         held.armStopLoss(60_000);
         when(positionRepository.findAll()).thenReturn(List.of(held));
         when(positionRepository.findByStockCode("005930")).thenReturn(java.util.Optional.of(held));
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 7, 68_000, 69_000))));
 
         sut().correctFromBroker();
@@ -273,7 +273,7 @@ class ShadowPortfolioReconcilerTest {
     void onStartup_corrects_quantity_mismatch() {
         Position drifted = dbHolding("005930", 10, 70_000);
         when(positionRepository.findAll()).thenReturn(List.of(drifted));
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 6, 70_000, 71_000))));
 
         sut().onStartup();
@@ -287,7 +287,7 @@ class ShadowPortfolioReconcilerTest {
     @DisplayName("기동 후 자동 가동 — 항상 RUNNING으로 시작 (사용자 정책 2026-07-16)")
     void onStartup_always_ends_running() {
         when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(0, 0, List.of()));
 
         sut().onStartup();
 
@@ -300,7 +300,7 @@ class ShadowPortfolioReconcilerTest {
     @DisplayName("correctFromBroker()는 재가동 게이트에서 재사용 가능한 public 메서드다")
     void correctFromBroker_is_reusable_standalone() {
         when(positionRepository.findAll()).thenReturn(List.of());
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceClient.BalanceSnapshot(1_000_000, 0,
                 List.of(new BalanceClient.Holding("005930", 3, 60_000, 61_000))));
 
         sut().correctFromBroker();

@@ -4,6 +4,7 @@ import com.trading.position.BalanceClient.BalanceSnapshot;
 import com.trading.position.BalanceClient.Holding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -41,7 +42,7 @@ class KisPositionManagerTest {
     void totalAssetValue_includes_cash_from_balance_api() {
         // 예수금 4,992만 + 삼성전자 1주(8만) = 총자산 5,000만
         when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(
-                50_000_000, List.of(new Holding("005930", 1, 79_000, 80_000))));
+                50_000_000, 49_920_000, List.of(new Holding("005930", 1, 79_000, 80_000))));
         when(dailyEquityRepository.findById(any(LocalDate.class)))
                 .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));
 
@@ -58,7 +59,7 @@ class KisPositionManagerTest {
     @Test
     void dailyPnl_computed_against_day_start_equity() {
         // 당일 시작 5,000만 → 현재 4,850만 = -3.0%
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(48_500_000, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(48_500_000, 0, List.of()));
         when(dailyEquityRepository.findById(any(LocalDate.class)))
                 .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));
 
@@ -69,7 +70,7 @@ class KisPositionManagerTest {
 
     @Test
     void first_snapshot_of_day_records_start_equity_and_pnl_is_zero() {
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, 0, List.of()));
         when(dailyEquityRepository.findById(any(LocalDate.class))).thenReturn(Optional.empty());
         when(dailyEquityRepository.save(any(DailyEquity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -80,11 +81,29 @@ class KisPositionManagerTest {
         assertThat(account.getDailyPnlPercent()).isEqualTo(0.0);
     }
 
+    /** 일별 순손익 원장의 "시작" 쪽 — 예수금(현금)도 같은 행에 실려야 마감과 짝이 맞는다 */
+    @Test
+    void first_snapshot_of_day_also_records_start_deposit() {
+        when(balanceClient.fetchBalance())
+                .thenReturn(new BalanceSnapshot(50_000_000, 49_920_000, List.of()));
+        when(dailyEquityRepository.findById(any(LocalDate.class))).thenReturn(Optional.empty());
+        when(dailyEquityRepository.save(any(DailyEquity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        sut.snapshotAccount();
+
+        ArgumentCaptor<DailyEquity> captor = ArgumentCaptor.forClass(DailyEquity.class);
+        verify(dailyEquityRepository).save(captor.capture());
+        assertThat(captor.getValue().getStartEquity()).isEqualTo(50_000_000.0);
+        assertThat(captor.getValue().getStartDeposit()).isEqualTo(49_920_000.0);
+        assertThat(captor.getValue().isClosed()).isFalse();   // 마감은 아직 안 찍혔다
+    }
+
     // ── F-5: consecutiveLossCount는 TradeResultTracker(portfolio_state)에서 ──
 
     @Test
     void consecutive_loss_count_wired_from_portfolio_state() {
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, 0, List.of()));
         when(dailyEquityRepository.findById(any(LocalDate.class)))
                 .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));
         when(portfolioStateRepository.findById(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT))
@@ -99,7 +118,7 @@ class KisPositionManagerTest {
 
     @Test
     void consecutive_calls_within_ttl_hit_balance_api_once() {
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, List.of()));
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, 0, List.of()));
         when(dailyEquityRepository.findById(any(LocalDate.class)))
                 .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));
 
@@ -115,7 +134,7 @@ class KisPositionManagerTest {
     @Test
     void api_failure_within_ttl_still_returns_cached_value() {
         when(balanceClient.fetchBalance())
-                .thenReturn(new BalanceSnapshot(50_000_000, List.of()))
+                .thenReturn(new BalanceSnapshot(50_000_000, 0, List.of()))
                 .thenThrow(new IllegalStateException("KIS 장애"));
         when(dailyEquityRepository.findById(any(LocalDate.class)))
                 .thenReturn(Optional.of(DailyEquity.of(LocalDate.now(), 50_000_000)));

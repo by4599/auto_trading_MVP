@@ -14,6 +14,7 @@ import java.util.List;
  *
  * 반환하는 BalanceSnapshot의 totalAssetValue는 output2의 tot_evlu_amt로,
  * "예수금 + 보유종목 평가금액"이다 — 현금을 포함한 진짜 총자산.
+ * deposit은 output2의 dnca_tot_amt(예수금총액) — 수수료·세금이 이미 차감된 현금이다.
  * 보유종목의 currentPrice는 KIS가 계산해 주는 실시간 현재가(prpr)다.
  *
  * 감사 F-1(현금 미포함 + 평단가 근사로 인한 MDD 오탐/미탐)의 해소 지점.
@@ -71,6 +72,7 @@ public class KisBalanceClient implements BalanceClient {
 
         AccountSummary summary = resp.output2().get(0);
         double totalAssetValue = parseDouble(summary.totalEvaluation());
+        double deposit         = parseDouble(summary.deposit());
 
         List<Holding> holdings = resp.output1() == null ? List.of()
                 : resp.output1().stream()
@@ -82,8 +84,9 @@ public class KisBalanceClient implements BalanceClient {
                                 parseDouble(h.currentPrice())))
                         .toList();
 
-        log.debug("잔고조회 완료: 총자산={} 보유종목={}", totalAssetValue, holdings.size());
-        return new BalanceSnapshot(totalAssetValue, holdings);
+        log.debug("잔고조회 완료: 총자산={} 예수금={} 보유종목={}",
+                totalAssetValue, deposit, holdings.size());
+        return new BalanceSnapshot(totalAssetValue, deposit, holdings);
     }
 
     // ── 파싱 헬퍼 ─────────────────────────────────────────────────────────────
