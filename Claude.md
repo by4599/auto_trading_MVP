@@ -229,7 +229,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
 | `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 **신규 매수 차단** (강제청산은 `RiskMonitor` 담당) | ✅ 활성 (Gate 1 — 현금 포함 equity). **2026-09-12: 매수 가드 추가** — 14개 룰 중 유일하게 `isBuy()` 검사가 없어 MDD 초과 시 매도까지 거부했다(타임컷·손절·최대보유가 전부 이 경로). 백테스트 A/B로 판정 불변 확인 후 수정 |
-| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ✅ 활성 (Gate 3 — `TradeResultTracker` 실현손익 스트릭, **라운드트립 단위** 2026-08-19) |
+| `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ⚠ **paper에서 사실상 무발동 (2026-09-15 실측)** — 룰 코드는 정상이고 backtest에서는 동작한다(`BacktestOrderClient:142`가 `recordRoundTrip` 호출). 그러나 paper는 **입력이 들어오지 않는다**: 모의 체결조회가 매도에 빈 응답을 주는 결함(아래 결함 5) 때문에 매도가 전부 대사 경로(`FillStateUpdater.reconcileFilledFromBalance`)로 종결되는데 **그 경로는 `TradeResult`도 `recordRoundTrip`도 남기지 않는다**. 실측: 2026-08-29~09-12 매도 주문 70건 · 라운드트립 기록 **0건**. 근거 `_workspace/12_audit_cash-based-pnl.md` §1 |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 | `PostTimeCutBuyRule` | 15:15 타임컷 이후 신규 매수 금지 | ✅ 활성 (2026-09-01 신설 — 다일 보유 칸은 면제) |
 
@@ -375,6 +375,12 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
    파라미터 문제가 아니므로 **조회 교정으로는 못 고친다.**
    ⚠ 귀결: **모의에서는 매도 체결가를 얻을 수 없다** → 실현손익(`trade_result`)·칸별 성적·
    왕복 슬리피지 측정이 전부 막힌다. 과거분 복구도 불가(브로커 원장 조회가 비어 있음).
+   ⚠ **안전장치에도 번진다 (2026-09-15 실측)**: 매도가 대사 경로로 종결되면
+   `recordRoundTrip`이 안 불려 **`ConsecutiveLossRule`이 paper에서 무발동**이다
+   (3주간 매도 70건 / 기록 0건). 위 리스크 룰 표 참고 — 룰 코드 문제가 아니라 입력 부재다.
+   ⚠ **일별 순손익은 우회로가 생겼다 (2026-09-15)**: 예수금(현금)은 증권사가 정상적으로
+   주므로 `DailyPnlRecorder`가 장 시작·마감 총자산/예수금 차이로 그날 순손익을 낸다
+   (`GET /api/daily-pnl`). 거래 단위 귀속은 여전히 불가 — 동시 체결이 섞이면 깨진다.
    현재는 ①(취소불가=체결) 자동복구 + 주기적 재동기화가 **유일한 체결 확인 수단**(≈10분 지연).
    남은 선택지는 실시간 체결통보(WebSocket `H0STCNI9`) 또는 실전 전환 후 재확인 —
    후자를 택했다(ADR-001 개정 2026-08-10: 슬리피지 관문을 실전 이후로 이관).
