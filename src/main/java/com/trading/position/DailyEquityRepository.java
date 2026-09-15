@@ -14,4 +14,10 @@ public interface DailyEquityRepository extends JpaRepository<DailyEquity, LocalD
 
     /** 일별 순손익 원장 조회 — 최근 날짜가 먼저 */
     List<DailyEquity> findByTradeDateGreaterThanEqualOrderByTradeDateDesc(LocalDate from);
+
+    /**
+     * 마감은 찍혔는데 알림을 못 보낸 날 — 다음 거래일 아침 이월 발송 대상.
+     * 오래된 날짜가 먼저 나온다(보내는 순서 그대로).
+     */
+    List<DailyEquity> findByEndEquityNotNullAndNotifiedAtNullOrderByTradeDateAsc();
 }

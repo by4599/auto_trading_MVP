@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 거래일 하루치 자산 원장. 날짜가 PK이므로 "매일 리셋"은 별도 크론 없이 날짜 키 교체로
@@ -48,6 +49,14 @@ public class DailyEquity {
     @Column(name = "end_deposit")
     private Double endDeposit;
 
+    /**
+     * 마감 손익 알림을 <b>실제로 보낸</b> 시각. null이면 아직 못 보냈다는 뜻이고
+     * 다음 거래일 아침에 이월 발송 대상이 된다 (DailyPnlRecorder).
+     * 이 기능 이전 행과 백테스트 행은 비어 있다.
+     */
+    @Column(name = "notified_at")
+    private LocalDateTime notifiedAt;
+
     protected DailyEquity() {}
 
     /** 예수금을 모르는 기록 (이 기능 이전 행·백테스트) — startDeposit은 null로 남는다 */
@@ -76,6 +85,17 @@ public class DailyEquity {
 
     public boolean isClosed() { return endEquity != null; }
 
+    /**
+     * 알림을 실제로 보낸 뒤에만 찍는다 — 이 값이 이월 발송 여부를 가르는 유일한 근거다.
+     * 이미 찍힌 날은 덮어쓰지 않는다 (먼저 보낸 시각이 정본).
+     */
+    public void markNotified(LocalDateTime at) {
+        if (this.notifiedAt != null) return;
+        this.notifiedAt = at;
+    }
+
+    public boolean isNotified() { return notifiedAt != null; }
+
     /** 그날 순손익(원) = 마감 총자산 - 시작 총자산. 마감 기록 전에는 null */
     public Double getNetPnl() {
         return endEquity == null ? null : endEquity - startEquity;
@@ -91,4 +111,5 @@ public class DailyEquity {
     public Double getStartDeposit()  { return startDeposit; }
     public Double getEndEquity()     { return endEquity; }
     public Double getEndDeposit()    { return endDeposit; }
+    public LocalDateTime getNotifiedAt() { return notifiedAt; }
 }

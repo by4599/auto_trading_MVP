@@ -14,6 +14,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 일별 순손익 원장의 마감 기록 장치 (측정 전용 — 매매 경로 무변경).
@@ -33,12 +36,20 @@ import java.time.LocalDate;
  * <p>15:29 KST에 돈다 — 타임컷(15:15)·최대보유(15:17)·재시도 스윕(최종 15:28)이 끝났고
  * 장 마감(15:30) 직전이라 <b>아직 장중</b>이다. 그 시각에 앱이 꺼져 있던 날은 마감이 비어
  * 있게 되고 (잔고는 소급 조회가 안 된다), 원장은 그 날을 "미마감"으로 남긴다 — 추측해 채우지 않는다.
+ *
+ * <p>알림은 <b>실제로 보낸 것만</b> 원장에 찍는다(notifiedAt). 텔레그램은 거래일 09:00~15:30에만
+ * 나가는데 스케줄 스레드가 1개라 <b>할 일이 많은 날일수록 15:29 작업이 밀린다</b>(실측 6일 중 1일은
+ * 15:30을 넘겼다). 그래서 창을 넘겨 못 보낸 날은 조용히 버리지 않고 다음 거래일 <b>09:05</b>에
+ * 이월 발송한다.
  */
 @Component
 @Profile("paper")
 public class DailyPnlRecorder {
 
     private static final Logger log = LoggerFactory.getLogger(DailyPnlRecorder.class);
+
+    /** 아침 이월로 한 번에 보내는 최대 건수 — 오래 꺼져 있었다고 무더기로 쏟아지지 않게 */
+    private static final int MAX_CATCHUP = 5;
 
     private final BalanceClient balanceClient;
     private final DailyEquityRepository dailyEquityRepository;
@@ -72,6 +83,62 @@ public class DailyPnlRecorder {
     @Scheduled(cron = "0 29 15 * * MON-FRI", zone = "Asia/Seoul")
     public void recordClose() {
         recordCloseFor(LocalDate.now(clock));
+    }
+
+    /**
+     * 평일 09:05 KST — 못 보낸 마감 손익을 다음 거래일 아침에 이월 발송한다.
+     *
+     * <p>왜 아침인가: 전송 창(거래일 09:00~15:30)이 막 열린 직후라 여유가 크고, 스케줄 스레드
+     * 1개를 {@code @Scheduled} 14개가 나눠 쓰는 이 앱에서 <b>마감 직전보다 경합이 훨씬 낮다</b>.
+     * 마감 직전에는 타임컷·재시도 스윕·1초 감시가 같은 스레드에 몰려 크론이 밀린다
+     * (실측: 15:25 크론이 +321초 밀려 15:30:21에 발화한 날이 있다).
+     *
+     * <p>여기서 보내는 것은 <b>알림뿐</b>이다 — 잔고를 다시 부르지 않는다. 원장은 이미
+     * 그날 장중에 찍힌 값이 정본이고, 아침에 다시 읽으면 다른 날의 자산이 섞인다.
+     */
+    @Scheduled(cron = "0 5 9 * * MON-FRI", zone = "Asia/Seoul")
+    public void sendPendingNotifications() {
+        sendPendingFor(LocalDate.now(clock));
+    }
+
+    void sendPendingFor(LocalDate today) {
+        if (!kisProperties.isConfigured()) return;
+        if (!marketCalendar.isTradingDay(today)) {
+            log.debug("[일별손익] {} 휴장일 — 이월 발송 스킵", today);
+            return;
+        }
+        if (!marketCalendar.isDuringMarketHoursNow()) {
+            log.info("[일별손익] {} 전송 창 밖 — 이월 발송을 다음 기회로 미룬다", today);
+            return;
+        }
+
+        List<DailyEquity> pending = dailyEquityRepository
+                .findByEndEquityNotNullAndNotifiedAtNullOrderByTradeDateAsc().stream()
+                .filter(DailyEquity::isClosed)                   // 마감값이 있어야 보낼 손익이 있다
+                .filter(d -> d.getTradeDate().isBefore(today))   // 오늘 것은 그날 15:29 경로가 맡는다
+                .toList();
+        if (pending.isEmpty()) return;
+
+        List<DailyEquity> recent = trimToRecent(pending);
+        log.info("[일별손익] 못 보낸 마감 알림 {}건 이월 발송", recent.size());
+        for (DailyEquity ledger : recent) {
+            sendAndMark(ledger, closeMessage(ledger, true));
+        }
+    }
+
+    /**
+     * 최근 {@value #MAX_CATCHUP}건만 남긴다 (오름차순 유지 — 오래된 날짜부터 보낸다).
+     * 잘라낸 날은 notifiedAt이 비어 있으므로 사라지지 않고 다음 아침에 이어서 나간다.
+     */
+    private List<DailyEquity> trimToRecent(List<DailyEquity> pending) {
+        if (pending.size() <= MAX_CATCHUP) return pending;
+        int cut = pending.size() - MAX_CATCHUP;
+        log.warn("[일별손익] 밀린 마감 알림 {}건 중 최근 {}건만 보낸다 — 이번에 넘기는 날: {}",
+                pending.size(), MAX_CATCHUP,
+                pending.subList(0, cut).stream()
+                        .map(d -> d.getTradeDate().toString())
+                        .collect(Collectors.joining(", ")));
+        return pending.subList(cut, pending.size());
     }
 
     // @Transactional을 붙이지 않는다 — 같은 빈 안에서 부르면 프록시를 안 타 무효다.
@@ -118,30 +185,63 @@ public class DailyPnlRecorder {
                 won(ledger.getStartEquity()), won(ledger.getEndEquity()), won(ledger.getNetPnl()),
                 won(ledger.getStartDeposit()), won(ledger.getEndDeposit()), won(ledger.getCashDelta()));
 
-        notifyClose(today, ledger);
+        notifyClose(ledger);
+    }
+
+    /** 원장이 저장된 뒤에만 부른다 — 알림은 언제나 마지막이고, 실패해도 원장을 되돌리지 않는다. */
+    private void notifyClose(DailyEquity ledger) {
+        if (ledger.getNetPnl() == null) return;
+        sendAndMark(ledger, closeMessage(ledger, false));
     }
 
     /**
-     * 15:29은 텔레그램 전송 창(거래일 09:00~15:30) 안이다 — 마감 뒤로 미루면 조용히 사라진다.
-     * 전송 실패가 원장 기록을 되돌리면 안 되므로 여기서 삼킨다 (알림은 곁다리다).
+     * 보내기 직전에 전송 창(거래일 09:00~15:30)을 <b>호출 측에서 한 번 더</b> 본다.
+     *
+     * <p>TelegramNotifier 안에도 같은 판정이 있지만, 창 밖이면 <b>조용히 건너뛰고</b>(log.info)
+     * 호출 측에 아무것도 알려주지 않는다 — 보냈는지를 모르면 이월할 수도, 경고할 수도 없다.
+     * 게다가 recordCloseFor의 첫 게이트와 전송 사이에는 잔고 조회(레이트리밋 ≥1초 + HTTP 최대
+     * 10초)가 끼어 있어 그 사이에 창이 닫힐 수 있다. 중복 판정은 <b>의도된 것</b>이다.
+     *
+     * <p>notifiedAt은 실제로 보낸 뒤에만 찍는다 — 못 보낸 날은 비워 둬야 아침에 이월된다.
+     * ⚠ 다만 그 값의 뜻은 "전달됐다"가 아니라 <b>"창 안에서 예외 없이 send()를 불렀다"</b>이다.
+     * {@code TelegramNotifier.send}가 HTTP 실패를 안에서 삼키므로 서버가 거부해도 도장은 찍힌다
+     * — 이월 장치는 <b>창 이탈만</b> 복구할 수 있고 전달 실패는 복구하지 못한다.
+     *
+     * <p>도장 저장까지 try 안에 둔다 — 여기서 예외가 새면 이월 루프가 남은 건을 버리고
+     * 스케줄 메서드 밖으로 던진다. 알림은 곁다리이므로 어떤 실패도 위로 올리지 않는다.
      */
-    private void notifyClose(LocalDate today, DailyEquity ledger) {
-        Double netPnl = ledger.getNetPnl();
-        if (netPnl == null) return;
-
-        String verdict = netPnl > 0 ? "벌었습니다" : netPnl < 0 ? "잃었습니다" : "본전입니다";
-        double startEquity = ledger.getStartEquity();
-        double percent = startEquity > 0 ? netPnl / startEquity * 100 : 0.0;
-        try {
-            notifier.sendCritical(String.format(
-                    "📒 [%s 마감] 오늘 %s원 %s (%.2f%%)%n"
-                    + "총자산 %s원 → %s원%n"
-                    + "수수료·세금이 이미 빠진 실제 금액입니다.",
-                    today, won(Math.abs(netPnl)), verdict, percent,
-                    won(startEquity), won(ledger.getEndEquity())));
-        } catch (Exception e) {
-            log.warn("[일별손익] {} 알림 전송 실패 — 원장은 기록됨: {}", today, e.getMessage());
+    private void sendAndMark(DailyEquity ledger, String message) {
+        LocalDate date = ledger.getTradeDate();
+        if (!marketCalendar.isDuringMarketHoursNow()) {
+            log.warn("[일별손익] {} 전송 창(거래일 09:00~15:30)을 넘겨 알림 보류 — "
+                    + "다음 거래일 아침에 보낸다", date);
+            return;
         }
+        try {
+            notifier.sendCritical(message);
+            ledger.markNotified(LocalDateTime.now(clock));
+            dailyEquityRepository.save(ledger);
+        } catch (Exception e) {
+            log.warn("[일별손익] {} 알림 처리 실패 — 다음 거래일 아침에 다시 시도한다: {}",
+                    date, e.getMessage());
+        }
+    }
+
+    /** 당일 발송과 이월 발송이 같은 문장을 쓰되 머리말만 다르다 — 이월분은 어느 날 것인지 밝힌다 */
+    private String closeMessage(DailyEquity ledger, boolean carriedOver) {
+        double netPnl = ledger.getNetPnl();
+        double startEquity = ledger.getStartEquity();
+        String verdict = netPnl > 0 ? "벌었습니다" : netPnl < 0 ? "잃었습니다" : "본전입니다";
+        double percent = startEquity > 0 ? netPnl / startEquity * 100 : 0.0;
+        String head = carriedOver
+                ? String.format("📒 [지난 거래일(%s) 마감분]", ledger.getTradeDate())
+                : String.format("📒 [%s 마감]", ledger.getTradeDate());
+        return String.format("%s %s %s원 %s (%.2f%%)%n"
+                        + "총자산 %s원 → %s원%n"
+                        + "수수료·세금이 이미 빠진 실제 금액입니다.",
+                head, carriedOver ? "그날" : "오늘",
+                won(Math.abs(netPnl)), verdict, percent,
+                won(startEquity), won(ledger.getEndEquity()));
     }
 
     private static String won(Double value) {
