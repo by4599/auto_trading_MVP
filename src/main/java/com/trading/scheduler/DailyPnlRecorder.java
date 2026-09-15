@@ -1,5 +1,6 @@
 package com.trading.scheduler;
 
+import com.trading.NotificationService;
 import com.trading.market.KisProperties;
 import com.trading.market.MarketCalendarService;
 import com.trading.position.BalanceClient;
@@ -43,17 +44,20 @@ public class DailyPnlRecorder {
     private final DailyEquityRepository dailyEquityRepository;
     private final MarketCalendarService marketCalendar;
     private final KisProperties kisProperties;
+    private final NotificationService notifier;
     private final Clock clock;
 
     public DailyPnlRecorder(BalanceClient balanceClient,
                             DailyEquityRepository dailyEquityRepository,
                             MarketCalendarService marketCalendar,
                             KisProperties kisProperties,
+                            NotificationService notifier,
                             Clock clock) {
         this.balanceClient = balanceClient;
         this.dailyEquityRepository = dailyEquityRepository;
         this.marketCalendar = marketCalendar;
         this.kisProperties = kisProperties;
+        this.notifier = notifier;
         this.clock = clock;
     }
 
@@ -113,6 +117,31 @@ public class DailyPnlRecorder {
                 today,
                 won(ledger.getStartEquity()), won(ledger.getEndEquity()), won(ledger.getNetPnl()),
                 won(ledger.getStartDeposit()), won(ledger.getEndDeposit()), won(ledger.getCashDelta()));
+
+        notifyClose(today, ledger);
+    }
+
+    /**
+     * 15:29은 텔레그램 전송 창(거래일 09:00~15:30) 안이다 — 마감 뒤로 미루면 조용히 사라진다.
+     * 전송 실패가 원장 기록을 되돌리면 안 되므로 여기서 삼킨다 (알림은 곁다리다).
+     */
+    private void notifyClose(LocalDate today, DailyEquity ledger) {
+        Double netPnl = ledger.getNetPnl();
+        if (netPnl == null) return;
+
+        String verdict = netPnl > 0 ? "벌었습니다" : netPnl < 0 ? "잃었습니다" : "본전입니다";
+        double startEquity = ledger.getStartEquity();
+        double percent = startEquity > 0 ? netPnl / startEquity * 100 : 0.0;
+        try {
+            notifier.sendCritical(String.format(
+                    "📒 [%s 마감] 오늘 %s원 %s (%.2f%%)%n"
+                    + "총자산 %s원 → %s원%n"
+                    + "수수료·세금이 이미 빠진 실제 금액입니다.",
+                    today, won(Math.abs(netPnl)), verdict, percent,
+                    won(startEquity), won(ledger.getEndEquity())));
+        } catch (Exception e) {
+            log.warn("[일별손익] {} 알림 전송 실패 — 원장은 기록됨: {}", today, e.getMessage());
+        }
     }
 
     private static String won(Double value) {

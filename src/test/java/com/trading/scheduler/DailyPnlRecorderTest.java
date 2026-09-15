@@ -39,6 +39,8 @@ class DailyPnlRecorderTest {
 
     private final BalanceClient balanceClient = mock(BalanceClient.class);
     private final DailyEquityRepository equityRepo = mock(DailyEquityRepository.class);
+    private final com.trading.NotificationService notifier =
+            mock(com.trading.NotificationService.class);
 
     private DailyPnlRecorder sut() {
         return sutAt(15, 29);   // 실제 스케줄 시각 — 장 마감(15:30) 직전, 아직 장중
@@ -53,7 +55,7 @@ class DailyPnlRecorderTest {
         kis.setAppkey("k");
         kis.setSecretkey("s");
         kis.setAccountNo("50000000-01");
-        return new DailyPnlRecorder(balanceClient, equityRepo, calendar, kis, clock);
+        return new DailyPnlRecorder(balanceClient, equityRepo, calendar, kis, notifier, clock);
     }
 
     private void givenBalance(double totalAssetValue, double deposit) {
@@ -68,6 +70,40 @@ class DailyPnlRecorderTest {
 
         verify(balanceClient, never()).fetchBalance();
         verify(equityRepo, never()).save(any());
+        verify(notifier, never()).sendCritical(any());
+    }
+
+    @Test
+    @DisplayName("마감이 기록되면 그날 손익을 알림으로 보낸다 — 금액·등락률·총자산 변화를 담는다")
+    void sends_notification_on_close() {
+        DailyEquity ledger = DailyEquity.of(MON_0914, 10_000_000, 9_000_000);
+        when(equityRepo.findById(MON_0914)).thenReturn(Optional.of(ledger));
+        givenBalance(10_120_000, 10_120_000);
+
+        sut().recordCloseFor(MON_0914);
+
+        org.mockito.ArgumentCaptor<String> msg = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(notifier).sendCritical(msg.capture());
+        assertThat(msg.getValue())
+                .contains("120,000")        // 순손익 절대값
+                .contains("벌었습니다")
+                .contains("1.20%");         // 120,000 / 10,000,000
+    }
+
+    @Test
+    @DisplayName("알림 전송이 실패해도 원장 기록은 되돌아가지 않는다 — 알림은 곁다리다")
+    void notification_failure_does_not_break_ledger() {
+        DailyEquity ledger = DailyEquity.of(MON_0914, 10_000_000, 9_000_000);
+        when(equityRepo.findById(MON_0914)).thenReturn(Optional.of(ledger));
+        givenBalance(9_900_000, 9_900_000);
+        org.mockito.Mockito.doThrow(new RuntimeException("telegram down"))
+                .when(notifier).sendCritical(any());
+
+        sut().recordCloseFor(MON_0914);
+
+        verify(equityRepo).save(ledger);
+        assertThat(ledger.isClosed()).isTrue();
+        assertThat(ledger.getNetPnl()).isEqualTo(-100_000.0);
     }
 
     @Test
@@ -152,7 +188,7 @@ class DailyPnlRecorderTest {
         MarketCalendarService calendar =
                 new MarketCalendarService(new MarketCalendarProperties(), clock);
         DailyPnlRecorder unconfigured = new DailyPnlRecorder(
-                balanceClient, equityRepo, calendar, new KisProperties(), clock);
+                balanceClient, equityRepo, calendar, new KisProperties(), notifier, clock);
 
         unconfigured.recordCloseFor(MON_0914);
 
