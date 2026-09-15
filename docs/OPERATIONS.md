@@ -19,6 +19,47 @@
 - 실전 전환 게이트에 "VPS 이전 완료"를 추가한다 (TRADING-RULES-AUDIT의 F-1~F-4와 동급).
 - 집 PC로 모의 운영하는 동안에도: Windows 자동 업데이트 재부팅 시간대를 장외로 강제,
   절전 모드 해제, 장중 노트북 덮개 닫힘 방지 설정을 운영 체크리스트로 관리한다.
+  ⚠ 2026-09-15 실측: 업데이트 사용 시간이 21:00~12:00으로 잡혀 있어 **14:29 장중에 자동 재부팅**됐다
+  (System 이벤트 1074). 사용 시간은 PC 설정이라 사람이 바꾼다 — 설정 → Windows 업데이트 →
+  고급 옵션 → 사용 시간 → 수동, 08:00 시작 · 18:00 이후 끝.
+
+### 1.1 자동 기동 — 작업 스케줄러 (2026-09-16)
+
+앱은 `start-paper-if-needed.ps1`이 켠다. 두 예약 작업이 같은 스크립트를 부른다:
+
+| 작업 | 언제 | 목적 |
+|---|---|---|
+| `AutoTrading-Paper-0830` | 평일 08:30 (PC가 꺼져 있었으면 켜진 뒤 곧바로) | 개장 전 기동 |
+| `AutoTrading-Paper-Logon` | 로그온 2분 뒤 | 장중 재부팅 뒤 복구 — 15:15 타임컷·손절 감시를 되살린다 |
+
+- 주말이거나, 이미 실행 중(8080 리슨)이거나, **켜지는 중(paper 프로필 java 프로세스)**이면
+  아무것도 하지 않는다. 포트는 기동 1~2분 뒤에야 열려서, 포트만 보면 두 작업이 겹칠 때
+  gradle이 두 번 뜬다.
+- 기록은 `logs/auto-start.log` — 기동·생략·종료 시각이 남는다. "앱 기동 시작" 뒤에
+  "앱 종료" 줄 없이 끊겼으면 PC가 꺼졌거나 재부팅된 것이다.
+- 스크립트(작업)는 앱이 떠 있는 동안 계속 살아 있다. 그래서 두 작업 모두 배터리 조건을 껐다
+  ("배터리면 시작 안 함"·"배터리로 전환하면 중지" 해제) — 이 PC는 노트북이라 예전 설정에서는
+  전원선이 빠지면 작업과 함께 앱까지 꺼질 수 있었다.
+- 기동하면 재동기화(미체결 전량 취소·브로커 잔고 대조) 뒤 **곧바로 RUNNING**이다
+  (`ShadowPortfolioReconciler.onStartup`, 2026-07-16 사용자 정책). 장중 재부팅 뒤 자동 기동도
+  같다 — §3 ⑤의 "장중 재시작은 SAFE_MODE 대기"는 이 정책으로 없어졌다.
+- 장중 재부팅 뒤 자동 기동은 **그날의 연속 무중단 기록을 살리지 못한다** — 09:00 이후 기동은
+  무중단으로 치지 않는다(`RunStreakRecorder`). 재부팅 자체는 위 사용 시간 설정으로 막는다.
+- **일부러 앱을 꺼 둘 때는 두 작업을 함께 끈다.** 안 그러면 다음 08:30이나 로그온 때 다시 켜진다:
+
+```powershell
+Get-ScheduledTask -TaskName AutoTrading-Paper-0830, AutoTrading-Paper-Logon | Disable-ScheduledTask   # 다시 켤 때는 Enable-ScheduledTask
+```
+
+- 기동기를 `.bat`로 두지 않는 이유: 이 PC의 은행·증권 보안 모듈(AhnLab Safe Transaction 등)이
+  **새로 만든 `.bat`/`.cmd` 파일을 열지 못하게 붙잡는다** (2026-09-16 실측 — 새 `.txt`/`.ps1`은 즉시
+  열리고 `.bat`/`.cmd`만 읽기·실행·삭제가 멈춤, Defender 탐지 기록 없음). 이미 있던 `run-paper.bat`은 영향 없다.
+- 다른 PC로 옮길 때는 두 작업을 XML로 내보내 가져온다 (경로·사용자 이름이 다르면 XML 안을 먼저 고친다):
+
+```powershell
+Export-ScheduledTask -TaskName AutoTrading-Paper-Logon | Out-File AutoTrading-Paper-Logon.xml
+Register-ScheduledTask -TaskName AutoTrading-Paper-Logon -Xml (Get-Content AutoTrading-Paper-Logon.xml -Raw)
+```
 
 ## 2. 데드맨 스위치 — 죽은 시스템은 자기가 죽었다고 알릴 수 없다
 
@@ -49,6 +90,10 @@
           손절·타임컷만 활성) → 사람이 상태 확인 후 RUNNING 전환
      → ⑥ 장외 재시작이면 다음 개장 전 자동 RUNNING 복귀 허용
 ```
+
+> ⚠ **현재 구현은 ⑤·⑥과 다르다 (2026-07-16 사용자 정책)** — 장중·장외 구분 없이 ①~④ 재동기화가
+> 끝나면 곧바로 RUNNING으로 시작한다(`ShadowPortfolioReconciler.onStartup`). 런타임 중 증권사 연결이
+> 끊기면 SAFE_MODE로 자동 정지하고 회복 시 자동 재개하는 장치는 그대로다. 자동 기동은 §1.1.
 
 - `TradingMode`에 `SAFE_MODE` 추가 필요 (신규 매수 차단 + 방어 로직만 활성).
 - ①~③은 기존 `ShadowPortfolioReconciler`를 기동 시 1회 강제 실행하는 것으로 재사용.
