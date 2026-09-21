@@ -13,6 +13,7 @@ import com.trading.order.OrderSizingService;
 import com.trading.position.Account;
 import com.trading.position.PositionManager;
 import com.trading.position.PositionRepository;
+import com.trading.risk.OpportunityCostLogger;
 import com.trading.risk.RiskEngine;
 import com.trading.risk.TradingStatusManager;
 import com.trading.signal.Signal;
@@ -91,7 +92,8 @@ class TradingSchedulerTest {
                 new RiskEngine(List.of()), orderEngine, positionManager,
                 statusManager, kisProperties,
                 new TradingUniverseService(universeRepository),
-                marketCalendarAt(weekday()));
+                marketCalendarAt(weekday()),
+                new OpportunityCostLogger());
     }
 
     /** 2026-07-15(수) — 캘린더에 휴장일로 등록되지 않은 평일 */
@@ -119,7 +121,8 @@ class TradingSchedulerTest {
                         mock(PositionRepository.class)),
                 positionManager, new TradingStatusManager(), kisProperties,
                 new TradingUniverseService(universeRepository),
-                marketCalendarAt(weekday(), time));
+                marketCalendarAt(weekday(), time),
+                new OpportunityCostLogger());
     }
 
     @Test
@@ -206,7 +209,8 @@ class TradingSchedulerTest {
                         mock(PositionRepository.class)),
                 positionManager, new TradingStatusManager(), kisProperties,
                 new TradingUniverseService(universeRepository),
-                marketCalendarAt(LocalDate.of(2026, 7, 18))); // 토요일
+                marketCalendarAt(LocalDate.of(2026, 7, 18)),  // 토요일
+                new OpportunityCostLogger());
 
         holidayScheduler.run();
 
