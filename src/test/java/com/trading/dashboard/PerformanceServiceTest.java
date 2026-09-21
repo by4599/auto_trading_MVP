@@ -93,4 +93,17 @@ class PerformanceServiceTest {
         assertThat(summary.get("winRate")).isNull();
         assertThat((List<?>) out.get("buckets")).isEmpty();
     }
+
+    @Test
+    void response_carries_source_warning_about_polluted_sell_price() {
+        when(repository.findByTradeDateBetweenOrderBySoldAtAsc(any(), any())).thenReturn(List.of());
+
+        Map<String, Object> out = sut.performance("daily", 30);
+
+        // trade_result는 모의 매도 체결가 결함(CLAUDE.md 결함 5)으로 손익이 과대계상된다.
+        // 화면이 이 숫자를 정본처럼 읽지 않도록 응답 자체가 출처를 밝혀야 한다.
+        assertThat((String) out.get("source"))
+                .contains("trade_result")
+                .contains("결함 5");
+    }
 }
