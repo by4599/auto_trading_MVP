@@ -93,6 +93,7 @@ public class DailyBarSimulator {
             // 않는다: checkSameDayStop·checkTakeProfit은 호출하지 않고, checkTrailingStop은 진입 전
             // 호출이라 당일 진입분(보유 없음)에는 no-op이다(이월분만 처리).
             exits.checkTrailingStop(stockCode, date, bar, carriedAtOpen);
+            exits.checkBracketTarget(stockCode, date, bar); // 이월분만 — 진입 전이라 당일분은 no-op
             checkMeanReversionEntry(stockCode, date, bar);
             return;
         }
@@ -100,6 +101,7 @@ public class DailyBarSimulator {
         checkEntry(stockCode, date, bar);
         exits.checkSameDayStop(stockCode, date, bar);
         exits.checkTakeProfit(stockCode, date, bar);
+        exits.checkBracketTarget(stockCode, date, bar); // 손절 판정 뒤 — 같은 날이면 손절 우선
         exits.checkTrailingStop(stockCode, date, bar, carriedAtOpen);
     }
 

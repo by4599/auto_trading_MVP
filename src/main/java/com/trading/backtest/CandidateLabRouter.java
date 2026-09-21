@@ -32,6 +32,7 @@ public class CandidateLabRouter {
     private final RegimeLab regimeLab;
     private final DonchianLab donchianLab;
     private final VbFilterLab vbFilterLab;
+    private final BracketLab bracketLab;
 
     public CandidateLabRouter(BacktestDataProperties properties,
                               CandleBackfillService backfillService,
@@ -42,7 +43,8 @@ public class CandidateLabRouter {
                               CrashVolLab crashVolLab,
                               RegimeLab regimeLab,
                               DonchianLab donchianLab,
-                              VbFilterLab vbFilterLab) {
+                              VbFilterLab vbFilterLab,
+                              BracketLab bracketLab) {
         this.properties = properties;
         this.backfillService = backfillService;
         this.coverageChecker = coverageChecker;
@@ -53,6 +55,7 @@ public class CandidateLabRouter {
         this.regimeLab = regimeLab;
         this.donchianLab = donchianLab;
         this.vbFilterLab = vbFilterLab;
+        this.bracketLab = bracketLab;
     }
 
     /** 이 라우터가 처리한 모드면 true */
@@ -60,7 +63,28 @@ public class CandidateLabRouter {
         return routeSizingAndCostLabs(mode)
                 || routeRegimeLabs(mode)
                 || routeDonchianLabs(mode)
-                || routeVbLabs(mode);
+                || routeVbLabs(mode)
+                || routeBracketLabs(mode);
+    }
+
+    // ── 고정% 브래킷 출구 A/B (창: stress, 지수 MA120 ON, 사이징 SZ2) ────────────
+
+    private boolean routeBracketLabs(String mode) {
+        // §17 — "-5% 손절 / +15% 익절" 고정 브래킷이 §14의 P3 트레일링을 이기는지. 진입 2종을
+        // 따로 돌린다(신호가 섞이면 오염). 같은 실행에 기준선(P3 트레일링)이 반드시 들어간다.
+        if ("bracket-lab".equalsIgnoreCase(mode)) {
+            LabScope scope = stressScope("bracket-lab",
+                    "MA 정배열 진입 + 고정% 브래킷 출구 + SZ2(0.25R·동시5) + 지수MA120", "MA-BRACKET");
+            bracketLab.run(scope, toggles::enableMaBreakoutOnlyResetAll, true);
+            return true;
+        }
+        if ("donchian-bracket-lab".equalsIgnoreCase(mode)) {
+            LabScope scope = stressScope("donchian-bracket-lab",
+                    "돈치안 진입 + 고정% 브래킷 출구 + SZ2(0.25R·동시5) + 지수MA120", "DONCHIAN-BRACKET");
+            bracketLab.run(scope, toggles::enableDonchianOnlyResetRsi, false);
+            return true;
+        }
+        return false;
     }
 
     // ── 사이징·비용·급락 측정 (창: candidate / crash-vol) ────────────────────────

@@ -38,6 +38,10 @@ public class DailyBarExitSimulator {
 
     static final String EXIT_STOP_GAP   = "StopLoss-GapOpen";
     static final String EXIT_STOP_INTRA = "StopLoss-ATR";
+    // 고정% 브래킷(§17) 전용 사유 — 기존 ATR 경로와 섞이지 않게 따로 센다(출구 내역 진단용)
+    static final String EXIT_BRACKET_STOP_GAP = "BracketStop-GapOpen";
+    static final String EXIT_BRACKET_STOP     = "BracketStop-Level";
+    static final String EXIT_BRACKET_TARGET   = "BracketTarget";
 
     private final BacktestMarketDataService market;
     private final RiskEngine riskEngine;
@@ -48,6 +52,7 @@ public class DailyBarExitSimulator {
     private final TrailingStopTracker trailingStopTracker;
     private final MutableClock clock;
     private final ScalpingProperties scalpingProperties;
+    private final ExitLabProperties exitLab;
 
     public DailyBarExitSimulator(BacktestMarketDataService market,
                                  RiskEngine riskEngine,
@@ -57,7 +62,8 @@ public class DailyBarExitSimulator {
                                  BacktestOrderClient orderClient,
                                  TrailingStopTracker trailingStopTracker,
                                  MutableClock clock,
-                                 ScalpingProperties scalpingProperties) {
+                                 ScalpingProperties scalpingProperties,
+                                 ExitLabProperties exitLab) {
         this.market = market;
         this.riskEngine = riskEngine;
         this.orderEngine = orderEngine;
@@ -67,32 +73,46 @@ public class DailyBarExitSimulator {
         this.trailingStopTracker = trailingStopTracker;
         this.clock = clock;
         this.scalpingProperties = scalpingProperties;
+        this.exitLab = exitLab;
     }
 
     // ── ①② 이월 보유분 손절 ─────────────────────────────────────────────────
 
     void checkCarriedStop(String stockCode, LocalDate date, Candle bar) {
         Position pos = heldPosition(stockCode);
-        if (pos == null || pos.getStopPrice() == null) return;
+        if (pos == null) return;
+        Double stop = stopLevel(pos);
+        if (stop == null) return;
+        boolean bracket = exitLab.isBracketStop();
 
-        if (bar.getOpen() <= pos.getStopPrice()) {
+        if (bar.getOpen() <= stop) {   // 갭 관통 — 레벨가가 아니라 더 나쁜 시가 체결
             clock.setTo(date, LocalTime.of(9, 5));
-            exitAt(stockCode, bar.getOpen(), EXIT_STOP_GAP);
-        } else if (bar.getLow() <= pos.getStopPrice()) {
+            exitAt(stockCode, bar.getOpen(), bracket ? EXIT_BRACKET_STOP_GAP : EXIT_STOP_GAP);
+        } else if (bar.getLow() <= stop) {
             clock.setTo(date, LocalTime.of(10, 0));
-            exitAt(stockCode, pos.getStopPrice(), EXIT_STOP_INTRA);
+            exitAt(stockCode, stop, bracket ? EXIT_BRACKET_STOP : EXIT_STOP_INTRA);
         }
+    }
+
+    /**
+     * 손절 레벨 — 고정% 브래킷(§17)이면 진입가 × (1−stopPct), 아니면 기존 ATR 손절선.
+     * stopPct=0인 실행에서는 {@code pos.getStopPrice()}를 그대로 돌려주므로 경로가 동일하다.
+     */
+    private Double stopLevel(Position pos) {
+        if (!exitLab.isBracketStop()) return pos.getStopPrice();
+        return pos.getAveragePrice() * (1 - exitLab.getStopPct());
     }
 
     // ── ③ 당일 진입분 손절 (비관적) ──────────────────────────────────────────
 
     void checkSameDayStop(String stockCode, LocalDate date, Candle bar) {
         Position pos = heldPosition(stockCode);
-        if (pos == null || pos.getStopPrice() == null) return;
-        if (bar.getLow() > pos.getStopPrice()) return;
+        if (pos == null) return;
+        Double stop = stopLevel(pos);
+        if (stop == null || bar.getLow() > stop) return;
 
         clock.setTo(date, LocalTime.of(14, 0));
-        exitAt(stockCode, pos.getStopPrice(), EXIT_STOP_INTRA);
+        exitAt(stockCode, stop, exitLab.isBracketStop() ? EXIT_BRACKET_STOP : EXIT_STOP_INTRA);
     }
 
     // ── ④ 스캘핑(방식3) 목표 익절 (BACKTEST-DESIGN §13) ────────────────────
@@ -112,6 +132,26 @@ public class DailyBarExitSimulator {
             clock.setTo(date, LocalTime.of(14, 15));
             exitAt(stockCode, target, "TakeProfit-Scalping");
         }
+    }
+
+    // ── ④′ 고정% 목표 익절 (§17 브래킷 출구 — 스캘핑 경로와 분리) ──────────────
+    //
+    // 스캘핑의 checkTakeProfit은 scalpingProperties 게이트에 묶여 있어 스캘핑 동작까지
+    // 바꾸게 되므로 재사용하지 않고 따로 둔다. targetPct=0이면 아무 일도 하지 않는다.
+    // 손절(loss-side)을 먼저 판정한 뒤에 호출된다 — 같은 날 손절·목표를 둘 다 건드리면
+    // 손절이 이기는 것이 "애매하면 항상 불리하게" 원칙이다.
+    // 갭 상승으로 시가가 이미 목표 위여도 <b>목표가</b>에 체결한다(더 좋은 시가를 주지 않는다).
+
+    void checkBracketTarget(String stockCode, LocalDate date, Candle bar) {
+        if (exitLab.getTargetPct() <= 0) return;
+        Position pos = heldPosition(stockCode);
+        if (pos == null) return;
+
+        double target = pos.getAveragePrice() * (1 + exitLab.getTargetPct());
+        if (bar.getHigh() < target) return;
+
+        clock.setTo(date, LocalTime.of(14, 15));
+        exitAt(stockCode, target, EXIT_BRACKET_TARGET);
     }
 
     // ── ⑤ 트레일링 스톱 필터 (§3.3, 기본 OFF — A/B 변형에서만 켠다) ──────────

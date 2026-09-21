@@ -50,6 +50,8 @@ public class ExecutionKnobs {
         riskLimits.setAtrStopMultiplier(p.atrMult());
         exitLab.setTimecutEnabled(p.timecut());
         exitLab.setMaxHoldDays(p.maxHoldDays());
+        exitLab.setStopPct(p.stopPct());     // 0이면 기존 ATR 손절 경로 (§17)
+        exitLab.setTargetPct(p.targetPct()); // 0이면 목표 익절 없음
         allFiltersOff();
         if (p.trailEnabled()) {
             filters.getTrailingStop().setEnabled(true);

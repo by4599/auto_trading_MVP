@@ -73,6 +73,7 @@ class DailyBarSimulatorTest {
     private ScalpingProperties scalpingProperties;
     private FilterProperties filters;
     private TrailingStopTracker trailingStopTracker;
+    private ExitLabProperties exitLab;
 
     /** 시나리오별 당일 봉을 갈아끼우는 가변 시리즈 (candle repo 목이 이 리스트를 반환) */
     private final List<CandleHistory> seriesRows = new ArrayList<>();
@@ -112,9 +113,10 @@ class DailyBarSimulatorTest {
         scalpingProperties = new ScalpingProperties();
         trailingStopTracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
         RiskEngine riskEngine = new RiskEngine(List.of());
+        exitLab = new ExitLabProperties();
         DailyBarExitSimulator exits = new DailyBarExitSimulator(market, riskEngine,
                 orderEngine, positionRepository, positionManager, orderClient,
-                trailingStopTracker, clock, scalpingProperties);
+                trailingStopTracker, clock, scalpingProperties, exitLab);
         sut = new DailyBarSimulator(market, dispatcher, riskEngine,
                 orderEngine, positionRepository, positionManager,
                 trailingStopTracker, exits, clock, new RsiProperties());
@@ -227,6 +229,36 @@ class DailyBarSimulatorTest {
         sut.simulateDay(CODE, TODAY);
 
         assertThat(positionStore.get(CODE).getQuantity()).isEqualTo(3);
+    }
+
+    // ── 고정% 브래킷 출구 (BACKTEST-DESIGN §17) ────────────────────────────────
+
+    @Test
+    @DisplayName("당일 진입분이 손절·목표를 같은 날 둘 다 건드리면 손절이 이긴다 (불리하게)")
+    void bracket_sameDay_stopWinsOverTarget() {
+        exitLab.setStopPct(0.05);
+        exitLab.setTargetPct(0.10);
+        // 시가 100 · 돌파가 110 진입 → 손절 104.6 / 목표 121.1. 저가 95도 고가 130도 관통한다
+        setTodayBar(new Candle(TODAY, 100, 130, 95, 120, 2000));
+
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore).doesNotContainKey(CODE);
+        assertThat(tradeRecorder.getTrades()).singleElement()
+                .extracting(TradeRecorder.ClosedTrade::exitReason)
+                .isEqualTo(DailyBarExitSimulator.EXIT_BRACKET_STOP);
+    }
+
+    @Test
+    @DisplayName("브래킷 OFF(기본값)면 같은 봉에서 고정% 손절이 발동하지 않는다 — 기존 경로 그대로")
+    void bracket_disabled_keepsAtrPath() {
+        // stopPct·targetPct = 0 (기본값). ATR 손절선 = 진입가 − 30 = 80.1 → 저가 95로는 안 닿는다
+        setTodayBar(new Candle(TODAY, 100, 130, 95, 120, 2000));
+
+        sut.simulateDay(CODE, TODAY);
+
+        assertThat(positionStore.get(CODE).getQuantity()).isGreaterThan(0);
+        assertThat(tradeRecorder.getTrades()).isEmpty();
     }
 
     // ── 이월 트레일링 손절: 보수적 갭 체결 (BACKTEST-DESIGN §14) ────────────────

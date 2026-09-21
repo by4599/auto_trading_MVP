@@ -22,15 +22,32 @@ public class ExitLabProperties {
     /** 0=무제한. >0이면 진입 후 N거래일 경과 시 종가 강제청산(무한 보유 방지·타임 손절). */
     private volatile int maxHoldDays = 0;
 
+    /** 0=기존 동작(ATR 손절선). >0이면 손절 레벨 = 진입가 × (1−stopPct) 고정% 손절 (§17). */
+    private volatile double stopPct = 0;
+
+    /** 0=목표 익절 없음. >0이면 목표 = 진입가 × (1+targetPct) 도달 시 익절 (§17). */
+    private volatile double targetPct = 0;
+
     public boolean isTimecutEnabled() { return timecutEnabled; }
     public void setTimecutEnabled(boolean timecutEnabled) { this.timecutEnabled = timecutEnabled; }
 
     public int getMaxHoldDays() { return maxHoldDays; }
     public void setMaxHoldDays(int maxHoldDays) { this.maxHoldDays = maxHoldDays; }
 
+    public double getStopPct() { return stopPct; }
+    public void setStopPct(double stopPct) { this.stopPct = stopPct; }
+
+    public double getTargetPct() { return targetPct; }
+    public void setTargetPct(double targetPct) { this.targetPct = targetPct; }
+
+    /** 고정% 브래킷 출구를 쓰는 실행인가 — false면 손절 판정이 기존 ATR 경로 그대로다 */
+    public boolean isBracketStop() { return stopPct > 0; }
+
     /** 프로필 스윕 사이 기본값 복원 — 다른 모드/런으로의 누출 방지 */
     public void resetDefaults() {
         this.timecutEnabled = true;
         this.maxHoldDays = 0;
+        this.stopPct = 0;
+        this.targetPct = 0;
     }
 }
