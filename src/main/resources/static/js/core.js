@@ -97,7 +97,7 @@ const Poll = (() => {
 
 // ── 탭 라우터 (해시 기반) ────────────────────────────────────────────────
 
-const TAB_IDS = ['home', 'perf', 'positions', 'review'];
+const TAB_IDS = ['home', 'perf', 'stats', 'diag', 'positions', 'review'];
 
 function switchTab(id) {
   if (!TAB_IDS.includes(id)) id = 'home';
