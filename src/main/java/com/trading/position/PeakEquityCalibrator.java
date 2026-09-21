@@ -27,4 +27,18 @@ public interface PeakEquityCalibrator {
      * true면 전고점을 갱신하지 않는다 — 잘못된 잔고 한 번이 전고점을 영구 오염시키는 경로를 끊는다.
      */
     boolean isImplausible(double equity);
+
+    /**
+     * 전고점이 <b>실제로 올라갔을 때만</b> 1회 호출된다 (같은 값 재확인·하락에는 호출되지 않는다).
+     *
+     * <p>알림을 여기에 둔 이유: 전고점 관련 동작 중 프로필마다 달라야 하는 것은 이미 이 인터페이스가
+     * 가르는 자리다. {@code ShadowPortfolio}에 알림 도구를 직접 주입하면 백테스트
+     * ({@code BacktestRunner}가 봉마다 tick을 돌린다)에서 시뮬레이션이 텔레그램을 두드리는 경로가
+     * 생긴다 — yml의 빈 토큰은 OS 환경변수에 지므로 구조로 막아야 한다(BACKTEST-DESIGN §12).
+     * 기본 구현은 무동작이라 {@link NoOpPeakEquityCalibrator}는 아무것도 보내지 않는다.
+     *
+     * @param previous 올라가기 직전의 전고점 (0이면 최초 확립 — '경신'이 아니다)
+     * @param current  새 전고점
+     */
+    default void notifyPeakRaised(double previous, double current) {}
 }

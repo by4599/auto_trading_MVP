@@ -125,12 +125,25 @@ public class ShadowPortfolio {
                 return;
             }
 
+            double previous = peakEquity;
             peakEquity = current;
             stateRepository.save(PortfolioState.of(PortfolioState.KEY_PEAK_EQUITY, current));
-            log.debug("[ShadowPortfolio] peakEquity 갱신: {}", peakEquity);
+            // 전고점은 리셋이 없어 한 번 오염되면 영구히 남는다 — 언제 얼마나 올랐는지는 사고 조사의
+            // 유일한 단서라 반드시 INFO로 남긴다 (2026-09-21 사고: DEBUG였던 탓에 7거래일간
+            // 오염 시점을 짚지 못했다). 여기까지 온 값은 이미 "신선 + 근거 범위 + 직전보다 큼"이다.
+            log.info("[ShadowPortfolio] peakEquity 경신: {} → {} ({})", previous, current, riseRate(previous, current));
+            calibrator.notifyPeakRaised(previous, current);
         } catch (Exception e) {
-            log.warn("[ShadowPortfolio] tick 오류 — peakEquity 유지 (현재값={}): {}", peakEquity, e.getMessage());
+            // 갱신·영속화(위 3줄)를 지난 뒤 알림에서 던진 경우도 여기로 온다 — 그때는 "유지"가 아니라
+            // 이미 반영된 상태다. 사고 조사 때 "갱신 실패"로 오독되지 않게 현재값만 사실대로 남긴다.
+            log.warn("[ShadowPortfolio] tick 오류 (peakEquity 현재값={}): {}", peakEquity, e.getMessage());
         }
+    }
+
+    /** 경신 폭 표기 — 직전값이 0(최초 확립)이면 증가율이 정의되지 않는다 */
+    private static String riseRate(double previous, double current) {
+        if (previous <= 0) return "최초 기록";
+        return String.format("+%.2f%%", (current - previous) / previous * 100);
     }
 
     public double getPeakEquity() {

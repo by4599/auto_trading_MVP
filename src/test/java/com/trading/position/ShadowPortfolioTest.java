@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -43,6 +45,10 @@ class ShadowPortfolioTest {
     private DailyEquityRepository dailyEquityRepository;
     private NotificationService notifier;
     private RiskLimitsProperties limits;
+    /** 알림 빈도 규칙이 "거래일"을 보므로 날짜를 넘길 수 있는 시계가 필요하다 (backtest의 것 재사용) */
+    private com.trading.backtest.MutableClock clock;
+    /** 장중/장외 판정 — 구체 클래스지만 목이 아니라 실객체다(시계만 움직이면 된다) */
+    private com.trading.market.MarketCalendarService marketCalendar;
 
     @BeforeEach
     void setUp() {
@@ -51,12 +57,17 @@ class ShadowPortfolioTest {
         dailyEquityRepository = mock(DailyEquityRepository.class);
         notifier              = mock(NotificationService.class);
         limits                = new RiskLimitsProperties();   // 기본값: 비중 10%, 최대 5종목
+        clock                 = new com.trading.backtest.MutableClock(
+                java.time.ZonedDateTime.of(java.time.LocalDate.of(2026, 9, 21), java.time.LocalTime.of(10, 0),
+                        java.time.ZoneId.of("Asia/Seoul")).toInstant());
+        marketCalendar        = new com.trading.market.MarketCalendarService(
+                new com.trading.market.MarketCalendarProperties(), clock);   // 휴장일 비움 = 토·일만 휴장
         when(dailyEquityRepository.findMaxStartEquity()).thenReturn(VERIFIED_MAX);
     }
 
     private EvidenceBasedPeakEquityCalibrator calibrator() {
         return new EvidenceBasedPeakEquityCalibrator(
-                dailyEquityRepository, stateRepository, limits, notifier);
+                dailyEquityRepository, stateRepository, limits, notifier, clock, marketCalendar);
     }
 
     private ShadowPortfolio sut() {
@@ -423,5 +434,329 @@ class ShadowPortfolioTest {
 
             assertThat(sut.getPeakEquity()).isEqualTo(50_000_000);
         }
+    }
+
+    // ── 전고점 경신 알림 (2026-09-21 사고 대응: 오염 시점을 아무도 몰랐다) ────────
+
+    @Nested
+    @DisplayName("전고점이 실제로 올라갔을 때만 알린다")
+    class PeakRaiseAlert {
+
+        /** 복원된 전고점 — 운영 DB 교정값 (2026-09-21) */
+        private static final double RESTORED = 10_088_806.0;
+
+        private ShadowPortfolio restored() {
+            storedPeak(RESTORED);
+            ShadowPortfolio sut = sut();
+            sut.restore();
+            return sut;
+        }
+
+        @Test
+        @DisplayName("전고점이 올라가면 직전값·새값과 함께 1회 알린다")
+        void raise_notifies_once() {
+            ShadowPortfolio sut = restored();
+            when(positionManager.snapshotAccount()).thenReturn(account(10_100_000));
+
+            sut.tick();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(10_100_000);
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("같은 값을 다시 확인하면 알리지 않는다 — 1초 틱마다 재전송 금지")
+        void same_value_does_not_notify_again() {
+            ShadowPortfolio sut = restored();
+            when(positionManager.snapshotAccount()).thenReturn(account(10_100_000));
+
+            sut.tick();
+            sut.tick();
+            sut.tick();
+
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("전고점보다 낮은 값에는 알리지 않는다")
+        void lower_value_does_not_notify() {
+            ShadowPortfolio sut = restored();
+            when(positionManager.snapshotAccount()).thenReturn(account(9_787_960));
+
+            sut.tick();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(RESTORED);
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("낡은(폴백) 스냅샷에는 알리지 않는다")
+        void stale_snapshot_does_not_notify() {
+            ShadowPortfolio sut = restored();
+            when(positionManager.snapshotAccount()).thenReturn(account(10_100_000).asStale());
+
+            sut.tick();
+
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("실측 근거상 불가능한 값에는 알리지 않는다 — 갱신 자체가 막히므로")
+        void implausible_value_does_not_notify() {
+            ShadowPortfolio sut = restored();
+            when(positionManager.snapshotAccount()).thenReturn(account(17_047_935));   // 2026-09-11 관측값
+
+            sut.tick();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(RESTORED);
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("최초 전고점 확립(직전값 0)은 '경신'이 아니므로 알리지 않는다")
+        void first_ever_peak_is_not_a_raise() {
+            when(positionManager.snapshotAccount()).thenReturn(account(10_100_000));
+
+            ShadowPortfolio sut = sut();   // restore() 없이 — peakEquity = 0
+            sut.tick();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(10_100_000);
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+        }
+
+        // ── 발송 빈도 (리더 확정 기준 2026-09-21) ─────────────────────────────
+        //   INFO 로그는 갱신될 때마다 전부 남긴다(수사 기록) / 텔레그램만 조인다(사람 호출).
+        //   ① 그 거래일의 첫 갱신  또는  ② 그날 직전 발송 대비 +1.0% 이상 추가 상승일 때만 1회.
+
+        @Test
+        @DisplayName("ⓐ 같은 날 잘게 여러 번 올라도 텔레그램은 1회뿐이다")
+        void same_day_small_rises_notify_only_once() {
+            ShadowPortfolio sut = restored();
+
+            tickAt(sut, RESTORED + 1_000);    // +0.01%
+            tickAt(sut, RESTORED + 2_000);    // +0.01%
+            tickAt(sut, RESTORED + 3_000);    // +0.01%  (누적 +0.03% — 문턱 미달)
+
+            assertThat(sut.getPeakEquity()).isEqualTo(RESTORED + 3_000);
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("ⓑ 같은 날이라도 직전 발송 대비 +1% 이상 더 오르면 한 번 더 알린다")
+        void same_day_one_percent_more_notifies_again() {
+            ShadowPortfolio sut = restored();
+
+            tickAt(sut, RESTORED + 1_000);                  // 1회차 발송 (그날 첫 갱신)
+            tickAt(sut, (RESTORED + 1_000) * 1.005);        // +0.5% — 아직 조용
+            tickAt(sut, (RESTORED + 1_000) * 1.010);        // +1.0% — 2회차 발송
+
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(2)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("ⓒ 날짜가 바뀌면 작은 상승이어도 그날 첫 갱신으로 다시 1회 알린다")
+        void new_trading_day_notifies_again() {
+            ShadowPortfolio sut = restored();
+
+            tickAt(sut, RESTORED + 1_000);    // 9/21 1회차
+            tickAt(sut, RESTORED + 2_000);    // 9/21 조용
+
+            clock.setTo(LocalDate.of(2026, 9, 22), LocalTime.of(9, 5));
+            tickAt(sut, RESTORED + 3_000);    // 9/22 첫 갱신 → 발송
+
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(2)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("오염처럼 한 번에 크게 튀면(+7.94%) 반드시 울린다")
+        void contamination_sized_jump_always_alerts() {
+            ShadowPortfolio sut = restored();
+            when(dailyEquityRepository.findMaxStartEquity()).thenReturn(11_000_000.0);   // 상한을 넓혀 갱신 허용
+
+            tickAt(sut, RESTORED + 1_000);          // 1회차
+            tickAt(sut, 10_890_158);                // 2026-09-21 사고의 오염값 (+7.93%)
+
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(2)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("텔레그램을 참아도 INFO 로그는 갱신 때마다 전부 남는다 — 수사 기록은 줄이지 않는다")
+        void info_log_is_written_on_every_raise_even_when_silent() {
+            ShadowPortfolio sut = restored();
+
+            List<String> logs = captureInfoLogs(() -> {
+                tickAt(sut, RESTORED + 1_000);
+                tickAt(sut, RESTORED + 2_000);
+                tickAt(sut, RESTORED + 3_000);
+            });
+
+            assertThat(logs.stream().filter(m -> m.contains("peakEquity 경신")).count()).isEqualTo(3);
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        // ── 장 밖 보류 (감사 M-1) ─────────────────────────────────────────────
+        //   TelegramNotifier는 거래일 09:00~15:30 밖이면 조용히 스킵한다. 도장을 먼저 찍으면
+        //   그날 "첫 갱신 1회" 할당만 소모되고 경보는 사라진다 — 실측 오염 2건이 둘 다 장 밖이었다.
+
+        @Test
+        @DisplayName("장 밖 갱신은 한 통도 안 나가고 도장도 안 찍힌다 — 다음 장중 첫 갱신이 1회를 보장받는다")
+        void out_of_hours_raise_sends_nothing_and_keeps_daily_quota() {
+            ShadowPortfolio sut = restored();
+            clock.setTo(LocalDate.of(2026, 9, 21), LocalTime.of(8, 45));   // 개장 전 (자동 기동 08:30)
+
+            tickAt(sut, RESTORED + 1_000);
+
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+
+            clock.setTo(LocalDate.of(2026, 9, 21), LocalTime.of(10, 0));   // 개장 후 첫 갱신
+            tickAt(sut, RESTORED + 2_000);
+
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("장 밖 3회 누적은 개장 후 한 통으로 — 가장 이른 직전값과 가장 높은 새값이 담긴다")
+        void held_out_of_hours_raises_are_sent_as_one_message() {
+            storedPeak(10_000_000);
+            ShadowPortfolio sut = sut();
+            sut.restore();
+            clock.setTo(LocalDate.of(2026, 9, 21), LocalTime.of(17, 17));   // 09-11 17:17 오염과 같은 시간대
+
+            tickAt(sut, 10_200_000);
+            tickAt(sut, 10_500_000);
+            tickAt(sut, 10_890_000);
+
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+
+            clock.setTo(LocalDate.of(2026, 9, 22), LocalTime.of(9, 5));
+            sut2Calibrator(sut).flushPendingAlert();
+
+            ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(msg.capture());
+            assertThat(msg.getValue())
+                    .contains("10,000,000")        // 가장 이른 직전값
+                    .contains("10,890,000")        // 가장 높은 새값
+                    .contains("장 밖")
+                    .contains("3회");
+        }
+
+        @Test
+        @DisplayName("장 밖이면 보류 비우기가 아무것도 하지 않는다 — 보류는 그대로 남는다")
+        void flush_does_nothing_outside_market_hours() {
+            ShadowPortfolio sut = restored();
+            clock.setTo(LocalDate.of(2026, 9, 21), LocalTime.of(17, 17));
+            tickAt(sut, RESTORED + 1_000);
+
+            sut2Calibrator(sut).flushPendingAlert();
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+
+            clock.setTo(LocalDate.of(2026, 9, 22), LocalTime.of(9, 5));
+            sut2Calibrator(sut).flushPendingAlert();
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(contains("전고점 경신"));
+        }
+
+        @Test
+        @DisplayName("2026-09-21 오염 재현 — 장 밖 +7.94%는 개장 후 반드시 한 통 울린다")
+        void contamination_out_of_hours_is_alerted_after_open() {
+            ShadowPortfolio sut = restored();
+            clock.setTo(LocalDate.of(2026, 9, 21), LocalTime.of(17, 17));
+
+            tickAt(sut, 10_890_158);   // 실제 오염값 (+7.94%)
+
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+
+            clock.setTo(LocalDate.of(2026, 9, 22), LocalTime.of(9, 0));
+            sut2Calibrator(sut).flushPendingAlert();
+
+            ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+            verify(notifier, org.mockito.Mockito.timeout(2_000).times(1)).sendCritical(msg.capture());
+            assertThat(msg.getValue()).contains("10,890,158").contains("7.9");
+        }
+
+        // ── 발송이 감시 스레드를 막지 않는다 (감사 M-2) ───────────────────────
+
+        @Test
+        @DisplayName("텔레그램 전송은 감시 스레드가 아니라 전용 스레드에서 돈다 — 1초 루프를 막지 않는다")
+        void send_does_not_run_on_the_caller_thread() throws Exception {
+            java.util.concurrent.CountDownLatch sent = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<String> senderThread =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            org.mockito.Mockito.doAnswer(inv -> {
+                senderThread.set(Thread.currentThread().getName());
+                sent.countDown();
+                return null;
+            }).when(notifier).sendCritical(anyString());
+
+            ShadowPortfolio sut = restored();
+            String callerThread = Thread.currentThread().getName();
+            tickAt(sut, RESTORED + 1_000);
+
+            assertThat(sent.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(senderThread.get()).isNotEqualTo(callerThread);
+        }
+
+        @Test
+        @DisplayName("알림 담당 구현체는 paper 전용이다 — backtest에는 보류 비우기 스케줄도 생기지 않는다")
+        void alerting_calibrator_is_paper_only() throws NoSuchMethodException {
+            org.springframework.context.annotation.Profile profile =
+                    EvidenceBasedPeakEquityCalibrator.class.getAnnotation(
+                            org.springframework.context.annotation.Profile.class);
+
+            assertThat(profile).isNotNull();
+            assertThat(profile.value()).containsExactly("paper");
+            // 보류 비우기(@Scheduled)가 이 클래스에 있으므로 backtest 프로필에는 아예 등록되지 않는다
+            assertThat(EvidenceBasedPeakEquityCalibrator.class
+                    .getDeclaredMethod("flushPendingAlert")
+                    .getAnnotation(org.springframework.scheduling.annotation.Scheduled.class)).isNotNull();
+        }
+
+        /** 이 ShadowPortfolio가 물고 있는 캘리브레이터 (보류 비우기를 직접 부르기 위해) */
+        private EvidenceBasedPeakEquityCalibrator sut2Calibrator(ShadowPortfolio sut) {
+            return (EvidenceBasedPeakEquityCalibrator)
+                    org.springframework.test.util.ReflectionTestUtils.getField(sut, "calibrator");
+        }
+
+        /** 이번 스냅샷 값으로 한 틱 돌린다 */
+        private void tickAt(ShadowPortfolio sut, double totalAsset) {
+            when(positionManager.snapshotAccount()).thenReturn(account(totalAsset));
+            sut.tick();
+        }
+
+        @Test
+        @DisplayName("백테스트 구현체로 조립하면 알림 경로 자체가 없다 — 시뮬이 텔레그램을 두드리지 않는다")
+        void backtest_never_notifies() {
+            when(positionManager.snapshotAccount()).thenReturn(account(50_000_000));
+            ShadowPortfolio sut = new ShadowPortfolio(
+                    positionManager, stateRepository, new NoOpPeakEquityCalibrator());
+
+            sut.tick();
+            sut.tick();
+
+            assertThat(sut.getPeakEquity()).isEqualTo(50_000_000);
+            verify(notifier, org.mockito.Mockito.after(200).never()).sendCritical(anyString());
+        }
+    }
+
+    /**
+     * INFO 로그를 실제로 남기는지 확인한다 — 오염 시점 추적의 유일한 단서이므로
+     * 텔레그램을 참는 경우에도 로그는 반드시 남아야 한다 (2026-09-21 사고).
+     */
+    private static List<String> captureInfoLogs(Runnable action) {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(ShadowPortfolio.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list.stream()
+                .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.INFO)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 }
