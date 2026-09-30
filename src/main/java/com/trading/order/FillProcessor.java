@@ -16,12 +16,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 주문 1건의 체결 확인 오케스트레이터.
  *
  * 역할 분리:
- *   - 이 클래스      : HTTP I/O (체결조회), 취소는 OrderCancelClient 위임, 분기 결정
+ *   - 이 클래스      : HTTP I/O (체결조회), 취소는 CancelRetryGate 위임, 분기 결정
  *   - FillStateUpdater: DB I/O (@Transactional)
  *
  * @Transactional 미사용 — DB 커넥션을 HTTP 대기 중에 점유하지 않는다.
@@ -49,14 +50,14 @@ public class FillProcessor {
 
     private final KisApiClient kisApiClient;
     private final FillStateUpdater stateUpdater;
-    private final OrderCancelClient cancelClient;
+    private final CancelRetryGate cancelRetryGate;
     private final BalanceClient balanceClient;
 
     public FillProcessor(KisApiClient kisApiClient, FillStateUpdater stateUpdater,
-                         OrderCancelClient cancelClient, BalanceClient balanceClient) {
+                         CancelRetryGate cancelRetryGate, BalanceClient balanceClient) {
         this.kisApiClient = kisApiClient;
         this.stateUpdater = stateUpdater;
-        this.cancelClient = cancelClient;
+        this.cancelRetryGate = cancelRetryGate;
         this.balanceClient = balanceClient;
     }
 
@@ -128,13 +129,27 @@ public class FillProcessor {
                 || snapshot.status() == OrderStatus.PARTIAL_FILLED;
 
         if (cancellable && isTimedOut(snapshot)) {
-            switch (cancelClient.cancelAll(snapshot.orderNo())) {
-                case SENT -> stateUpdater.markCancelRequested(snapshot.id());
-                // 취소할 잔량 없음 = 이미 체결됨. 체결조회가 놓친 체결을 실잔고로 대사해 종결한다.
-                case NO_OPEN_QTY -> resolveFilledByBalance(snapshot);
-                case FAILED -> log.warn("주문 취소 실패 - 폴링 계속: ordNo={} requestedAt={}",
-                        snapshot.orderNo(), snapshot.requestedAt());
-            }
+            attemptCancel(snapshot);
+        }
+    }
+
+    /**
+     * 취소는 관문(CancelRetryGate)을 통과할 때만 나간다 — 장외이거나 KIS가 이미 "장종료"로
+     * 거부한 주문은 시도하지 않는다(2026-09-22 무한 재시도 5,983회 사고).
+     * 시도하지 않았으면(빈 값) 주문 상태를 건드리지 않고 <b>체결조회는 다음 폴에서 계속</b>한다.
+     */
+    private void attemptCancel(OrderSnapshot snapshot) {
+        Optional<OrderCancelClient.CancelOutcome> outcome = cancelRetryGate.attemptCancel(snapshot.orderNo());
+        if (outcome.isEmpty()) return;
+
+        switch (outcome.get()) {
+            case SENT -> stateUpdater.markCancelRequested(snapshot.id());
+            // 취소할 잔량 없음 = 이미 체결됨. 체결조회가 놓친 체결을 실잔고로 대사해 종결한다.
+            case NO_OPEN_QTY -> resolveFilledByBalance(snapshot);
+            // 장종료 = 다음 개장까지 성공할 수 없다. 억제 등록과 로그(1회)는 관문이 담당한다.
+            case MARKET_CLOSED -> { }
+            case FAILED -> log.warn("주문 취소 실패 - 폴링 계속: ordNo={} requestedAt={}",
+                    snapshot.orderNo(), snapshot.requestedAt());
         }
     }
 
