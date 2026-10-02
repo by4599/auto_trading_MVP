@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -31,6 +33,9 @@ public class KisMarketDataService implements MarketDataService {
     private static final String MARKET_CODE = "J";                   // 주식
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /** 일봉 이어 받기 상한 — KIS 일봉 차트는 호출당 약 100행이라 5페이지면 약 500봉(폭주 방어) */
+    private static final int MAX_DAILY_PAGES = 5;
 
     private final KisApiClient kisApiClient;
 
@@ -73,30 +78,70 @@ public class KisMarketDataService implements MarketDataService {
     /**
      * 최근 완성 일봉 N개 (과거→최신). 당일 미완성 봉 제외.
      * 조회 범위는 휴장일 여유를 두고 N×2+10일을 잡는다.
+     *
+     * <p>KIS 일봉 차트는 호출당 약 100행이 상한이다(KisCandleHistoryClient와 같은 TR). 첫 응답으로
+     * N개가 차지 않으면 가장 오래된 행의 전날을 새 끝 날짜로 삼아 이어 받는다. 이게 없던 동안
+     * 125봉을 요구하는 전략(이평 정배열·돈치안의 MA120)은 100봉 미만을 받아 paper에서 한 번도
+     * 신호를 내지 못했다(2026-07-04~ 90일간 이평돌파 칸 매매 0건 — VB 28건·스캘핑 72건과 대조).
+     * 첫 페이지로 충분한 요청(ATR 15봉 등)은 예전과 똑같이 1회만 호출한다.
      */
     @Override
     public List<Candle> getDailyCandles(String stockCode, int days) {
-        String today = LocalDate.now().format(DATE_FMT);
-        DailyChartResponse resp = fetchDailyChart(
-                stockCode, LocalDate.now().minusDays((long) days * 2 + 10));
+        LocalDate today = LocalDate.now();
+        LocalDate from = today.minusDays((long) days * 2 + 10);
+        DailyChartResponse first = fetchDailyChart(stockCode, from, today);
 
-        if (resp == null || resp.output2() == null || resp.output2().isEmpty()) {
+        if (first == null || first.output2() == null || first.output2().isEmpty()) {
             throw new IllegalStateException("일봉 조회 실패: stockCode=" + stockCode);
         }
 
         // KIS 응답은 최신→과거 순 — 당일을 건너뛰고 N개 수집 후 과거→최신으로 뒤집는다
-        List<Candle> collected = new java.util.ArrayList<>();
-        for (DailyData d : resp.output2()) {
-            if (d.date() == null || today.equals(d.date())) continue;
-            collected.add(toCandle(d));
-            if (collected.size() == days) break;
+        List<Candle> newestFirst = new ArrayList<>();
+        LocalDate oldest = collectCompleted(first.output2(), today, days, newestFirst);
+        int pages = 1;
+        while (newestFirst.size() < days && oldest != null && oldest.isAfter(from)
+                && pages < MAX_DAILY_PAGES) {
+            DailyChartResponse next = fetchDailyChart(stockCode, from, oldest.minusDays(1));
+            pages++;
+            if (next == null || next.output2() == null || next.output2().isEmpty()) break;
+            LocalDate nextOldest = collectCompleted(next.output2(), today, days, newestFirst);
+            if (nextOldest == null || !nextOldest.isBefore(oldest)) break; // 진전 없음 — 같은 창 반복 방어
+            oldest = nextOldest;
         }
-        java.util.Collections.reverse(collected);
-        return List.copyOf(collected);
+        if (pages > 1) {
+            log.info("[MarketData] {} 일봉 {}봉 수취 (요청 {}봉, 페이지 {}회)",
+                    stockCode, newestFirst.size(), days, pages);
+        }
+        Collections.reverse(newestFirst);
+        return List.copyOf(newestFirst);
+    }
+
+    /**
+     * 한 페이지(최신→과거)에서 완성 봉을 이어 담는다 — 오늘(미완성) 봉과 이미 담은 날짜 이후는 건너뛴다.
+     *
+     * @return 이 페이지의 가장 오래된 날짜(다음 커서 기준). 날짜 있는 행이 없으면 null
+     */
+    private static LocalDate collectCompleted(List<DailyData> rows, LocalDate today, int days,
+                                              List<Candle> newestFirst) {
+        LocalDate oldestInPage = null;
+        for (DailyData d : rows) {
+            if (d.date() == null || d.date().isBlank()) continue;
+            LocalDate date = LocalDate.parse(d.date(), DATE_FMT);
+            oldestInPage = date;
+            if (!date.isBefore(today) || newestFirst.size() >= days) continue;
+            LocalDate lastAdded = newestFirst.isEmpty() ? null : newestFirst.get(newestFirst.size() - 1).date();
+            if (lastAdded != null && !date.isBefore(lastAdded)) continue; // 페이지 경계 중복 방어
+            newestFirst.add(toCandle(d));
+        }
+        return oldestInPage;
     }
 
     private DailyChartResponse fetchDailyChart(String stockCode, LocalDate from) {
-        String today    = LocalDate.now().format(DATE_FMT);
+        return fetchDailyChart(stockCode, from, LocalDate.now());
+    }
+
+    private DailyChartResponse fetchDailyChart(String stockCode, LocalDate from, LocalDate to) {
+        String today    = to.format(DATE_FMT);
         String fromDate = from.format(DATE_FMT);
 
         return kisApiClient.getClient().get()
