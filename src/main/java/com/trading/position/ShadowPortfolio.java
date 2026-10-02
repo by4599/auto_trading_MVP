@@ -4,7 +4,6 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 // ADR 2.2: peakEquity는 단조 증가만. 08:30 DailyLossRule 리셋과 완전 분리.
@@ -103,7 +102,11 @@ public class ShadowPortfolio {
         return true;
     }
 
-    @Scheduled(fixedRate = 1000)
+    /**
+     * 전고점 갱신 1회. 부르는 쪽이 프로필마다 다르다 — paper는 {@link ShadowPortfolioTicker}가 <b>장중에만</b>
+     * 1초마다(감사 H-1(b)), backtest는 BacktestRunner가 봉마다 15:30에 직접 부른다. 장 시간 판정을 여기 넣지 않는
+     * 이유는 그 백테스트 호출을 캘린더 데이터와 무관하게 그대로 두기 위해서다(회귀 앵커 보호).
+     */
     public void tick() {
         try {
             Account account = positionManager.snapshotAccount();

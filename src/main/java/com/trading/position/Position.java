@@ -61,6 +61,15 @@ public class Position {
     @Column(name = "realized_pnl_accum", nullable = false)
     private double realizedPnlAccum = 0.0;
 
+    /**
+     * 트레일링 스톱용 "진입 이후 최고가" (2026-10-01) — 며칠 들고 가는 A동은 앱이 재시작돼도
+     * 이 값을 기억해야 한다(메모리에만 두면 재시작 때 현재가로 다시 잡혀 트레일 손절선이 느슨해진다).
+     * null = 아직 관측 전(새 진입·브로커 보정 행·도입 전 보유분) — StopLossMonitor가 첫 관측가에서
+     * 시작해 오를 때만 올린다. 라운드트립이 끝나면 비운다(entryDate·realizedPnlAccum과 같은 수명).
+     */
+    @Column(name = "trailing_high")
+    private Double trailingHigh;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -79,6 +88,7 @@ public class Position {
     public void applyBuy(int filledQty, double filledPrice) {
         if (this.quantity == 0) {
             this.realizedPnlAccum = 0.0;   // 새 라운드트립 시작 — 앞 매매의 손익을 물려받지 않는다
+            this.trailingHigh = null;      // 앞 매매의 최고가도 물려받지 않는다
         }
         double totalCost = (double) this.quantity * this.averagePrice
                 + (double) filledQty * filledPrice;
@@ -122,6 +132,7 @@ public class Position {
         this.quantity -= filledQty;
         if (this.quantity == 0) {
             this.entryDate = null;   // 라운드트립 종료 — 재진입 시 새로 센다
+            this.trailingHigh = null;
         }
         this.updatedAt = LocalDateTime.now();
     }
@@ -137,6 +148,19 @@ public class Position {
     public StrategyBucket getBucket() { return bucket; }
     public LocalDate getEntryDate()  { return entryDate; }
     public double getRealizedPnlAccum() { return realizedPnlAccum; }
+    public Double getTrailingHigh()  { return trailingHigh; }
+
+    /**
+     * 진입 이후 최고가를 올린다 — 저장된 값보다 높을 때만(단조 증가). 0 이하 가격은 시세 불명이라 무시.
+     * @return 값이 바뀌었으면 true (호출 측이 그때만 저장해 쓰기를 줄인다)
+     */
+    public boolean raiseTrailingHigh(double price) {
+        if (price <= 0) return false;
+        if (this.trailingHigh != null && price <= this.trailingHigh) return false;
+        this.trailingHigh = price;
+        this.updatedAt = LocalDateTime.now();
+        return true;
+    }
 
     /** 진입일을 모르는 보유분에 관측일을 도장 찍는다 — 이미 있으면 건드리지 않는다 */
     public void stampEntryDateIfAbsent(LocalDate date) {

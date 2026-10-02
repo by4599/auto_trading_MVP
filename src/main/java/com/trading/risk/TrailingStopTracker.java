@@ -11,8 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 트레일링 스톱 필터 상태 (설계 문서 §3.3) — +armProfit 도달 후 고점 대비
  * trail 하락 시 청산. 기본 OFF.
  *
- * 고점은 인메모리 추적 — 앱 재시작 시 소실되며, 그 경우 기존 ATR 손절선이
- * 방어선으로 남는다 (트레일링은 수익 보존 보조 장치이지 1차 방어선이 아니다).
+ * 고점은 인메모리로 들고 있다. 백테스트는 이 메모리만 쓴다. 라이브(paper)는 2026-10-01부터
+ * StopLossMonitor가 고점을 Position.trailingHigh에 영속화하고 매 틱 {@link #syncHigh}로 덮어쓴다 —
+ * 며칠 보유하는 A동은 앱이 재시작돼도 진입 이후 최고점을 잊으면 안 되기 때문이다.
+ * (트레일링은 수익 보존 장치이고 1차 방어선은 여전히 ATR 손절선이다.)
  */
 @Component
 public class TrailingStopTracker {
@@ -26,6 +28,15 @@ public class TrailingStopTracker {
 
     public void updateHigh(String stockCode, double price) {
         highSinceEntry.merge(stockCode, price, Math::max);
+    }
+
+    /**
+     * 영속된 고점으로 덮어쓴다 (라이브 경로 — StopLossMonitor). {@link #updateHigh}와 달리 max를 취하지
+     * 않는다: 타임컷·체결 대사로 끝난 앞 라운드트립의 고점이 메모리에 남아 새 진입을 오염시키지 않도록
+     * DB(Position)에 저장된 이번 라운드트립의 값을 정본으로 삼는다. 백테스트는 이 메서드를 쓰지 않는다.
+     */
+    public void syncHigh(String stockCode, double high) {
+        highSinceEntry.put(stockCode, high);
     }
 
     /** 청산(전량 매도) 시 호출 — 다음 진입의 고점 추적을 오염시키지 않는다 */

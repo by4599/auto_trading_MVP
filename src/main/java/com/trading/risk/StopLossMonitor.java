@@ -2,6 +2,7 @@ package com.trading.risk;
 
 import com.trading.bucket.StrategyBucket;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.order.OrderEngine;
 import com.trading.order.OrderHistoryRepository;
 import com.trading.order.OrderSide;
@@ -28,6 +29,11 @@ import org.springframework.stereotype.Component;
  * [데이터 품질 게이트] 잔고 API 실패로 낡은(폴백) 스냅샷이면 판정을 건너뛴다 —
  * 옛 가격으로 손절/익절/트레일링을 헛발동(특히 옛 고가로 익절 매도)하는 것을 막는다.
  * (RiskMonitor의 낡은-스냅샷 스킵과 동일 원칙. 매도=money-moving이라 신선값일 때만 판정.)
+ *
+ * [장 시간 게이트] 장 밖(거래일 09:00~마감 외·휴장일)에는 판정하지 않는다 (감사 H-1(c), 2026-10-01).
+ * 다일 보유분이 15:30을 넘기면 장외에도 신선한 스냅샷이 생기는데, 종가가 손절선·트레일선 아래면
+ * 매 초 시장가 매도 → KIS 거부 → FAILED → 다음 초 재시도가 다음 날 아침까지 반복된다.
+ * 건너뛸 뿐 잊지 않는다 — 손절선·최고점은 Position(DB)에 남아 다음 개장 첫 틱에 그대로 판정된다.
  */
 @Component
 @Profile("paper")
@@ -48,6 +54,7 @@ public class StopLossMonitor {
     private final KisProperties kisProperties;
     private final TrailingStopTracker trailingStopTracker;
     private final ScalpingProperties scalpingProperties;
+    private final MarketCalendarService marketCalendar;
 
     public StopLossMonitor(PositionRepository positionRepository,
                            OrderHistoryRepository orderHistoryRepository,
@@ -57,7 +64,8 @@ public class StopLossMonitor {
                            TradingStatusManager statusManager,
                            KisProperties kisProperties,
                            TrailingStopTracker trailingStopTracker,
-                           ScalpingProperties scalpingProperties) {
+                           ScalpingProperties scalpingProperties,
+                           MarketCalendarService marketCalendar) {
         this.positionRepository = positionRepository;
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionManager = positionManager;
@@ -67,6 +75,7 @@ public class StopLossMonitor {
         this.kisProperties = kisProperties;
         this.trailingStopTracker = trailingStopTracker;
         this.scalpingProperties = scalpingProperties;
+        this.marketCalendar = marketCalendar;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -76,6 +85,8 @@ public class StopLossMonitor {
 
     void checkStops() {
         if (!kisProperties.isConfigured()) return;
+        // 장 시간 외에는 매도 판정을 하지 않는다 (RiskMonitor와 같은 판정) — 장외 매도 거부 폭주 차단
+        if (!marketCalendar.isDuringMarketHoursNow()) return;
         TradingMode mode = statusManager.getCurrentMode();
         if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) return;
 
@@ -119,8 +130,9 @@ public class StopLossMonitor {
             }
         }
 
-        // 트레일링 스톱 필터 (§3.3, 기본 OFF) — ATR 손절과 별개의 수익 보존 훅
-        trailingStopTracker.updateHigh(snapshot.stockCode(), current);
+        // 트레일링 스톱 필터 (§3.3, 기본 OFF) — ATR 손절과 별개의 수익 보존 훅.
+        // 고점은 Position에 영속화한 값이 정본이다(재시작해도 유지, 2026-10-01) — 트래커는 판정만 한다.
+        trailingStopTracker.syncHigh(snapshot.stockCode(), trailingHighAfter(pos, current));
         if (trailingStopTracker.exitPrice(
                 snapshot.stockCode(), current, pos.getAveragePrice(), pos.getBucket()).isPresent()) {
             sellVia(TRAILING_NAME, snapshot.stockCode(), account, current, pos);
@@ -129,6 +141,32 @@ public class StopLossMonitor {
 
         if (pos.getStopPrice() == null || current > pos.getStopPrice()) return;
         sellVia(STRATEGY_NAME, snapshot.stockCode(), account, current, pos);
+    }
+
+    /**
+     * 진입 이후 최고가를 올려 저장하고 그 값을 돌려준다. 저장된 값이 없으면(새 진입·브로커 보정 행·
+     * 도입 전 보유분) 지금 관측가에서 시작한다 — 모르는 과거 고점을 추정해 트레일을 당겨 파는 것보다
+     * 늦게 파는 쪽이 안전하다(MaxHoldScheduler의 진입일 미상 처리와 같은 원칙). 오를 때만 쓴다.
+     */
+    private double trailingHighAfter(Position pos, double current) {
+        if (pos.raiseTrailingHigh(current)) {
+            persistTrailingHigh(pos);
+        }
+        return pos.getTrailingHigh();
+    }
+
+    /**
+     * 저장이 실패해도(@Version 충돌·DB 잠금) 이 틱의 판정은 메모리 값으로 계속한다 (감사 M-3).
+     * 여기서 던지면 그 종목은 ATR 손절(1차 방어선) 판정 없이 catch로 빠진다. 저장은 재시작 대비일 뿐이고,
+     * 다음 틱이 DB 값을 다시 읽어 또 올리므로 저절로 재시도된다.
+     */
+    private void persistTrailingHigh(Position pos) {
+        try {
+            positionRepository.save(pos);
+        } catch (RuntimeException e) {
+            log.warn("[StopLoss] 최고점 저장 실패 — 이번 틱은 메모리 값 {}로 판정 계속: {} {}",
+                    String.format("%.0f", pos.getTrailingHigh()), pos.getStockCode(), e.getMessage());
+        }
     }
 
     private void sellVia(String reason, String stockCode, Account account,

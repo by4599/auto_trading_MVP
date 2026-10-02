@@ -66,7 +66,11 @@ public class BucketProperties {
         };
     }
 
-    /** 방식2/3은 재료 확보 전까지, A동(TREND)은 ADR-001 개정 승인 전까지 잠금 — 방식1만 기본 활성 */
+    /**
+     * 방식1(VB)만 기본 활성 — 나머지는 설정으로 켠다. A동(TREND)은 ADR-001 개정(2026-08-07 승인)으로
+     * 개시됐고 paper는 2026-10-01 사용자 결정으로 켰다(trend-enabled). 기본값 false는 백테스트·기타
+     * 프로필 보호용이다. VB 신호 자체를 끄는 스위치는 trading.strategy.enabled다(칸 잠금이 아니다).
+     */
     public boolean isBucketActive(StrategyBucket bucket) {
         return switch (bucket) {
             case VB    -> true;

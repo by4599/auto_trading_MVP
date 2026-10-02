@@ -2,6 +2,8 @@ package com.trading.risk;
 
 import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.market.MarketDataService;
 import com.trading.order.KisOrderClient;
 import com.trading.order.OrderEngine;
@@ -18,6 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,6 +47,13 @@ class StopLossMonitorTest {
     private KisProperties kisProperties;
     private StopLossMonitor sut;
 
+    /** 평일 장중(2026-10-01 12:00 KST)으로 고정된 캘린더 — 장 시간 게이트(감사 H-1(c))를 통과시킨다 */
+    static MarketCalendarService inHours() {
+        ZoneId kst = ZoneId.of("Asia/Seoul");
+        Clock fixed = Clock.fixed(LocalDateTime.of(2026, 10, 1, 12, 0).atZone(kst).toInstant(), kst);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+
     @BeforeEach
     void setUp() {
         positionRepository = mock(PositionRepository.class);
@@ -64,7 +76,7 @@ class StopLossMonitorTest {
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
                 new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
-                new com.trading.strategy.ScalpingProperties());
+                new com.trading.strategy.ScalpingProperties(), inHours());
     }
 
     /** 보유 33주 @72,500, 손절선 69,500, 현재가 currentPrice인 상태를 구성 */
@@ -193,7 +205,7 @@ class StopLossMonitorTest {
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
                 new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
-                scalpingProperties);
+                scalpingProperties, inHours());
     }
 
     private Position givenMixPosition(double avgPrice, double currentPrice) {

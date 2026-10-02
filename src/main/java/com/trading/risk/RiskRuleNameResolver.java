@@ -40,6 +40,7 @@ final class RiskRuleNameResolver {
         BY_FRAGMENT.put("타임컷 이후 신규 매수 금지", "PostTimeCutBuyRule");
         BY_FRAGMENT.put("공시 쿨다운",               "DisclosureCooldownRule");
         BY_FRAGMENT.put("진입 시간창 필터",          "EntryTimeWindowRule");
+        BY_FRAGMENT.put("지수 추세 판정 불가",       "IndexTrendDataGateRule");
         BY_FRAGMENT.put("지수 추세 필터",            "IndexTrendRule");
         BY_FRAGMENT.put("지수 레짐 필터",            "IndexRegimeRule");
         BY_FRAGMENT.put("직전 주문 실패로 대기 중",  "OrderFailureCooldownRule");

@@ -33,6 +33,7 @@ class RiskRuleNameResolverTest {
         "공시 쿨다운 — 유상증자 공시(2026-09-01) 후 5일 내 신규 매수 금지         | DisclosureCooldownRule",
         "진입 시간창 필터 — 09:30 이전 신규 매수 금지 (현재 09:05)                | EntryTimeWindowRule",
         "지수 추세 필터 — 지수가 MA120 아래(하락 추세) 신규 매수 금지             | IndexTrendRule",
+        "지수 추세 판정 불가 — KOSPI MA120 판정용 일봉을 아직 받지 못해 신규 매수 보류 (fail-closed) | IndexTrendDataGateRule",
         "지수 레짐 필터 — KOSPI 갭다운일 신규 매수 금지                           | IndexRegimeRule",
         "직전 주문 실패로 대기 중: 005930                                         | OrderFailureCooldownRule",
     })
