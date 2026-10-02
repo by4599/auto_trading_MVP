@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 주문/포지션의 DB 상태를 원자적으로 갱신하는 @Transactional 전담 빈.
@@ -50,6 +52,16 @@ public class FillStateUpdater {
     private final ApplicationEventPublisher eventPublisher;
     private final TradeResultTracker tradeResultTracker;
     private final TradeResultRepository tradeResultRepository;
+
+    /**
+     * 체결가를 몰라 실현손익을 건너뛴 라운드트립의 종목코드 (진행 중인 것만).
+     *
+     * <p>Position 컬럼이 아니라 메모리에 두는 이유: 이건 매매 상태가 아니라 "측정이
+     * 가능했나"의 흔적이고, 라운드트립 경계(전량 청산·재진입)에서 함께 지워진다.
+     * 재시작하면 잊지만 그때 최악은 옛 동작(불완전 합계로 1회 판정)으로 돌아가는 것뿐이라
+     * 스키마를 늘리는 대가보다 싸다고 판단했다.
+     */
+    private final Set<String> pnlGapRoundTrips = ConcurrentHashMap.newKeySet();
 
     public FillStateUpdater(OrderHistoryRepository orderHistoryRepository,
                             PositionRepository positionRepository,
@@ -224,6 +236,57 @@ public class FillStateUpdater {
                 order.getStockCode(), order.getOrderNo(), order.getCancelRequestedAt());
     }
 
+    /**
+     * 취소가 "잔량 없음"으로 거부된 주문을 실제 잔고 기준으로 종결한다.
+     *
+     * 배경: 개장 무렵 체결된 주문을 체결조회(VTTC8001R)가 빈 응답으로 놓치면,
+     * 취소도 "정정/취소할 수량이 없습니다"로 거부돼 주문이 영원히 폴링에 갇히고
+     * DB에 포지션이 안 생긴다(브로커-DB desync). 취소 거부가 곧 "이미 체결됨"의
+     * 확정 신호이므로, 그 종목을 실잔고로 정렬하고 주문을 FILLED로 종결해 폴링을 끊는다.
+     *
+     * 주기 Reconciler의 "자동보정 안 함(코퍼레이트 액션 오인 방지, §5.3)"과 달리,
+     * 이건 KIS의 "취소 불가=체결됨" 확정 신호에 의한 주문 단위 타깃 보정이다.
+     *
+     * @param brokerQty 해당 종목의 실제 브로커 보유 수량(0이면 이미 매도 등으로 정리된 상태)
+     */
+    @Retryable(
+            retryFor = ObjectOptimisticLockingFailureException.class,
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100, multiplier = 2.0)
+    )
+    @Transactional
+    public void reconcileFilledFromBalance(Long orderId, int brokerQty, double brokerAvgPrice) {
+        OrderHistory order = orderHistoryRepository.findById(orderId).orElseThrow();
+
+        OrderStatus current = order.getStatus();
+        if (current != OrderStatus.ACCEPTED && current != OrderStatus.PARTIAL_FILLED) {
+            log.warn("reconcileFilledFromBalance 무시 — 이미 처리된 주문: status={} orderId={}", current, orderId);
+            return;
+        }
+
+        // 1. 종목 포지션을 브로커 실잔고로 정렬
+        Position pos = positionRepository.findByStockCode(order.getStockCode())
+                .orElse(Position.empty(order.getStockCode()));
+        int before = pos.getQuantity();
+        if (brokerQty <= 0) {
+            if (before > 0) positionRepository.delete(pos);
+        } else {
+            pos.reconcileTo(brokerQty, brokerAvgPrice);
+            if (order.getBucket() != null) pos.assignBucketIfAbsent(order.getBucket());
+            positionRepository.save(pos);
+            // 새로 인식된(늘어난) 보유 → 손절 장착. 매도로 줄어든 경우는 제외.
+            if (brokerQty > before) {
+                eventPublisher.publishEvent(new OrderPartialFilledEvent(
+                        order.getSide(), order.getStockCode(), brokerQty, brokerAvgPrice));
+            }
+        }
+
+        // 2. 주문 종결 — 브로커에 잔량 없음(=체결됨). markFilled로 폴링을 끊는다.
+        order.markFilled(order.getQuantity(), brokerAvgPrice);
+        log.warn("[체결 대사] 취소불가(잔량없음)=체결로 판정 — 실잔고 정렬: ordNo={} 종목={} 브로커보유={}주 → 주문 종결(FILLED)",
+                order.getOrderNo(), order.getStockCode(), brokerQty);
+    }
+
     // ── Position 갱신 ─────────────────────────────────────────────────────────
 
     private void updatePosition(OrderHistory order, int newlyFilled, double fillPrice) {
@@ -231,6 +294,10 @@ public class FillStateUpdater {
                 .orElse(Position.empty(order.getStockCode()));
 
         if (order.getSide() == OrderSide.BUY) {
+            if (pos.getQuantity() == 0) {
+                // 새 라운드트립 시작 — 앞 매매의 "체결가 미상" 표시를 물려받지 않는다
+                pnlGapRoundTrips.remove(order.getStockCode());
+            }
             pos.applyBuy(newlyFilled, fillPrice);
             // 지갑 칸 귀속 — 주문의 칸을 물려받는다 (칸 미지정 주문은 null→VB 간주)
             if (order.getBucket() != null) {
@@ -238,17 +305,51 @@ public class FillStateUpdater {
             }
             positionRepository.save(pos);
         } else {
-            // applySell 전에 기록 — 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
-            tradeResultTracker.recordSellFill(
-                    order.getStockCode(), newlyFilled, fillPrice, pos.getAveragePrice());
+            applySellFill(order, pos, newlyFilled, fillPrice);
+        }
+    }
+
+    /**
+     * 매도 체결 반영 — 수량은 언제나 맞추고, 손익은 <b>체결가를 알 때만</b> 기록한다.
+     *
+     * <p>모의 체결조회(VTTC8001R)는 매도에 빈 응답을 주는 결함이 있어(CLAUDE.md 결함 5)
+     * 체결가가 0으로 들어올 수 있다. 0을 그대로 계산하면 실현손익 = -평단가 x 수량, 즉
+     * <b>전액 손실</b>이 남는다(2026-07-30 실측: 5건 전부 손실·합계 -5,014,000원).
+     * 그 가짜 손실은 ConsecutiveLossRule로 흘러가 실제 매매를 1시간 멈출 수 있다.
+     *
+     * <p>모르면 기록하지 않는다 — 체결가를 모르면 이익인지 손실인지도 모르기 때문이다.
+     * 대신 경고 로그로 사람이 알아채게 남긴다.
+     */
+    private void applySellFill(OrderHistory order, Position pos, int newlyFilled, double fillPrice) {
+        if (fillPrice > 0) {
+            // 평단가는 매도 반영 전 값이어야 실현손익이 맞다 (F-5)
+            double realized = (fillPrice - pos.getAveragePrice()) * newlyFilled;
             // 실현손익 영속화 (실적 대시보드) — 라이브 경로 전용, 같은 트랜잭션에서 커밋.
             // 칸 귀속은 보유 포지션의 칸이 원천 (매도 신호가 아니라 "누구 돈으로 샀나" 기준)
             tradeResultRepository.save(TradeResult.live(
                     order.getStockCode(), newlyFilled, pos.getAveragePrice(), fillPrice,
                     pos.getBucket()));
-            pos.applySell(newlyFilled);
-            if (pos.getQuantity() == 0) positionRepository.delete(pos);
-            else                        positionRepository.save(pos);
+            // 연속손실은 조각이 아니라 매매 1회 단위 — 전량 청산될 때 합계로 한 번만 판정한다
+            pos.accrueRealized(realized);
+        } else {
+            pnlGapRoundTrips.add(order.getStockCode());
+            log.warn("[실현손익] 체결가 미상 — 실현손익 기록 보류 (수량만 반영): 종목={} 수량={}주 ordNo={}",
+                    order.getStockCode(), newlyFilled, order.getOrderNo());
+        }
+
+        pos.applySell(newlyFilled);
+        if (pos.getQuantity() == 0) {
+            // 한 조각이라도 손익을 건너뛴 매매는 합계가 불완전하다 — 그 숫자로 연속손실을
+            // 판정하면 근거 없이 매매를 멈추거나(손실 오판) 실제 손실 스트릭을 지운다(수익 오판).
+            if (pnlGapRoundTrips.remove(order.getStockCode())) {
+                log.warn("[실현손익] 체결가 미상 조각이 섞인 매매 — 연속손실 판정 생략: 종목={}",
+                        order.getStockCode());
+            } else {
+                tradeResultTracker.recordRoundTrip(order.getStockCode(), pos.getRealizedPnlAccum());
+            }
+            positionRepository.delete(pos);
+        } else {
+            positionRepository.save(pos);
         }
     }
 }

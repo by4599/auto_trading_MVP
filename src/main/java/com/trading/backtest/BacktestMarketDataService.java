@@ -32,8 +32,16 @@ public class BacktestMarketDataService implements MarketDataService {
 
     private static final Logger log = LoggerFactory.getLogger(BacktestMarketDataService.class);
 
-    /** ATR(14) 워밍업용 — 재생 시작일 이전 완결 봉 여유 */
-    static final int WARMUP_CALENDAR_DAYS = 45;
+    /**
+     * 재생 시작일 이전 완결 봉 여유 — ATR(14)은 며칠이면 충분하지만, 방식2
+     * MA돌파(MovingAverageBreakoutStrategy)의 120일 이동평균 워밍업이 지배적이다.
+     * MA120 ≈ 거래일 120일 ≈ 달력일 170일 안팎이라, 여유 없이 45일만 두면
+     * Walk-Forward 검증 구간(3개월)이 시작 전부터 끝까지 MA120을 한 번도 채우지
+     * 못해 방식2 신호가 전혀 나지 않는 결함이 있었다(BACKTEST-DESIGN §13). 260일로
+     * 넉넉히 잡아 거래일 180일 안팎을 확보한다. CandleBackfillService.rangeFrom()도
+     * 이 상수를 그대로 참조하므로 백필 범위도 함께 늘어난다.
+     */
+    static final int WARMUP_CALENDAR_DAYS = 260;
 
     private final CandleHistoryRepository repository;
 

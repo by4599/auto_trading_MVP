@@ -18,15 +18,36 @@ public final class BacktestCosts {
 
     private BacktestCosts() {}
 
+    /**
+     * 지정 슬리피지 기준 왕복 총비용 — cost-lab(§14.1 비용 상향 민감도)이 쓴다.
+     * 수수료·제세는 법정 확정값이라 고정, 불확실한 슬리피지만 인자로 받는다.
+     */
+    public static double roundTripCost(double slippageRate) {
+        return slippageRate * 2 + COMMISSION_RATE * 2 + SELL_TAX_RATE;
+    }
+
     /** 매수 체결가 = 시장가 × (1 + 슬리피지) */
     public static double buyFillPrice(double rawPrice) {
-        return rawPrice * (1 + SLIPPAGE_RATE);
+        return buyFillPrice(rawPrice, SLIPPAGE_RATE);
+    }
+
+    /** 매수 체결가 (슬리피지 지정) — 비용 상향 민감도 실험용 */
+    public static double buyFillPrice(double rawPrice, double slippageRate) {
+        return rawPrice * (1 + slippageRate);
     }
 
     /** 매도 체결가 = 시장가 × (1 − 슬리피지) */
     public static double sellFillPrice(double rawPrice) {
-        return rawPrice * (1 - SLIPPAGE_RATE);
+        return sellFillPrice(rawPrice, SLIPPAGE_RATE);
     }
+
+    /** 매도 체결가 (슬리피지 지정) — 비용 상향 민감도 실험용 */
+    public static double sellFillPrice(double rawPrice, double slippageRate) {
+        return rawPrice * (1 - slippageRate);
+    }
+
+    // 아래 두 메서드는 슬리피지를 쓰지 않는다(슬리피지는 이미 체결가에 반영됨).
+    // 수수료·제세는 법정 확정값이므로 비용 상향 실험에서도 불변 — 오버로드가 없는 이유다.
 
     /** 매수 현금 유출 = 체결대금 + 수수료 */
     public static double buyCashOut(double fillPrice, int quantity) {

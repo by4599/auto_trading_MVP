@@ -29,19 +29,40 @@ public final class Account {
     private final double dailyPnlPercent;        // DailyLossRule 사용
     private final int    consecutiveLossCount;    // ConsecutiveLossRule 사용
     private final List<PositionSnapshot> positions;
+    /**
+     * 이 스냅샷이 KIS 실잔고로 갓 조회된 신선한 값인지 여부.
+     * 잔고 API 실패로 낡은 캐시/DB 폴백을 쓰면 false — 청산처럼 신선 데이터가
+     * 필수인 판정(RiskMonitor)은 false일 때 건너뛴다(낡은 값 오판 방지).
+     */
+    private final boolean fresh;
 
     public Account(double totalAssetValue,
                    double dailyPnlPercent,
                    int    consecutiveLossCount,
                    List<PositionSnapshot> positions) {
+        this(totalAssetValue, dailyPnlPercent, consecutiveLossCount, positions, true);
+    }
+
+    private Account(double totalAssetValue,
+                    double dailyPnlPercent,
+                    int    consecutiveLossCount,
+                    List<PositionSnapshot> positions,
+                    boolean fresh) {
         this.totalAssetValue      = totalAssetValue;
         this.dailyPnlPercent      = dailyPnlPercent;
         this.consecutiveLossCount = consecutiveLossCount;
         this.positions            = List.copyOf(positions);
+        this.fresh                = fresh;
     }
 
-    public double getTotalAssetValue()             { return totalAssetValue; }
-    public double getDailyPnlPercent()            { return dailyPnlPercent; }
+    /** 낡은(폴백) 스냅샷 표시본 — 신선 데이터가 필요한 판정에서 걸러내기 위함 */
+    public Account asStale() {
+        return new Account(totalAssetValue, dailyPnlPercent, consecutiveLossCount, positions, false);
+    }
+
+    public double  getTotalAssetValue()            { return totalAssetValue; }
+    public double  getDailyPnlPercent()            { return dailyPnlPercent; }
+    public boolean isFresh()                       { return fresh; }
     public int    getConsecutiveLossCount()        { return consecutiveLossCount; }
     public int    getPositionCount()               { return positions.size(); }
     public List<PositionSnapshot> getPositions()  { return positions; }

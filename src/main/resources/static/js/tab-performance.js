@@ -1,254 +1,219 @@
-// tab-performance.js — 실적 탭: 기간별 누적 성과 (요약 스탯 + SVG 누적 곡선 + 버킷 테이블)
+// tab-performance.js — 실적 탭
+//
+// 위쪽(정본): /api/performance/account — 계좌 잔고 원장으로 계산한 진짜 성적.
+// 아래쪽(참고, 접힘): /api/performance — 거래 기록으로 계산한 옛 숫자. 모의투자가 판 값을
+//   0원으로 주는 결함 때문에 손익이 부풀려져 있다. 지우지 않고 남겨 둔 이유는
+//   "왜 두 숫자가 다른가"를 사용자가 직접 볼 수 있어야 하기 때문이다(응답의 source 문구 그대로 표시).
+
+const ACCOUNT_DAYS = 365;
+
+// ── 계좌 기준 성적 (정본) ─────────────────────────────────────────────────
+
+async function loadAccountPerf() {
+  const el = document.getElementById('perfAccountBody');
+  if (!el) return;
+  try {
+    renderAccountPerf(el, await get('/api/performance/account?days=' + ACCOUNT_DAYS));
+  } catch {
+    showFetchError(el, '계좌 성적을 불러오지 못했습니다 (잠시 뒤 다시 시도합니다)');
+  }
+}
+
+function renderAccountPerf(el, d) {
+  el.textContent = '';
+
+  if (d.currentEquity == null) {
+    el.appendChild(emptyState('아직 계좌 기록이 없습니다 — 하루가 마감되면 쌓이기 시작합니다'));
+    el.dataset.loaded = '1';
+    return;
+  }
+
+  el.appendChild(accountStats(d));
+  el.appendChild(subHeading('내 돈이 어떻게 움직였나 (총자산)'));
+  el.appendChild(equityChart(d));
+  el.appendChild(subHeading('하루에 번 돈 · 잃은 돈 (하루를 마감한 날만)'));
+  el.appendChild(dailyBars(d.daily));
+  el.appendChild(subHeading('날짜별 기록'));
+  el.appendChild(dailyTable(d.daily));
+
+  el.dataset.loaded = '1';
+}
+
+function accountStats(d) {
+  return statGrid([
+    {
+      label: '번 돈 (처음 넣은 돈과 지금의 차이)',
+      value: SIGN(d.cumulativePnl) + KRW(d.cumulativePnl),
+      cls:   priceClass(d.cumulativePnl),
+      note:  '처음 ' + KRW(d.initialEquity),
+    },
+    {
+      label: '수익률 (처음 대비 몇 %)',
+      value: PCT(d.cumulativeReturnPercent),
+      cls:   priceClass(d.cumulativeReturnPercent),
+    },
+    {
+      // 자동 멈춤은 "지금" 낙폭으로 판단한다 — 한도 안내는 이 칸에 붙인다
+      label: '지금 낙폭 (가장 많았을 때보다 얼마나 줄었나)',
+      value: PCT(d.currentDrawdownPercent),
+      cls:   priceClass(d.currentDrawdownPercent),
+      note:  (d.peakEquity != null ? '가장 많았을 때 ' + KRW(d.peakEquity) : '') +
+             (d.mddLimitPercent != null ? ' · ' + d.mddLimitPercent + '%를 넘으면 자동으로 멈춥니다' : ''),
+    },
+    {
+      label: '가장 컸던 낙폭 (제일 많이 줄었던 순간)',
+      value: PCT(d.maxDrawdownPercent),
+      cls:   priceClass(d.maxDrawdownPercent),
+      note:  '이 기간 중 제일 깊었던 순간입니다 (지금은 회복했을 수도 있습니다)',
+    },
+    {
+      label: '지금 총자산 (주식 + 현금)',
+      value: KRW(d.currentEquity),
+      cls:   'flat',
+      note:  '마감을 찍은 날 ' + d.closedDays + '일',
+    },
+  ]);
+}
+
+/** 총자산 곡선 — y축은 값 범위에 맞춘다(0부터 그리면 선이 납작해진다) */
+function equityChart(d) {
+  const initial = d.initialEquity ?? 0;
+  return buildLineChart({
+    points: (d.series || []).map(p => {
+      const diff = p.equity - initial;
+      return {
+        label: shortDate(p.date),
+        value: p.equity,
+        tip1:  p.date + '  총자산 ' + KRW(p.equity),
+        tip2:  '처음보다 ' + SIGN(diff) + KRW(diff),
+      };
+    }),
+    formatY:   v => Math.round(v / 10000).toLocaleString('ko-KR') + '만',
+    emptyText: '총자산 기록이 아직 없습니다',
+  });
+}
+
+/**
+ * 일별 순손익 막대 — 마감을 찍은 날만 그린다.
+ * 마감 기록이 없는 날(주말·앱이 꺼져 있던 날)은 netPnl이 null이다. 0으로 그리면
+ * "그날은 본전이었다"는 거짓말이 되므로 아예 뺀다.
+ */
+function dailyBars(daily) {
+  const closed = (daily || []).filter(r => r.closed && r.netPnl != null);
+  const box = document.createElement('div');
+
+  box.appendChild(buildBarChart({
+    bars: [...closed].reverse().map(r => ({          // 원본은 최신 먼저 → 그래프는 오래된 날부터
+      label: shortDate(r.date),
+      value: r.netPnl,
+      tip1:  r.date + '  ' + SIGN(r.netPnl) + KRW(r.netPnl),
+      tip2:  '마감 총자산 ' + KRW(r.endEquity) + ' · ' + PCT(r.netPnlPercent),
+    })),
+    emptyText: '하루를 마감한 기록이 아직 없습니다',
+  }));
+
+  const note = document.createElement('div');
+  note.className = 'stat-note';
+  note.textContent = '막대가 안 보이면 그날 번 돈도 잃은 돈도 0원이라는 뜻입니다. ' +
+    '마감 기록이 없는 날(주말 등)은 그래프에서 뺐습니다.';
+  box.appendChild(note);
+  return box;
+}
+
+function dailyTable(daily) {
+  const rows = (daily || []).map(r => r.closed
+    ? [
+        r.date, '마감함',
+        KRW(r.startEquity), KRW(r.endEquity),
+        { text: SIGN(r.netPnl) + KRW(r.netPnl), cls: priceClass(r.netPnl) },
+        { text: PCT(r.netPnlPercent),           cls: priceClass(r.netPnlPercent) },
+      ]
+    : [
+        r.date, { text: '마감 기록 없음', cls: 'flat' },
+        KRW(r.startEquity), { text: '—', cls: 'flat' },
+        { text: '마감 기록 없음', cls: 'flat' }, { text: '—', cls: 'flat' },
+      ]);
+
+  if (rows.length === 0) return emptyState('날짜별 기록이 없습니다');
+  return buildTable(['날짜', '마감', '시작 총자산', '끝 총자산', '그날 번 돈', '그날 %'], rows);
+}
+
+// ── (참고) 거래 기록 기준 옛 숫자 — 접힌 칸 ───────────────────────────────
 
 let perfPeriod = 'daily';
 
-async function loadPerformance() {
-  const el = document.getElementById('perfBody');
+async function loadLegacyPerf() {
+  const el = document.getElementById('perfLegacyBody');
   if (!el) return;
   try {
-    const data = await get('/api/performance?period=' + perfPeriod + '&days=90');
-    renderPerformance(el, data);
-  } catch { /* 유지 */ }
+    renderLegacyPerf(el, await get('/api/performance?period=' + perfPeriod + '&days=90'));
+  } catch {
+    showFetchError(el, '옛 실적을 불러오지 못했습니다');
+  }
 }
 
 function setPerfPeriod(p) {
   perfPeriod = p;
-  loadPerformance();
+  loadLegacyPerf();
 }
 
-function renderPerformance(el, data) {
+function renderLegacyPerf(el, data) {
   el.textContent = '';
-  const s = data.summary;
+  el.dataset.loaded = '1';
 
-  // ── 기간 토글 ──
-  const toggle = document.createElement('div');
-  toggle.style.cssText = 'display:flex;gap:6px;margin-bottom:14px';
-  [['daily', '일별'], ['weekly', '주별'], ['monthly', '월별']].forEach(([key, label]) => {
-    const btn = document.createElement('button');
-    btn.className = 'wl-del';
-    btn.textContent = label;
-    if (key === perfPeriod) {
-      btn.style.color = 'var(--blue)';
-      btn.style.borderColor = 'var(--blue)';
-      btn.style.fontWeight = '700';
-    }
-    btn.onclick = () => setPerfPeriod(key);
-    toggle.appendChild(btn);
-  });
-  el.appendChild(toggle);
+  el.appendChild(noticeBox(
+    '⚠ 아래 숫자는 믿지 마세요. 위쪽 계좌 숫자가 정답입니다.\n' + (data.source || '')));
+  el.appendChild(chipRow(
+    [['daily', '일별'], ['weekly', '주별'], ['monthly', '월별']], perfPeriod, setPerfPeriod));
 
-  // ── 데이터 없음: 백필 안내 ──
   if (!data.buckets || data.buckets.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = '조회 기간(90일) 내 실현손익 기록이 없습니다.';
-    el.appendChild(empty);
-
-    const hint = document.createElement('div');
-    hint.style.cssText = 'text-align:center;padding-bottom:8px';
-    const btn = document.createElement('button');
-    btn.className = 'wl-btn';
-    btn.textContent = '과거 체결 내역에서 실적 생성 (백필)';
-    btn.onclick = runBackfill;
-    hint.appendChild(btn);
-    const note = document.createElement('div');
-    note.className = 'empty-state';
-    note.style.paddingTop = '8px';
-    note.textContent = '매도 체결이 발생하면 자동으로 기록됩니다. 과거 기록 복원은 위 버튼 1회면 충분합니다.';
-    hint.appendChild(note);
-    el.appendChild(hint);
+    el.appendChild(emptyState('조회 기간(90일) 안에 거래 기록이 없습니다.'));
+    el.appendChild(backfillBox());
     return;
   }
 
-  // ── 요약 스탯 4칸 ──
-  const stats = document.createElement('div');
-  stats.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px';
-  [
-    ['누적 손익', SIGN(s.totalPnl) + KRW(s.totalPnl), priceClass(s.totalPnl)],
-    ['승률', s.winRate != null ? s.winRate + '%' : '—', 'flat'],
-    ['평균 이익', s.avgWin ? '+' + KRW(s.avgWin) : '—', 'up'],
-    ['평균 손실', s.avgLoss ? KRW(s.avgLoss) : '—', 'down'],
-  ].forEach(([label, value, cls]) => {
-    const box = document.createElement('div');
-    box.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px';
-    const l = document.createElement('div');
-    l.className = 'card-label';
-    l.style.marginBottom = '4px';
-    l.textContent = label;
-    const v = document.createElement('div');
-    v.className = cls;
-    v.style.cssText = 'font-size:1.05rem;font-weight:700';
-    v.textContent = value;
-    box.append(l, v);
-    stats.appendChild(box);
-  });
-  el.appendChild(stats);
+  const s = data.summary;
+  el.appendChild(statGrid([
+    { label: '누적 손익(거래 기록)', value: SIGN(s.totalPnl) + KRW(s.totalPnl), cls: priceClass(s.totalPnl) },
+    { label: '승률',      value: s.winRate != null ? s.winRate + '%' : '—', cls: 'flat' },
+    { label: '평균 이익', value: s.avgWin  ? '+' + KRW(s.avgWin)  : '—',    cls: 'up' },
+    { label: '평균 손실', value: s.avgLoss ? KRW(s.avgLoss)       : '—',    cls: 'down' },
+  ]));
 
-  // ── 누적 손익 곡선 (인라인 SVG) ──
-  el.appendChild(buildCumPnlChart(data.buckets));
+  el.appendChild(buildLineChart({
+    points: data.buckets.map(b => ({
+      label: b.label,
+      value: b.cumPnl,
+      tip1:  b.label + '  누적 ' + SIGN(b.cumPnl) + KRW(b.cumPnl),
+      tip2:  '기간 손익 ' + SIGN(b.pnl) + KRW(b.pnl) + ' · ' + b.trades + '건',
+    })),
+    includeZero: true,
+  }));
 
-  // ── 상세 요약 라인 ──
   const detail = document.createElement('div');
   detail.className = 'pnl-sub';
-  detail.style.marginBottom = '12px';
-  const parts = [`거래 ${s.tradeCount}건 (승 ${s.winCount} / 패 ${s.lossCount})`];
-  if (s.bestDay)  parts.push(`최고일 ${s.bestDay.date} ${SIGN(s.bestDay.pnl)}${KRW(s.bestDay.pnl)}`);
-  if (s.worstDay) parts.push(`최악일 ${s.worstDay.date} ${SIGN(s.worstDay.pnl)}${KRW(s.worstDay.pnl)}`);
-  detail.textContent = parts.join(' · ');
+  detail.textContent = `거래 ${s.tradeCount}건 (승 ${s.winCount} / 패 ${s.lossCount})`;
   el.appendChild(detail);
 
-  // ── 버킷 테이블 ──
-  const table = document.createElement('table');
-  table.className = 'orders-table';
-  const thead = document.createElement('thead');
-  const hrow = document.createElement('tr');
-  ['기간', '손익', '누적', '거래', '승'].forEach(h => {
-    const th = document.createElement('th');
-    th.textContent = h;
-    hrow.appendChild(th);
-  });
-  thead.appendChild(hrow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  [...data.buckets].reverse().forEach(b => {   // 최근이 위로
-    const tr = document.createElement('tr');
-    const cells = [
-      [b.label, 'flat'],
-      [SIGN(b.pnl) + KRW(b.pnl), priceClass(b.pnl)],
-      [SIGN(b.cumPnl) + KRW(b.cumPnl), priceClass(b.cumPnl)],
-      [b.trades + '건', ''],
-      [b.wins + '건', ''],
-    ];
-    cells.forEach(([v, cls]) => {
-      const td = document.createElement('td');
-      if (cls) td.className = cls;
-      td.textContent = v;
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  el.appendChild(table);
+  el.appendChild(buildTable(['기간', '손익', '누적', '거래', '승'],
+    [...data.buckets].reverse().map(b => [
+      b.label,
+      { text: SIGN(b.pnl) + KRW(b.pnl),       cls: priceClass(b.pnl) },
+      { text: SIGN(b.cumPnl) + KRW(b.cumPnl), cls: priceClass(b.cumPnl) },
+      b.trades + '건',
+      b.wins + '건',
+    ])));
 }
 
-// ── SVG 누적 손익 곡선 (외부 라이브러리 없음) ─────────────────────────────
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-function svgEl(tag, attrs) {
-  const e = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  return e;
-}
-
-function buildCumPnlChart(buckets) {
-  const W = 720, H = 240, PAD_L = 64, PAD_R = 14, PAD_T = 14, PAD_B = 26;
-  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
-
-  const values = [0, ...buckets.map(b => b.cumPnl)];   // 시작점 0
-  const vMin = Math.min(...values), vMax = Math.max(...values);
-  const range = (vMax - vMin) || 1;
-
-  const x = i => PAD_L + (values.length === 1 ? 0 : (i / (values.length - 1)) * plotW);
-  const y = v => PAD_T + (1 - (v - vMin) / range) * plotH;
-
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'overflow-x:auto;margin-bottom:14px';
-  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%' });
-  svg.style.minWidth = '480px';
-
-  // y축 그리드 + 라벨 (4단계)
-  for (let i = 0; i <= 3; i++) {
-    const v = vMin + (range * i) / 3;
-    const yy = y(v);
-    svg.appendChild(svgEl('line', {
-      x1: PAD_L, y1: yy, x2: W - PAD_R, y2: yy,
-      stroke: '#21262d', 'stroke-width': 1,
-    }));
-    const label = svgEl('text', {
-      x: PAD_L - 8, y: yy + 4, 'text-anchor': 'end',
-      fill: '#8b949e', 'font-size': 11,
-    });
-    label.textContent = Math.round(v).toLocaleString('ko-KR');
-    svg.appendChild(label);
-  }
-
-  // 0 기준선 (범위 안에 있을 때만, 점선)
-  if (vMin < 0 && vMax > 0) {
-    svg.appendChild(svgEl('line', {
-      x1: PAD_L, y1: y(0), x2: W - PAD_R, y2: y(0),
-      stroke: '#6e7681', 'stroke-width': 1, 'stroke-dasharray': '4 3',
-    }));
-  }
-
-  // x축 라벨: 처음/중간/끝
-  const labelIdx = [...new Set([0, Math.floor((buckets.length - 1) / 2), buckets.length - 1])];
-  labelIdx.forEach(i => {
-    if (i < 0) return;
-    const t = svgEl('text', {
-      x: x(i + 1), y: H - 8, 'text-anchor': 'middle',
-      fill: '#8b949e', 'font-size': 11,
-    });
-    t.textContent = buckets[i].label;
-    svg.appendChild(t);
-  });
-
-  // 누적 곡선 — 최종 손익 부호로 색 결정 (한국 관례: 이익 빨강 / 손실 파랑)
-  const finalPnl = values[values.length - 1];
-  const color = finalPnl >= 0 ? '#f78166' : '#58a6ff';
-  const points = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-  svg.appendChild(svgEl('polyline', {
-    points, fill: 'none', stroke: color, 'stroke-width': 2,
-    'stroke-linejoin': 'round', 'stroke-linecap': 'round',
-  }));
-
-  // 마지막 점 강조
-  svg.appendChild(svgEl('circle', {
-    cx: x(values.length - 1), cy: y(finalPnl), r: 3.5, fill: color,
-  }));
-
-  // 마우스오버 툴팁 (가장 가까운 버킷으로 스냅)
-  const guide = svgEl('line', {
-    x1: 0, y1: PAD_T, x2: 0, y2: H - PAD_B,
-    stroke: '#8b949e', 'stroke-width': 1, 'stroke-dasharray': '3 3', visibility: 'hidden',
-  });
-  svg.appendChild(guide);
-  const tipBg = svgEl('rect', {
-    x: 0, y: 0, rx: 6, width: 170, height: 40,
-    fill: '#161b22', stroke: '#30363d', visibility: 'hidden',
-  });
-  const tip1 = svgEl('text', { x: 0, y: 0, fill: '#e6edf3', 'font-size': 11, visibility: 'hidden' });
-  const tip2 = svgEl('text', { x: 0, y: 0, fill: '#8b949e', 'font-size': 11, visibility: 'hidden' });
-  svg.append(tipBg, tip1, tip2);
-
-  svg.addEventListener('mousemove', ev => {
-    const rect = svg.getBoundingClientRect();
-    const mx = (ev.clientX - rect.left) * (W / rect.width);
-    let best = 1, bestDist = Infinity;
-    for (let i = 1; i < values.length; i++) {
-      const d = Math.abs(x(i) - mx);
-      if (d < bestDist) { bestDist = d; best = i; }
-    }
-    const b = buckets[best - 1];
-    const gx = x(best);
-    guide.setAttribute('x1', gx); guide.setAttribute('x2', gx);
-    guide.setAttribute('visibility', 'visible');
-
-    const tx = Math.min(gx + 10, W - 180);
-    tipBg.setAttribute('x', tx); tipBg.setAttribute('y', PAD_T + 4);
-    tip1.setAttribute('x', tx + 10); tip1.setAttribute('y', PAD_T + 20);
-    tip2.setAttribute('x', tx + 10); tip2.setAttribute('y', PAD_T + 35);
-    tip1.textContent = b.label + '  누적 ' + SIGN(b.cumPnl) + b.cumPnl.toLocaleString('ko-KR') + '원';
-    tip2.textContent = '기간 손익 ' + SIGN(b.pnl) + b.pnl.toLocaleString('ko-KR') + '원 · ' + b.trades + '건';
-    [tipBg, tip1, tip2].forEach(e => e.setAttribute('visibility', 'visible'));
-  });
-  svg.addEventListener('mouseleave', () => {
-    [guide, tipBg, tip1, tip2].forEach(e => e.setAttribute('visibility', 'hidden'));
-  });
-
-  wrap.appendChild(svg);
-  return wrap;
+function backfillBox() {
+  const box = document.createElement('div');
+  box.style.textAlign = 'center';
+  const btn = document.createElement('button');
+  btn.className = 'wl-btn';
+  btn.textContent = '과거 체결 내역에서 옛 실적 다시 만들기 (백필)';
+  btn.onclick = runBackfill;
+  box.appendChild(btn);
+  return box;
 }
 
 async function runBackfill() {
@@ -258,10 +223,11 @@ async function runBackfill() {
     showToast(`백필 완료: ${data.created}건 생성` + (warn ? ` (경고 ${warn}건 — 콘솔 확인)` : ''),
       warn ? 'err' : 'ok');
     if (warn) console.warn('백필 경고:', data.warnings);
-    await loadPerformance();
+    await loadLegacyPerf();
   } catch (e) {
     showToast('백필 실패: ' + e.message, 'err');
   }
 }
 
-Poll.register('perf', loadPerformance, 60_000);
+Poll.register('perf', loadAccountPerf, 60_000);
+Poll.register('perf', loadLegacyPerf,  0);      // 참고용이라 탭에 들어올 때 1회만

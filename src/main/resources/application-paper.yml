@@ -8,6 +8,10 @@ kis:
   appkey: ${KIS_APPKEY}
   secretkey: ${KIS_SECRETKEY}
   account-no: ${KIS_ACCOUNT_NO}   # 예) 50000000-01
+  # KIS 공지 "API 호출 유량 안내"(2026.04.20 기준, 2026-08-04 확인): 모의투자 1건/초.
+  # 계좌 단위 제한이라 매매·잔고·체결·대시보드 호출을 합쳐 이 한도를 넘으면 안 된다.
+  # 실전 전환 시 18 (기존 20에서 하향됨).
+  rate-limit-per-sec: 1
 
 telegram:
   bot-token: ${TELEGRAM_BOT_TOKEN:}   # 비워두면 알림 스킵 (개발 환경)
@@ -19,9 +23,21 @@ dart:
 heartbeat:
   url: ${HEARTBEAT_URL:}   # 비워두면 하트비트 스킵 — OPERATIONS §2, healthchecks.io 등 무료 서비스의 ping URL
 
+# 운영 상태 거울 (com.trading.mirror) — 밖에서 폰으로 상태를 보기 위한 읽기 전용 복사본.
+# 매매·기록의 원본은 그대로 로컬 H2다. 전송이 실패해도 매매는 영향받지 않는다.
+# key는 서버 전용 secret key(sb_secret_...)를 환경변수로만 넣는다 —
+# 공개용 publishable key로는 RLS가 켜진 테이블에 쓸 수 없다. 절대 이 파일에 값을 적지 말 것.
+supabase:
+  url: ${SUPABASE_URL:}        # 비워두면 미러 스킵 (예: https://xxxx.supabase.co)
+  key: ${SUPABASE_KEY:}        # 비워두면 미러 스킵
+  table: trading_mirror
+  snapshot-id: paper           # 같은 행을 계속 덮어쓴다 — 히스토리가 아니라 "지금 상태" 한 줄
+  interval-ms: 300000          # 5분. 거래일 09:00~15:30에만 전송한다
+
 # §3.3 A/B 채택 필터 (REPORT-20260713-0735) — 조합이 검증 구간 PF 0.66→0.81,
 # MDD 49.2→27.9%로 동반 우위. 전략 자체는 여전히 불합격(PF<1)이므로 이 필터는
 # "파이프라인 검증용 모의투자의 출혈 축소"이지 실전 승격 근거가 아니다.
+# (2026-10-01: 아래 전역 트레일링은 B동 몫이다. A동(TREND)은 bucket-params의 자기 값을 쓴다.)
 trading:
   filters:
     trailing-stop:
@@ -30,27 +46,69 @@ trading:
     disclosure-cooldown:
       enabled: true
       cooldown-days: 5
+    # 지수 추세 필터 (BACKTEST-DESIGN §14.4·§15.7) — KOSPI 전일 종가가 MA120 아래면 신규 매수 금지.
+    # A동 검증 설정의 핵심 부품(약세장 MDD 33.5%→13.3%). ma-period 코드 기본값은 200이다 — 반드시 120.
+    # 데이터: KisIndexRegimeSource(거래일 하루 1회 KOSPI 일봉). 한 번도 못 받았으면 매수 보류
+    # (IndexTrendDataGateRule, fail-closed).
+    index-trend:
+      enabled: true
+      ma-period: 120
 
-  # 지갑 칸 실험 (2026-07-19 설계) — 방식별 1,000만원 한도로 성적 분리.
-  # paper 전용: backtest 프로필에서는 켜지 않는다 (B-3 결정성 보존).
-  # 2026-07-20: 방식2·3을 이평선·스캘핑으로 교체하며 사용자 판단으로 검증 없이 활성화
-  # (BACKTEST-DESIGN §12 — 원래 EVENT/MIX 재료는 CANDIDATE 0건으로 폐기됨).
+  # ── 2026-10-01 A동(Sleeve A) 전환 — 사용자 결정 (ADR-001 2026-08-07 개정: A동 개시·자금 40%) ──
+  # 검증 설정 = BACKTEST-DESIGN §15.7 D0: 돈치안(20/120) + P3 출구 + SZ2(0.25R·동시5) + 지수 MA120.
+  # 당일 청산 3방식(B동)은 전부 백테스트 불합격이라 끈다 — 계좌 원장(daily_equity)으로 A동만 재기 위해.
+  # 동시 5종목은 전역 최대 보유 종목 수(risk.maxPositionCount 기본 5)가 맡는다.
+  strategy:
+    enabled: false            # 방식1 VB(변동성 돌파) 끔 — BACKTEST-DESIGN §7·§13 불합격
+  ma-breakout:
+    enabled: false            # 방식2 이평 정배열 돌파(EVENT 칸) 끔 — §13 불합격
+  scalping:
+    enabled: false            # 방식3 눌림목 스캘핑(MIX 칸) 끔 — §13 불합격 (아래 값은 재가동 대비 보존)
+    window-size: 10
+    pullback-pct: 0.005
+    rebound-pct: 0.003
+    take-profit-pct: 0.008
+  donchian:
+    enabled: true             # A동 진입 — 직전 20일 고가 돌파 + 종가 > MA120
+    lookback: 20
+    trend-ma-period: 120
+
+  # 지갑 칸 (2026-07-19 설계) — paper 전용: backtest 프로필에서는 켜지 않는다 (B-3 결정성 보존).
+  # A동 배분 400만원 = ADR 40% x 초기 원금 1,000만원. 백테스트는 계좌 전체(1,000만원, 복리)에 0.25R였으므로
+  # 여기서는 건당 위험(1R = 400만원 x 0.25% = 1만원)이 백테스트 출발점의 40%다 — 성적 비교 시 분모가 다르다.
+  # B동 칸(vb/event/mix-allocation)은 신호를 끈 채 값만 남긴다(재가동 시 ADR의 B동 30% 한도부터 맞출 것).
   bucket:
     enabled: true
     experiment-start: 2026-07-20
     vb-allocation: 10000000
     event-allocation: 10000000
     mix-allocation: 10000000
-    event-enabled: true
-    mix-enabled: true
+    event-enabled: false
+    mix-enabled: false
+    trend-enabled: true
+    trend-allocation: 4000000
 
-  # 스캘핑(방식3) 파라미터 — 검증 없이 가동, 사용자 판단(2026-07-20)
-  scalping:
-    enabled: true
-    window-size: 10
-    pullback-pct: 0.005
-    rebound-pct: 0.003
-    take-profit-pct: 0.008
+  # A동(TREND) 칸별 사이징·출구 — BACKTEST-DESIGN §15.7 D0 / §14 P3 그대로.
+  bucket-params:
+    overrides:
+      TREND:
+        risk-fraction-per-trade: 0.0025   # SZ2 0.25R
+        atr-stop-multiplier: 1.0          # P3 ATR 손절 1.0배
+        trailing-enabled: true
+        trailing-arm-profit-pct: 0.01     # +1% 도달 후 트레일 무장
+        trailing-trail-pct: 0.03          # 무장 후 고점 대비 3% 하락 시 청산
+        multi-day-hold: true              # 15:15 타임컷 제외 (이월)
+        max-hold-days: 20                 # 20거래일째 15:17 종가 정리 (MaxHoldScheduler)
+
+  # 예약 청산 리허설 (OPERATIONS §7) — 사람이 그 시각에 버튼을 못 눌러도 훈련이 진행되게 한다.
+  # 기본 꺼짐. 켤 때는 date를 콕 집는다 — 상시 반복은 매매 자체를 막는다(리허설은 전량 매도 후 중지).
+  # at에 앱이 꺼져 있었어도 deadline까지는 다시 시도한다. deadline은 타임컷(15:15)보다 앞에 둔다.
+  drill:
+    enabled: false
+    date: ""          # 예: 2026-08-20
+    at: "10:00"
+    deadline: "14:00"
+    buy-if-flat: true # 보유가 없으면 005930 10주를 먼저 사서 청산 대상을 만든다
 
 # H2 파일 모드: 서버 재기동 시 ACCEPTED 주문 상태가 소멸하지 않도록 영속화.
 # 재기동 후 FillPoller가 기존 ACCEPTED 주문을 그대로 폴링 재개한다.
@@ -65,3 +123,16 @@ spring:
     hibernate:
       ddl-auto: update      # 재기동 시 스키마를 삭제하지 않고 변경분만 적용
     show-sql: false
+
+# 파일 로그 — 콘솔에만 찍으면 창이 닫히거나 PC가 재시작될 때 그날의 동작 근거가
+# 통째로 사라진다 (2026-08-27 사고 때 연속 가동일이 왜 1로 찍혔는지 끝내 못 밝혔다).
+# logs/ 는 .gitignore 처리되어 있다. paper 전용 — 백테스트 결정성·테스트 속도에 영향 없음.
+logging:
+  file:
+    name: logs/paper.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/paper-%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 20MB
+      max-history: 60
+      total-size-cap: 500MB

@@ -18,6 +18,11 @@ class BacktestMetricsTest {
         return new TradeRecorder.ClosedTrade("005930", D, D, 1, cost, proceeds, "TimeCut-1515");
     }
 
+    private static TradeRecorder.ClosedTrade trade(LocalDate entry, LocalDate exit,
+                                                   double cost, double proceeds) {
+        return new TradeRecorder.ClosedTrade("005930", entry, exit, 1, cost, proceeds, "TimeCut-1515");
+    }
+
     @Test
     @DisplayName("PF = 총이익 / |총손실|")
     void profitFactor() {
@@ -68,5 +73,38 @@ class BacktestMetricsTest {
         assertThat(m.winRate()).isZero();
         assertThat(m.profitFactor()).isZero();
         assertThat(m.maxDrawdown()).isZero();
+        assertThat(m.payoffRatio()).isZero();
+        assertThat(m.avgHoldDays()).isZero();
+    }
+
+    @Test
+    @DisplayName("손익비 = 평균이익 ÷ 평균손실 (§14 손익비 재설계 판독 지표)")
+    void payoffRatio() {
+        // 이익 2건 평균 +2000, 손실 1건 -1000 → 손익비 2.0
+        List<TradeRecorder.ClosedTrade> trades = List.of(
+                trade(100_000, 103_000),  // +3000
+                trade(100_000, 101_000),  // +1000  (평균이익 2000)
+                trade(100_000, 99_000));  // -1000  (평균손실 1000)
+        BacktestMetrics m = BacktestMetrics.of(trades, List.of(1_000_000.0), 1_000_000);
+        assertThat(m.payoffRatio()).isCloseTo(2.0, within(1e-9));
+    }
+
+    @Test
+    @DisplayName("손실이 없으면 손익비 = ∞, 이익도 없으면 0")
+    void payoffRatio_edges() {
+        assertThat(BacktestMetrics.of(List.of(trade(100_000, 101_000)),
+                List.of(1_001_000.0), 1_000_000).payoffRatio()).isInfinite();
+        assertThat(BacktestMetrics.of(List.of(trade(100_000, 100_000)),
+                List.of(1_000_000.0), 1_000_000).payoffRatio()).isZero(); // 본전만
+    }
+
+    @Test
+    @DisplayName("평균 보유일수 = entryDate~exitDate 달력일 평균")
+    void avgHoldDays() {
+        List<TradeRecorder.ClosedTrade> trades = List.of(
+                trade(LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 5), 100_000, 101_000),  // 0일
+                trade(LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 11), 100_000, 99_000)); // 6일
+        BacktestMetrics m = BacktestMetrics.of(trades, List.of(1_000_000.0), 1_000_000);
+        assertThat(m.avgHoldDays()).isCloseTo(3.0, within(1e-9));
     }
 }

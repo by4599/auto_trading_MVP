@@ -2,9 +2,12 @@ package com.trading.backtest;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * 백테스트 설정 (B-1/B-2).
@@ -37,6 +40,16 @@ public class BacktestDataProperties {
     /** 적재/재생 기간 (년) — 설계 문서 §2.2 최소 3년 */
     private int years = 3;
 
+    /**
+     * candle_history 소급 저장 하한 (선택). null이면 기존 계산(now - years - 워밍업 260일) 그대로.
+     *
+     * <p><b>저장 깊이만</b> 바꾼다 — 판정 창(전역 from/to·years·candidate-from/to)과 무관하다.
+     * 기존 모드(full/smoke/ma-breakout/scalping/events/exit-lab)는 여전히 now-years로 재생하고
+     * {@code BacktestMarketDataService}가 from-260일까지만 조회하므로, 이 값을 과거로 당겨
+     * 더 오래된 캔들을 쌓아도 그 모드들의 결과는 바뀌지 않는다.
+     */
+    private LocalDate backfillFrom = null;
+
     /** 지수 레짐 필터용 KOSPI 지수 적재 여부 */
     private boolean includeKospi = true;
 
@@ -67,6 +80,57 @@ public class BacktestDataProperties {
     /** 유동성 필터 임계값 (원/일) — 미달 종목은 VB 유니버스 재검증에서 제외 (방법론 §2.2) */
     private double minDailyTradingValue = 5_000_000_000d;
 
+    /**
+     * §14.1 검증 후보(MA+P3+RR1) 전용 고정 유니버스 — 재현성을 위해 저장소에 못 박는다.
+     * 전역 symbols(6종목)와 별개이며 cost-lab·risk-lab만 사용한다.
+     * (출처: logs/backtest/REPORT-RISKLAB-MA-P3-20260722-2200.md 헤더 = §14.1 기준선 표본)
+     */
+    private List<String> candidateSymbols = List.of(
+            "005930", "000660", "373220", "005380", "035420", "068270", "036930", "240810",
+            "058470", "319660", "039030", "222800", "095610", "440110", "009150", "042700",
+            "403870", "084370", "005290", "357780", "089030", "074600", "067310", "348210",
+            "281820", "247540", "086520", "006400", "196170", "028300", "207940", "950160",
+            "298380", "000250", "141080", "263750", "293490", "112040", "277810", "402340",
+            "105560", "032830", "028260", "000270", "055550", "329180", "012450", "034020",
+            "012330", "034730", "086790", "066570", "000810", "267260");
+
+    /** §14.1 기준선 기간 시작 (고정 판정 창의 시작일) */
+    private LocalDate candidateFrom = LocalDate.parse("2023-07-22");
+
+    /**
+     * §14.1 기준선을 재현하는 고정 판정 창의 끝. 새 데이터로 재검증하려면 이 값을 의도적으로
+     * 바꾸거나 --backtest.candidate-from/to로 덮어쓴다(그게 '기준선을 새로 찍겠다'는 명시 행위다).
+     */
+    private LocalDate candidateTo = LocalDate.parse("2026-07-21");
+
+    /**
+     * crash-vol 전용 측정 창 시작 — 2020-01(코로나 폭락)·2022(금리 쇼크) 진짜 하락장을 포함한다.
+     * candidate-from(§14.1 판정 창)과 <b>독립</b>이다: cost-lab·risk-lab은 재현 기준선이라
+     * 창을 못 박아 두고, crash-vol만 소급 확장 데이터를 쓴다. 재현성을 위해 부동 날짜가 아닌
+     * 고정값으로 둔다.
+     */
+    private LocalDate crashVolFrom = LocalDate.parse("2020-01-01");
+
+    /** crash-vol 전용 측정 창 끝 — candidate-to와 같은 날이지만 별개 설정이다(우연한 결합 금지) */
+    private LocalDate crashVolTo = LocalDate.parse("2026-07-21");
+
+    /**
+     * regime-lab 전용 <b>약세장 포함</b> 판정 창 시작 — §14.3 스트레스 실행과 같은 6.5년 창
+     * (2020 코로나 · 2022 금리 쇼크 포함, Walk-Forward 24창). candidate-from(§14.1 재현 창)과
+     * <b>독립</b>이다: cost-lab·risk-lab은 기준선 재현이라 창을 못 박아 두고, regime-lab만
+     * 이 창을 쓴다. 재현성을 위해 부동 날짜가 아닌 고정값으로 둔다.
+     */
+    private LocalDate stressFrom = LocalDate.parse("2020-01-01");
+
+    /** regime-lab 전용 판정 창 끝 — candidate-to와 같은 날이지만 별개 설정이다(우연한 결합 금지) */
+    private LocalDate stressTo = LocalDate.parse("2026-07-21");
+
+    /**
+     * 거버넌스 기준선 yml 기록 여부 — 기본 false. 대조·점검용 lab 실행이 기준선을 조용히
+     * 덮어쓰던 사고(2026-07-23) 차단. 기준선을 새로 찍으려면 --backtest.write-baseline=true를 명시한다.
+     */
+    private boolean writeBaseline = false;
+
     public List<String> getSymbols() { return symbols; }
     public void setSymbols(List<String> symbols) { this.symbols = symbols; }
 
@@ -80,6 +144,9 @@ public class BacktestDataProperties {
 
     public int getYears() { return years; }
     public void setYears(int years) { this.years = years; }
+
+    public LocalDate getBackfillFrom() { return backfillFrom; }
+    public void setBackfillFrom(LocalDate backfillFrom) { this.backfillFrom = backfillFrom; }
 
     public boolean isIncludeKospi() { return includeKospi; }
     public void setIncludeKospi(boolean includeKospi) { this.includeKospi = includeKospi; }
@@ -107,4 +174,43 @@ public class BacktestDataProperties {
 
     public double getMinDailyTradingValue() { return minDailyTradingValue; }
     public void setMinDailyTradingValue(double minDailyTradingValue) { this.minDailyTradingValue = minDailyTradingValue; }
+
+    public List<String> getCandidateSymbols() { return candidateSymbols; }
+    public void setCandidateSymbols(List<String> candidateSymbols) { this.candidateSymbols = candidateSymbols; }
+
+    public LocalDate getCandidateFrom() { return candidateFrom; }
+    public void setCandidateFrom(LocalDate candidateFrom) { this.candidateFrom = candidateFrom; }
+
+    public LocalDate getCandidateTo() { return candidateTo; }
+    public void setCandidateTo(LocalDate candidateTo) { this.candidateTo = candidateTo; }
+
+    public LocalDate getCrashVolFrom() { return crashVolFrom; }
+    public void setCrashVolFrom(LocalDate crashVolFrom) { this.crashVolFrom = crashVolFrom; }
+
+    public LocalDate getCrashVolTo() { return crashVolTo; }
+    public void setCrashVolTo(LocalDate crashVolTo) { this.crashVolTo = crashVolTo; }
+
+    public LocalDate getStressFrom() { return stressFrom; }
+    public void setStressFrom(LocalDate stressFrom) { this.stressFrom = stressFrom; }
+
+    public LocalDate getStressTo() { return stressTo; }
+    public void setStressTo(LocalDate stressTo) { this.stressTo = stressTo; }
+
+    public boolean isWriteBaseline() { return writeBaseline; }
+    public void setWriteBaseline(boolean writeBaseline) { this.writeBaseline = writeBaseline; }
+
+    /**
+     * 캔들 저장이 반드시 도달해야 하는 날 = 고정 판정 창들의 끝 중 가장 늦은 날.
+     *
+     * <p>여기서 max를 취하는 것은 <b>저장 요구</b>일 뿐이다 — 어느 모드를 돌리든 그 창 끝까지는
+     * 캔들이 있어야 한다는 뜻이며, 한 창의 설정이 다른 창의 <b>판정</b>에 끼어들지 않는다
+     * (candidate/crash-vol/stress 세 창의 독립성은 그대로다). 백필의 7일 슬랙이 이 날짜를
+     * 삼켜 창 끝자락이 데이터 없이 채점되던 결함을 막는 데 쓴다.
+     */
+    public LocalDate requiredCoverageThrough() {
+        return Stream.of(candidateTo, crashVolTo, stressTo)
+                .filter(Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .orElse(null);
+    }
 }
