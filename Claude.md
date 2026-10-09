@@ -271,7 +271,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `IndexTrendRule` | KOSPI 전일 종가가 MA(paper 120 · 코드 기본 200) 아래면(하락 추세) **신규 매수 금지**. 판정이 없으면 통과 | ✅ 활성 (**2026-10-01 paper ON** — A동 검증 설정의 핵심 부품, BACKTEST-DESIGN §14.4·§15.7). 기본 OFF(`trading.filters.index-trend.enabled`). 데이터는 `KisIndexRegimeSource` — 거래일 하루 1회(개장 1분 뒤) KOSPI 일봉 조회, 실패 시 30분 뒤 재시도. 갭다운 필터 `IndexRegimeRule`과는 별개 |
 | `IndexTrendDataGateRule` | 지수 필터가 켜져 있는데 **판정이 아직 없으면**(KOSPI 일봉을 한 번도 못 받음) 신규 매수 보류 — fail-closed(모르면 막기). 매도는 안 막는다 | ✅ 활성 (2026-10-01 신설, `@Profile("!backtest")`). `IndexTrendRule`의 "판정 없으면 통과"는 백테스트 회귀 앵커가 기억하는 동작이라 그대로 두고 라이브에서만 이 관문으로 막는다 — paper 데이터원이 NoOp(항상 판정 없음)이던 시절엔 필터를 켜도 무발동이었다. ⚠ **하루 낡은 판정도 "있음"으로 친다**: 밤새 켜둔 날 09:00~그날 첫 조회(09:01~02)에는 전날 판정으로 매수가 통과할 수 있다(fail-open, `_workspace/32_audit_after-hours-guards.md` M-A, 미해결) |
 | `OrderFailureCooldownRule` | 그 종목의 주문 접수가 실패하면 **잠시 신규 매수 금지** — 브로커 거부 60초 · 응답 불명 600초(실제로 체결됐을 수 있어 재동기화가 흡수할 시간). 체결이 확인되면 즉시 해제. 매도는 안 막는다 | ✅ 활성 (2026-08-04 신설, 켜고 끄는 스위치 없음 — 시간은 `trading.order.rejected-cooldown-sec`/`ambiguous-cooldown-sec`, yml 미설정이라 코드 기본값). 실패한 주문은 ACCEPTED로 남지 않아 `PendingOrderRule`이 중복을 못 막는 틈을 메운다. 실패 기록은 `KisOrderClientImpl:136-137`. 차단 목록은 메모리에만 있어 앱을 재시작하면 풀린다 |
-| `DisclosureCooldownRule` | 이벤트성 공시가 나온 종목은 **다음 날부터 N일(달력일) 신규 매수 금지** — 당일 공시는 제외(선견편향), 정례 공시(지분·대량보유·IR·특수관계·정기보고)도 제외 | ✅ 활성 (**paper ON, 5일** — VB 시절 B-3 A/B 채택분, BACKTEST-DESIGN §9). 기본 OFF(`trading.filters.disclosure-cooldown.enabled`). 공시(DART) 데이터가 있어야 막는다 — `DART_API_KEY` 미설정이면 막을 공시가 없어 통과. ⚠ **A동 검증(§15.7 D0)은 이 필터를 끄고 채점했다** — 지금 paper 성적과 검증 성적의 분모가 어긋난다. 끌지 말지는 사용자 결정 대기(`_workspace/30_audit_trend-sleeve-switch.md` L-5) |
+| `DisclosureCooldownRule` | 이벤트성 공시가 나온 종목은 **다음 날부터 N일(달력일) 신규 매수 금지** — 당일 공시는 제외(선견편향), 정례 공시(지분·대량보유·IR·특수관계·정기보고)도 제외 | ⏸ 꺼짐 (**2026-10-09 paper 설정 OFF** — 사용자 결정. A동 검증 설정(§15.7 D0)이 이 필터를 끄고(`ExecutionKnobs.allFiltersOff`) 채점했으므로 paper 성적의 분모를 맞췄다 — `_workspace/30_audit_trend-sleeve-switch.md` L-5 대응, `PaperTrendSleeveConfigTest`가 OFF를 고정. 앱 적용·확인 기록은 `_workspace/34_ops_disclosure-cooldown-off.md` §5). 기본 OFF(`trading.filters.disclosure-cooldown.enabled`) · 일수 5는 재가동 대비 보존. 원래 VB 시절 B-3 A/B 채택분(BACKTEST-DESIGN §9). 켜더라도 공시(DART) 데이터가 있어야 막는다 — `DART_API_KEY` 미설정이면 막을 공시가 없어 통과. ⚠ 대시보드 설정 화면에서 다시 켤 수 있고, 그 저장값(`app_setting`)은 기동 때 yml을 덮어쓴다(`TradingParamService.loadOnStartup`) — 테스트는 yml만 고정한다 |
 | `IndexRegimeRule` | KOSPI **갭다운일**(당일 시가 < 전일 종가) 신규 매수 금지. 판정이 없으면 통과 | ⏸ 꺼짐 (기본 OFF, paper 미설정 — `trading.filters.index-regime.enabled`). ⚠ **paper에서는 켜도 무발동**: `KisIndexRegimeSource`가 갭다운 판정을 구현하지 않아 항상 "판정 없음"을 주고(`:98-102`), 이 룰은 그때 통과시킨다 — `IndexTrendDataGateRule` 같은 관문도 없다. ⚠ B-3 백테스트에서도 무발동이었다(KOSPI 미적재 — 위 §14.4 메모, §7 "지수 레짐 기각" 판정 무효). 추세 필터 `IndexTrendRule`과는 별개 |
 | `EntryTimeWindowRule` | 장 초반(기본 09:15 이전) 신규 매수 금지 — 휩쏘성 가짜 돌파 회피 | ⏸ 꺼짐 (기본 OFF, paper 미설정 — `trading.filters.entry-window.enabled` · `not-before`). 일봉 백테스트는 돌파 시각을 몰라 검증할 수 없다 — 분봉(`MinuteCandleCollector`) 축적 후 A/B를 거쳐야 켤 수 있다 |
 
@@ -389,7 +389,8 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
   (`WalkForwardEngine` 6/3/3 + K 민감도 + 필터 A/B → `logs/backtest/REPORT-*.md`,
   합격 시 `docs/BACKTEST-BASELINE.yml`). 실행: `--spring.profiles.active=backtest`.
   K는 `StrategyParameters`(기본 0.5), 필터 5종은 `FilterProperties`(기본 OFF —
-  단, **paper는 A/B 채택으로 트레일링 1% + 공시 쿨다운 5일 ON**, BACKTEST-DESIGN §9.
+  단, **paper는 A/B 채택으로 트레일링 1% + 공시 쿨다운 5일 ON**, BACKTEST-DESIGN §9 —
+  공시 쿨다운은 2026-10-09 OFF(A동 검증 설정과 맞춤, 리스크 룰 표 참고).
   시간창·거래량 필터는 분봉 축적 후 검증). 상세: BACKTEST-DESIGN.md §6 v1 구현 노트.
   ⚠️ `@EnableScheduling`은 `SchedulingConfig`(@Profile("!backtest"))에 있다 —
   백테스트 결정성 때문에 애플리케이션 클래스로 되돌리지 말 것

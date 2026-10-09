@@ -38,7 +38,7 @@ import static org.mockito.Mockito.when;
 /**
  * 2026-10-01 A동 전환 — 배포될 {@code application-paper.yml}이 검증된 설정(BACKTEST-DESIGN §15.7 D0)과
  * 같은지 고정한다: 돈치안(20/120) · 0.25R · ATR 1.0 · 트레일 arm1%/trail3% · 타임컷 제외 ·
- * 최대 20거래일 · 지수 MA120 ON, 그리고 당일 청산 3방식(B동) OFF.
+ * 최대 20거래일 · 지수 MA120 ON · 공시 쿨다운 OFF, 그리고 당일 청산 3방식(B동) OFF.
  */
 @DisplayName("paper 설정 — A동(돈치안) ON · B동 3방식 OFF · 지수 MA120")
 class PaperTrendSleeveConfigTest {
@@ -117,6 +117,14 @@ class PaperTrendSleeveConfigTest {
 
         assertThat(filters.getIndexTrend().isEnabled()).isTrue();
         assertThat(filters.getIndexTrend().getMaPeriod()).isEqualTo(120);
+    }
+
+    @Test
+    @DisplayName("공시 쿨다운 OFF — D0는 공시 쿨다운을 끈 채 채점했다 (ExecutionKnobs.allFiltersOff)")
+    void disclosure_cooldown_off_as_in_backtest_d0() {
+        FilterProperties filters = PaperProfileYaml.bind("trading.filters", FilterProperties.class);
+
+        assertThat(filters.getDisclosureCooldown().isEnabled()).isFalse();
     }
 
     @Test

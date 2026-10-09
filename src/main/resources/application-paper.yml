@@ -43,8 +43,10 @@ trading:
     trailing-stop:
       enabled: true
       trail-pct: 0.01
+    # 공시 쿨다운은 2026-10-09 끔(사용자 결정) — A동 검증 설정(§15.7 D0)은 공시 쿨다운을 끈 채 채점했다
+    # (allFiltersOff 뒤 트레일링·지수 MA120만 다시 켬, _workspace/30_audit L-5). 켜 두면 paper 성적과 검증 성적의 분모가 어긋난다.
     disclosure-cooldown:
-      enabled: true
+      enabled: false
       cooldown-days: 5
     # 지수 추세 필터 (BACKTEST-DESIGN §14.4·§15.7) — KOSPI 전일 종가가 MA120 아래면 신규 매수 금지.
     # A동 검증 설정의 핵심 부품(약세장 MDD 33.5%→13.3%). ma-period 코드 기본값은 200이다 — 반드시 120.
