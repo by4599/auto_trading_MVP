@@ -53,10 +53,11 @@
 | 연속 가동일 | `/api/trading/run-streak` = `streakDays 1 · lastRecordedDate 2026-10-02` |
 
 영향: 거래일 10-06(화)·10-07(수)·10-08(목) 매매·감시 0(10-05 월·10-09 금은 휴장). 보유 0이라 무방비 노출은 없었다.
-원인(덮개 닫힘·전원 버튼·모던 스탠바이 자동 진입 등)은 조사하지 않았다 — 09-15 기록상 절전은 AC·DC '안 함'인데 506은 모던 스탠바이
-진입이라 별개 경로일 수 있다. PC 설정은 사용자 몫. 릴리즈 항목 "5거래일 연속 무중단"이 다시 끊겼다.
+원인: **배터리 부족으로 절전 모드 진입**(사용자 확인, 2026-10-10). 09-15에 꺼 둔 '절전 안 함' 설정과는 별개 경로다 — 배터리가
+바닥나면 설정과 무관하게 잠든다. 10-10 00:5x 현재 배터리 77% · 전원 연결 · 충전 중(`Win32_Battery`, `root/wmi BatteryStatus`).
+재발 방지는 장중 전원선 상시 연결(사람 몫). 릴리즈 항목 "5거래일 연속 무중단"이 다시 끊겼다.
 
-## 5. 재시작 기록 — 정지까지 완료, 기동·적용 확인 대기
+## 5. 재시작 기록 — 완료 (10-10 01:08 기동, 적용 확인)
 
 | 단계 | 결과 |
 |---|---|
@@ -64,8 +65,10 @@
 | 백업 | `backup/trading-db-20261010_001120.zip`(21.3 MB) · `backtest-db-20261010_001120.zip`(4.4 MB), 종료 코드 0 |
 | 정지 전 상태 | 00:44 `/api/status` RUNNING · `/api/position` [] · `/api/orders/open` [] — 보유·미체결 0 |
 | 정지 | 00:44 `Stop-Process` PID 3376(앱)·11356(gradle 데몬)·27244(gradlew) → paper java 0개 · 8080 free · 작업 `AutoTrading-Paper-0830` Ready · `logs/auto-start.log` `2026-10-10 00:44:57 [0830] 앱 종료 (코드 -1)` |
-| 기동 | **리더는 하지 못했다.** 작업 스케줄러가 부르는 기동기 `start-paper-if-needed.ps1:30-33`은 토·일에 기동을 건너뛴다(설계). 남은 길은 `run-paper` 기동기를 직접 실행하는 것인데, 이 세션에서 .bat 파일을 언급한 셸 명령은 9건 모두 실행되기 전에 멈췄다(보안 모듈의 .bat 차단 — `start-paper-if-needed.ps1:12-13`, OPERATIONS §1.1 — 또는 실행 승인 단계로 보이며 원인은 확인하지 않았다). 우회하지 않았다. → **사용자가 탐색기에서 `run-paper`를 더블클릭**하거나 **10-12(월) 08:30 자동 기동**(평일)으로 켜진다. 둘 다 bootRun 경로라 운영 빌드의 yml 사본이 새 값으로 덮인다(35_audit 조건 1) |
-| 적용 확인 | **대기.** 기동 후 순서(35_audit §2-②): ① 새 PID `[main]` 줄에서 `Started TradingApplication` + `[Reconciler] 기동 재동기화 완료` ② `GET /api/params` → `filters.disclosureCooldown.enabled` value **"false"**(유일한 확정 증거) ③ 새 PID `[main]`에 `[Param] 저장된 투자 파라미터` 없음 ④ `Loaded 15 risk rules` 그대로. 그 전까지 30_audit L-5는 "해소 대상"이다 |
+| 기동 시도(리더) | **실패 — 리더는 켜지 못했다.** 작업 스케줄러가 부르는 기동기 `start-paper-if-needed.ps1:30-33`은 토·일에 기동을 건너뛴다(설계). 남은 길은 `run-paper` 기동기를 직접 실행하는 것인데, 이 세션에서 .bat 파일을 언급한 셸 명령은 기동 시도(00:5x, `Start-Process`) 포함 모두 실행되기 전에 멈췄다(보안 모듈의 .bat 차단 — `start-paper-if-needed.ps1:12-13`, OPERATIONS §1.1 — 또는 실행 승인 단계로 보이며 원인은 확인하지 않았다). 늦게 실행돼 이중 기동되지 않게 즉시 취소하고 java 0 · 8080 free를 확인했다. 우회하지 않았다 |
+| 바탕화면 아이콘 수리 | 사용자가 누른 바탕화면 `AutoTrading.lnk` → `C:\Users\SAMSUNG\trading-launch.ps1`(저장소 밖)이 **7월 폴더 rename 전 경로 `Desktop\개발\auto_trading`을 가리켜** `Set-Location` 실패 → `.\gradlew` 못 찾고 종료. 4줄의 경로만 `Desktop\workspace\auto_trading`으로 고쳤다(UTF-8 BOM·CRLF 유지, 파싱 오류 0). 이 아이콘은 `run-paper`가 아니라 gradlew bootRun을 직접 부르지만, KIS·텔레그램·DART·Supabase 키가 전부 Windows 사용자 환경변수에 있어(`HEARTBEAT_URL`만 미설정) 자동 기동과 같은 키로 뜬다. JDK 경로(`jdk-25.0.3.9-hotspot`)도 존재 확인 |
+| 기동 | **01:07:50 사용자가 아이콘으로 기동** — 새 앱 PID 22036. bootRun 경로라 운영 빌드의 yml 사본이 갱신됐다(`auto_trading-build/resources/main/application-paper.yml:49` `enabled: false`, 35_audit 조건 1 충족). 이 앱은 사용자 창에 딸려 돈다 — 창을 닫으면 꺼진다. 10-12(월) 08:30 작업은 8080 리슨을 보고 기동을 생략한다 |
+| 적용 확인 | **통과 (35_audit §2-② 순서).** ① 새 PID `[main]`: `01:08:04 Started TradingApplication in 13.767 seconds` → `01:08:05 [Reconciler] 브로커 대조 완료 — 불일치 없음` → `기동 재동기화 완료 — 자동 가동(RUNNING)` ② **01:08:21 `GET /api/params` → `filters.disclosureCooldown.enabled` value "false"**(일수 5) — 유일한 확정 증거 ③ 새 PID의 `[Param]` 줄 **0건** — 저장값 덮어쓰기 없음(35_audit L-1 확정) ④ `Loaded 15 risk rules`에 `DisclosureCooldownRule` 그대로(룰은 남고 통과만 한다). `/api/status` RUNNING · configured true. → **30_audit L-5 해소** |
 
 ⚠ 기동 직후에는 지수 판정이 비어 있어, 다음 거래일 첫 조회(개장 1분 뒤) 전까지 `IndexTrendDataGateRule`이 신규 매수를 막는다(35_audit I-2, 의도된 동작).
 ⚠ ②에서 "true"가 나오면 저장값이 있다는 뜻이다 — 대시보드 "기본값 원복"을 누르지 말 것(전역 트레일링까지 꺼진다). 35_audit §2-②의 두 방법 중 하나로 처리한다.
