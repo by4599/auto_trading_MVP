@@ -268,6 +268,8 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ⚠ **paper에서 사실상 무발동 (2026-09-15 실측)** — 룰 코드는 정상이고 backtest에서는 동작한다(`BacktestOrderClient:142`가 `recordRoundTrip` 호출). 그러나 paper는 **입력이 들어오지 않는다**: 모의 체결조회가 매도에 빈 응답을 주는 결함(아래 결함 5) 때문에 매도가 전부 대사 경로(`FillStateUpdater.reconcileFilledFromBalance`)로 종결되는데 **그 경로는 `TradeResult`도 `recordRoundTrip`도 남기지 않는다**. 실측: 2026-08-29~09-12 매도 주문 70건 · 라운드트립 기록 **0건**. 근거 `_workspace/12_audit_cash-based-pnl.md` §1 |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 | `PostTimeCutBuyRule` | 15:15 타임컷 이후 신규 매수 금지 | ✅ 활성 (2026-09-01 신설 — 다일 보유 칸은 면제) |
+| `IndexTrendRule` | KOSPI 전일 종가가 MA(paper 120 · 코드 기본 200) 아래면(하락 추세) **신규 매수 금지**. 판정이 없으면 통과 | ✅ 활성 (**2026-10-01 paper ON** — A동 검증 설정의 핵심 부품, BACKTEST-DESIGN §14.4·§15.7). 기본 OFF(`trading.filters.index-trend.enabled`). 데이터는 `KisIndexRegimeSource` — 거래일 하루 1회(개장 1분 뒤) KOSPI 일봉 조회, 실패 시 30분 뒤 재시도. 갭다운 필터 `IndexRegimeRule`과는 별개 |
+| `IndexTrendDataGateRule` | 지수 필터가 켜져 있는데 **판정이 아직 없으면**(KOSPI 일봉을 한 번도 못 받음) 신규 매수 보류 — fail-closed(모르면 막기). 매도는 안 막는다 | ✅ 활성 (2026-10-01 신설, `@Profile("!backtest")`). `IndexTrendRule`의 "판정 없으면 통과"는 백테스트 회귀 앵커가 기억하는 동작이라 그대로 두고 라이브에서만 이 관문으로 막는다 — paper 데이터원이 NoOp(항상 판정 없음)이던 시절엔 필터를 켜도 무발동이었다. ⚠ **하루 낡은 판정도 "있음"으로 친다**: 밤새 켜둔 날 09:00~그날 첫 조회(09:01~02)에는 전날 판정으로 매수가 통과할 수 있다(fail-open, `_workspace/32_audit_after-hours-guards.md` M-A, 미해결) |
 
 > 강제청산 실행부(`KisBrokerageApiClient`)는 Gate 2에서 실구현 완료 —
 > **모의계좌 리허설 깨끗한 1회 성공으로 Gate 2 완료 (2026-08-19)**
