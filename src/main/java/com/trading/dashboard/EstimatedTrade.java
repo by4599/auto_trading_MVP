@@ -14,6 +14,9 @@ import java.time.LocalDateTime;
  * <p>수수료·세금은 빼지 않은 <b>총손익</b>이다. 추정가로 계산한 값에 비용까지 얹으면
  * 정확해 보이지만 실제로는 오차만 커진다 — 정확한 금액은 계좌 기준
  * ({@code /api/performance/account})을 봐야 한다.
+ *
+ * <p>crossBucket = 매도 직전 마지막 매수의 칸 조각이 모자라 <b>다른 칸의 옛 조각</b>과 짝지었다는 표시
+ * ({@link TradePairer} 칸 우선 짝짓기) — 그 짝의 매수가·칸은 믿기 어렵다.
  */
 public record EstimatedTrade(String stockCode,
                              StrategyBucket bucket,
@@ -22,7 +25,8 @@ public record EstimatedTrade(String stockCode,
                              int quantity,
                              double buyPrice,
                              double sellPrice,
-                             SellPriceEstimator.Source sellSource) {
+                             SellPriceEstimator.Source sellSource,
+                             boolean crossBucket) {
 
     /** 손익(원) — 추정 매도가 기준 */
     public double pnl() {

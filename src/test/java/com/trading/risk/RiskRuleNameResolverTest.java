@@ -37,6 +37,7 @@ class RiskRuleNameResolverTest {
         "지수 레짐 필터 — KOSPI 갭다운일 신규 매수 금지                           | IndexRegimeRule",
         "직전 주문 실패로 대기 중: 005930                                         | OrderFailureCooldownRule",
         "잔고 정보가 낡음(조회 실패) — 신규 매수 보류                              | StaleAccountBuyGuardRule",
+        "칸 손실 상한 도달로 잠김: TREND — 낙폭 12.5% (한도 12%), 사람이 해제할 때까지 신규 매수 금지 | SleeveLockRule",
     })
     void maps_each_rule_message(String reason, String expectedRule) {
         assertThat(RiskRuleNameResolver.resolve(reason.trim())).isEqualTo(expectedRule);

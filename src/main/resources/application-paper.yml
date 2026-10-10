@@ -94,6 +94,13 @@ trading:
     mix-enabled: false
     trend-enabled: true
     trend-allocation: 4000000
+    # 칸별 낙폭 상한 (ADR-001 §2.2 개정 2026-08-07) — 칸 자산이 그 칸의 최고 기록보다 이만큼 줄면(1분 간격 2회 연속)
+    # 그 칸만 잠근다: 신규 매수 중지 + 보유를 평시 매도 경로로 정리. 다른 칸은 계속 운영한다(SleeveDrawdownMonitor).
+    # 칸 자산 = 배분금 + 실현손익(TradeResult, 없으면 매도가 추정) + 보유 평가손익. 해제는 사람만:
+    # POST /api/buckets/{칸}/unlock (사유 필수). 상태 조회: GET /api/buckets/sleeve-status
+    sleeve-drawdown:
+      a-sleeve-limit: 0.12    # A동(TREND) — 검증에서 본 최악(13.1%) 바로 아래
+      b-sleeve-limit: 0.20    # B동(VB·EVENT·MIX)
 
   # A동(TREND) 칸별 사이징·출구 — BACKTEST-DESIGN §15.7 D0 / §14 P3 그대로.
   bucket-params:

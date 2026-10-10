@@ -27,4 +27,15 @@ class PaperSafetyGuardsConfigTest {
 
         assertThat(enabled).isTrue();
     }
+
+    @Test
+    @DisplayName("칸별 낙폭 상한이 ADR 값으로 적혀 있다 — A동 12% / B동 20% (ADR-001 §2.2 개정 2026-08-07)")
+    void sleeve_drawdown_caps_are_pinned_to_adr_values() {
+        Binder binder = paperBinder();
+
+        assertThat(binder.bind("trading.bucket.sleeve-drawdown.a-sleeve-limit", Double.class).orElse(null))
+                .isEqualTo(0.12);
+        assertThat(binder.bind("trading.bucket.sleeve-drawdown.b-sleeve-limit", Double.class).orElse(null))
+                .isEqualTo(0.20);
+    }
 }

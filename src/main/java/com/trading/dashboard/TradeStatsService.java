@@ -53,7 +53,8 @@ public class TradeStatsService {
             + "정확한 금액은 계좌 기준(/api/performance/account)을 보세요";
 
     static final String MATCHING_RULE =
-            "선입선출(FIFO) — 종목별로 가장 오래된 매수부터 매도와 짝짓는다. "
+            "칸 우선 선입선출(FIFO) — 종목별로, 매도 직전 마지막 매수의 칸 조각부터 오래된 순으로 매도와 짝짓는다"
+            + "(같은 종목은 한 번에 한 칸만 보유). 모자라면 다른 칸 조각을 쓰고 칸 넘김(crossBucketPieces)으로 센다. "
             + "매도 한 건이 매수 여러 건을 덮으면 거래도 그만큼 나뉜다. 칸은 매수 쪽 것을 쓴다";
 
     private final OrderHistoryRepository orderHistoryRepository;
@@ -149,7 +150,15 @@ public class TradeStatsService {
         m.put("unmeasurableQuantity", w.unmeasurable().stream()
                                         .mapToInt(TradePairer.Unmeasurable::quantity).sum());
         m.put("unmeasurableReasons",  unmeasurableReasons(w.unmeasurable()));
+        m.put("crossBucketPieces",    crossBucketPieces(w));
         return m;
+    }
+
+    /** 직전 매수의 칸 조각이 모자라 다른 칸 옛 조각과 짝지은 조각 수 — 그 짝의 매수가·칸은 믿기 어렵다 */
+    private static int crossBucketPieces(Window w) {
+        long trades = w.trades().stream().filter(EstimatedTrade::crossBucket).count();
+        long excluded = w.unmeasurable().stream().filter(TradePairer.Unmeasurable::crossBucket).count();
+        return (int) (trades + excluded);
     }
 
     private static List<Map<String, Object>> unmeasurableReasons(

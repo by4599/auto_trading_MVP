@@ -51,6 +51,7 @@ const RULE_LABEL = {
   IndexRegimeRule:          '시장 분위기가 나빠서',
   OrderFailureCooldownRule: '조금 전 주문이 실패해서 쉬는 중',
   StaleAccountBuyGuardRule: '잔고 정보를 못 받아서 (오래된 값)',
+  SleeveLockRule:           '그 지갑 칸이 손실 한도에 닿아 잠겨서 (사람이 풀어야 함)',
 };
 
 /** 룰 이름을 못 알아보면(UNKNOWN 등) 원문 사유를 그대로 보여준다 */
