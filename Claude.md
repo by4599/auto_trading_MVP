@@ -111,8 +111,10 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
    현재 해당은 돈치안 + P3 출구 + 지수 MA120 + 0.25R(§15.7 D0) 하나이며, 2026-10-01 사용자 결정으로
    **모의투자에서 가동 중**이다. 검증 안 된 조합을 이 칸에 올리거나, 검증된 파라미터·자금 비율·낙폭
    한도를 재검증·ADR 개정 없이 바꾸는 것은 ADR-001 위반이다. **실매매 승격은 게이트 G2(사람)가 단독
-   관문**이다(2026-08-10 개정). ⚠ 개정 중 아직 코드에 없는 것: 누적 MDD 가드 8%(현재 `risk.mddLimit`
-   0.10) · 슬리브별 낙폭 상한(A동 −12% / B동 −20%) — 실전 전 필수(`_workspace/30_audit` M-4).
+   관문**이다(2026-08-10 개정). ⚠ 개정 중 미완: 누적 MDD 가드 8%는 2026-10-10 paper에 **런타임으로만**
+   적용됐다(대시보드 파라미터 = 운영 DB `app_setting`의 `risk.mddLimit`=0.08, git에 없음 — 코드 상수·백테스트는
+   10% 그대로. 대시보드 "기본값 원복"을 누르거나 DB를 새로 만들면 조용히 10%로 돌아간다, `_workspace/38_ops`) ·
+   슬리브별 낙폭 상한(A동 −12% / B동 −20%)은 코드에 없다 — 둘 다 실전 전 정본화·구현 필수(`_workspace/30_audit` M-4 부분 해소).
 
 ## 현재 스코프 (이거 넘어서는 기능 제안하지 말 것)
 
@@ -264,7 +266,7 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 | `MaxPositionCountRule` | 최대 보유 종목 5개 | ✅ 활성 |
 | `MarketCloseRule` | 15:20 이후 신규 매수 금지 | ✅ 활성 (P2-A — KST 고정 Clock 주입, F-8 해소) |
 | `DailyLossRule` | -3% 매수 차단 / -5% 강제청산 | ✅ 활성 (Gate 1 — dailyPnl 실값 + `RiskMonitor` 상시 감시) |
-| `GlobalEquityStopRule` | 전고점 대비 MDD 10% 초과 시 **신규 매수 차단** (강제청산은 `RiskMonitor` 담당) | ✅ 활성 (Gate 1 — 현금 포함 equity). **2026-09-12: 매수 가드 추가** — 14개 룰 중 유일하게 `isBuy()` 검사가 없어 MDD 초과 시 매도까지 거부했다(타임컷·손절·최대보유가 전부 이 경로). 백테스트 A/B로 판정 불변 확인 후 수정 |
+| `GlobalEquityStopRule` | 전고점 대비 MDD 한도 초과 시 **신규 매수 차단** (강제청산은 `RiskMonitor`가 같은 한도로 담당). 한도: **paper 실효 8%**(2026-10-10 대시보드 저장값 `app_setting`), 코드 상수·백테스트 10% | ✅ 활성 (Gate 1 — 현금 포함 equity). **2026-09-12: 매수 가드 추가** — 14개 룰 중 유일하게 `isBuy()` 검사가 없어 MDD 초과 시 매도까지 거부했다(타임컷·손절·최대보유가 전부 이 경로). 백테스트 A/B로 판정 불변 확인 후 수정 |
 | `ConsecutiveLossRule` | 연속 손실 3회 시 1시간 중지 | ⚠ **paper에서 사실상 무발동 (2026-09-15 실측)** — 룰 코드는 정상이고 backtest에서는 동작한다(`BacktestOrderClient:142`가 `recordRoundTrip` 호출). 그러나 paper는 **입력이 들어오지 않는다**: 모의 체결조회가 매도에 빈 응답을 주는 결함(아래 결함 5) 때문에 매도가 전부 대사 경로(`FillStateUpdater.reconcileFilledFromBalance`)로 종결되는데 **그 경로는 `TradeResult`도 `recordRoundTrip`도 남기지 않는다**. 실측: 2026-08-29~09-12 매도 주문 70건 · 라운드트립 기록 **0건**. 근거 `_workspace/12_audit_cash-based-pnl.md` §1 |
 | `BucketBudgetRule` | 지갑 칸 잠금/예산 소진 시 매수 차단 | ✅ 활성 (paper 전용 — `trading.bucket.enabled` OFF면 통과) |
 | `PostTimeCutBuyRule` | 15:15 타임컷 이후 신규 매수 금지 | ✅ 활성 (2026-09-01 신설 — 다일 보유 칸은 면제) |
