@@ -85,6 +85,9 @@ public class EvidenceBasedPeakEquityCalibrator implements PeakEquityCalibrator {
     /** 전송을 1초 감시 루프 밖으로 빼는 전용 스레드 (감사 M-2 — 상세는 그 클래스 주석) */
     private final BackgroundAlertSender alertSender;
 
+    /** "의심스러운 고점 거부" 하루 1회 경고 — 같은 전송 스레드를 쓴다 (결함 6, 2026-10-11) */
+    private final SuspiciousPeakAlerter suspiciousPeakAlerter;
+
     public EvidenceBasedPeakEquityCalibrator(DailyEquityRepository dailyEquityRepository,
                                              PortfolioStateRepository stateRepository,
                                              RiskLimitsProperties limits,
@@ -98,6 +101,7 @@ public class EvidenceBasedPeakEquityCalibrator implements PeakEquityCalibrator {
         this.clock = clock;
         this.marketCalendar = marketCalendar;
         this.alertSender = new BackgroundAlertSender(notifier::sendCritical, "peak-alert-sender");
+        this.suspiciousPeakAlerter = new SuspiciousPeakAlerter(alertSender::send, clock, marketCalendar);
     }
 
 
@@ -235,6 +239,13 @@ public class EvidenceBasedPeakEquityCalibrator implements PeakEquityCalibrator {
                         + "짐작보다 큰 폭이면 잔고 값이 튄 것일 수 있습니다 — 로그를 확인하세요.",
                 heldNote, pendingPrevious, pendingCurrent, rise,
                 pendingCurrent * (1 - limits.getMddLimit()), limits.getMddLimit() * 100);
+    }
+
+    /** 의심스러운 고점 거부 경고 — 하루 1회, 장중에만, 감시 스레드 밖 전송 (상세는 {@link SuspiciousPeakAlerter}) */
+    @Override
+    public void notifySuspiciousPeakRejected(SuspiciousPeakReason reason, double rejectedEquity,
+                                             double currentPeak, EquityCrossCheck check) {
+        suspiciousPeakAlerter.alert(reason, rejectedEquity, currentPeak, check);
     }
 
     @PreDestroy

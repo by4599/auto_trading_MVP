@@ -135,8 +135,10 @@ public class KisPositionManager implements PositionManager {
         log.debug("계좌 스냅샷(KIS): 총자산={} 일일손익={}% 보유종목={}",
                 totalAssetValue, String.format("%.2f", dailyPnlPercent * 100), snapshots.size());
 
+        // 총자산 대조 판정(결함 6)을 함께 싣는다 — 지금은 ShadowPortfolio의 전고점 인정 여부만 이 표시를 본다
         return new Account(totalAssetValue, dailyPnlPercent,
-                tradeResultTracker.getConsecutiveLossCount(), snapshots);
+                tradeResultTracker.getConsecutiveLossCount(), snapshots)
+                .withEquityCheck(balance.equityCheck());
     }
 
     /**

@@ -1,10 +1,15 @@
 package com.trading.position;
 
+import com.trading.position.PeakEquityCalibrator.SuspiciousPeakReason;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+
+import java.time.Clock;
+import java.time.Duration;
 
 // ADR 2.2: peakEquity는 단조 증가만. 08:30 DailyLossRule 리셋과 완전 분리.
 // "영구 보존" 요건을 재시작 너머까지 보장하기 위해 portfolio_state에 영속화한다.
@@ -16,19 +21,37 @@ public class ShadowPortfolio {
 
     private static final Logger log = LoggerFactory.getLogger(ShadowPortfolio.class);
 
+    /** 잔고 대조 불일치로 갱신을 거부할 때의 WARN 간격 — 처음 1회 + 이어지면 이 간격마다 최대 1회 */
+    static final Duration MISMATCH_LOG_INTERVAL = Duration.ofMinutes(10);
+
     private final PositionManager positionManager;
     private final PortfolioStateRepository stateRepository;
     private final PeakEquityCalibrator calibrator;
+    private final LogThrottle mismatchLogThrottle;
     private volatile double peakEquity = 0.0;
     /** 전고점이 클램프 교정된 뒤 사람 확인을 못 받은 상태 — MDD 자동 강제청산만 보류시킨다 */
     private volatile boolean peakUnverified = false;
 
+    /** 시계를 주지 않는 조립(기존 테스트 등) — 시스템 시계는 거부 로그 간격에만 쓰인다 */
     public ShadowPortfolio(PositionManager positionManager,
                            PortfolioStateRepository stateRepository,
                            PeakEquityCalibrator calibrator) {
+        this(positionManager, stateRepository, calibrator, Clock.systemDefaultZone());
+    }
+
+    /**
+     * 스프링이 쓰는 생성자 — paper는 KST 시계(ClockConfig), backtest는 가상 시계(@Primary).
+     * 시계는 잔고 대조 불일치 거부 로그의 간격(10분)에만 쓰인다. 전고점 판정 자체는 시계를 보지 않는다.
+     */
+    @Autowired
+    public ShadowPortfolio(PositionManager positionManager,
+                           PortfolioStateRepository stateRepository,
+                           PeakEquityCalibrator calibrator,
+                           Clock clock) {
         this.positionManager = positionManager;
         this.stateRepository = stateRepository;
         this.calibrator = calibrator;
+        this.mismatchLogThrottle = new LogThrottle(clock, MISMATCH_LOG_INTERVAL);
     }
 
     /**
@@ -121,10 +144,19 @@ public class ShadowPortfolio {
             double current = account.getTotalAssetValue();
             if (current <= 0 || current <= peakEquity) return;
 
+            // 증권사 총자산이 "D+2 정산 현금 + 보유수량×현재가"로 직접 계산한 값과 1% 넘게 어긋나면 인정하지 않는다
+            // (결함 6 — 장중에 튀는 값. 기존 상한은 8% 한도를 부르는 +5.11%~+15% 구간을 통과시킨다)
+            if (account.isEquityMismatch()) {
+                rejectMismatched(current, account.getEquityCheck());
+                return;
+            }
+
             // 신선한 값이어도 실측 근거상 불가능하게 크면 갱신하지 않는다 (잔고 오독 1회 → 영구 오염 차단)
             if (calibrator.isImplausible(current)) {
                 log.warn("[ShadowPortfolio] 총자산 {}이 실측 근거상 비정상 — peakEquity 갱신 건너뜀 (현재값={})",
                         current, peakEquity);
+                calibrator.notifySuspiciousPeakRejected(
+                        SuspiciousPeakReason.IMPLAUSIBLE, current, peakEquity, account.getEquityCheck());
                 return;
             }
 
@@ -141,6 +173,22 @@ public class ShadowPortfolio {
             // 이미 반영된 상태다. 사고 조사 때 "갱신 실패"로 오독되지 않게 현재값만 사실대로 남긴다.
             log.warn("[ShadowPortfolio] tick 오류 (peakEquity 현재값={}): {}", peakEquity, e.getMessage());
         }
+    }
+
+    /**
+     * 잔고 대조 불일치 거부 — 값은 메모리·DB 모두 그대로 두고, 증거(증권사값·계산값·차이)를 남기고, 사람을 부른다.
+     * 로그는 처음 1회 + 이어지면 10분에 최대 1회(생략 건수 표기), 텔레그램은 하루 1회(paper 구현체만).
+     * 원래 숫자 전부는 잔고 조회 쪽 진단 로그({@code BalanceRawDiagnostics}, 별도 10분 간격)가 같은 무렵에 남긴다.
+     */
+    private void rejectMismatched(double current, EquityCrossCheck check) {
+        mismatchLogThrottle.tryAcquire().ifPresent(skipped -> log.warn(
+                "[ShadowPortfolio] 잔고 대조 불일치 — peakEquity 갱신 거부: 증권사 총자산 {} / 계산값 {} "
+                        + "(D+2 정산 {} + 보유평가 {}) / 차이 {} / 현재 전고점 {} 유지{}",
+                String.format("%.0f", current), String.format("%.0f", check.computedTotal()),
+                String.format("%.0f", check.settledCash()), String.format("%.0f", check.holdingsValue()),
+                String.format("%+.2f%%", check.diffRatio() * 100), String.format("%.0f", peakEquity),
+                LogThrottle.skippedNote(skipped)));
+        calibrator.notifySuspiciousPeakRejected(SuspiciousPeakReason.BALANCE_MISMATCH, current, peakEquity, check);
     }
 
     /** 경신 폭 표기 — 직전값이 0(최초 확립)이면 증가율이 정의되지 않는다 */

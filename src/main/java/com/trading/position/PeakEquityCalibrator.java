@@ -41,4 +41,27 @@ public interface PeakEquityCalibrator {
      * @param current  새 전고점
      */
     default void notifyPeakRaised(double previous, double current) {}
+
+    /** 의심스러운 고점을 전고점으로 인정하지 않은 이유 — 경고 문구를 고르는 데만 쓴다 */
+    enum SuspiciousPeakReason {
+        /** 증권사 총자산이 "D+2 정산 현금 + Σ보유수량×현재가"와 허용오차 넘게 어긋남 ({@link EquityCrossCheck}) */
+        BALANCE_MISMATCH,
+        /** 실측 근거상 불가능하게 큼 ({@link #isImplausible}) */
+        IMPLAUSIBLE
+    }
+
+    /**
+     * 의심스러운 고점을 전고점으로 <b>인정하지 않았을 때</b> 호출된다 (2026-10-11, 결함 6).
+     *
+     * <p>2026-09-11 상한 거부(17,047,935원)는 WARN 로그 3줄뿐이라 아무도 몰랐다 — 사람을 부를 길이 필요하다.
+     * 알림을 여기 두는 이유는 {@link #notifyPeakRaised}와 같다: 백테스트가 텔레그램을 두드리는 경로를 구조로 막는다.
+     * 기본 구현은 무동작이라 {@link NoOpPeakEquityCalibrator}(백테스트)는 아무것도 보내지 않는다.
+     *
+     * @param reason         거부 이유
+     * @param rejectedEquity 인정하지 않은 총자산(증권사 값)
+     * @param currentPeak    그대로 둔 지금 전고점
+     * @param check          그 스냅샷의 대조 판정(상한 거부일 때는 일치·판정 불가일 수도 있다)
+     */
+    default void notifySuspiciousPeakRejected(SuspiciousPeakReason reason, double rejectedEquity,
+                                              double currentPeak, EquityCrossCheck check) {}
 }
