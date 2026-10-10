@@ -75,6 +75,14 @@ Register-ScheduledTask -TaskName AutoTrading-Paper-Logon -Xml (Get-Content AutoT
   "지금 시장에 노출된 게 있는가"를 폰에서 바로 판단할 수 있게 한다.
 - 구현: `@Scheduled` 5분 주기 HTTP GET 1건 — Phase 2에서 half-day 작업량.
 
+> ⚠ **현재 상태 (2026-10-11 확인): 꺼져 있다.** 코드(`DeadmanHeartbeat` — 실제로는 5분마다 POST, 24시간)와 시험은 있지만
+> 보낼 주소 `HEARTBEAT_URL`이 설정된 적이 없어 매번 건너뛴다. 그래서 10-06~10-08 배터리 절전으로 앱이 꺼졌을 때도
+> 경고가 오지 않았다. 켜는 순서:
+> 1. (사람) healthchecks.io 무료 계정을 만들고 체크를 하나 만든다 — 주기 5분, 유예 10분, 알림 채널은 텔레그램 또는 이메일
+> 2. 실패 로그에 ping 주소가 그대로 남는 문제(`_workspace/44_audit` L-5)를 먼저 고친다 — 주소를 아는 사람은 가짜 박동을 보낼 수 있다
+> 3. ping 주소를 Windows 사용자 환경변수 `HEARTBEAT_URL`에 넣는다
+> 4. 앱을 다시 켠다 → healthchecks 화면에 5분 간격으로 박동이 찍히는지 본다. 앱을 끄고 10분 뒤 경고가 오는지도 한 번 확인한다
+
 ## 3. 크래시 후 재시작 — SAFE_MODE 기동 시퀀스
 
 재시작한 앱은 자신이 죽어 있던 동안 무슨 일이 있었는지 모른다. 따라서 기동 직후
@@ -162,6 +170,7 @@ Register-ScheduledTask -TaskName AutoTrading-Paper-Logon -Xml (Get-Content AutoT
 | 🔇 데드맨 스위치 경고 (시스템 침묵) | ① MTS로 보유 포지션 확인 → ② 노출이 있으면 수동 손절선 주문 예약 → ③ 원격 접속으로 앱 상태 확인/재시작 (§3 시퀀스 자동 수행됨) |
 | 📉 API 장애 중 보유 포지션 존재 | 시스템이 SAFE_MODE로 스스로 전환됨 → MTS에서 수동 관리로 전환, 복구 알림 후 §6 재가동 |
 | 💾 DB 손상 | `position_rebuild.sql` + Reconciler로 브로커 기준 재구축 (기존 도구 활용) |
+| 🔒 칸 손실 상한 잠금 알림 (A동 `TREND` −12% · B동 칸 −20%, ADR-001 §2.2) | 앱이 이미 한 일: **그 칸만** 신규 매수를 막고(`SleeveLockRule`) 그 칸 보유를 정상 매도 경로로 판다. 다른 칸·계좌 전체 가드는 그대로 돈다. ① `GET /api/buckets/sleeve-status`로 칸 자산·최고 기록·낙폭·잠금 사유 확인 → ② 원인 진단([PERFORMANCE-GOVERNANCE §6](PERFORMANCE-GOVERNANCE.md) 4범주 — 특히 데이터 오염인지 실제 손실인지. 칸 자산은 매도가 추정치를 포함한다) → ③ 풀기로 정했을 때만 **사람이** 사유를 적어 해제: `Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/buckets/TREND/unlock -ContentType 'application/json' -Body '{"reason":"원인 진단 결과"}'` → ④ 해제하면 그 칸의 최고 기록이 **지금 칸 자산으로 다시 잡힌다**(다음 잠금은 거기서 다시 12%/20% 빠질 때) |
 
 런북은 인쇄 가능한 1페이지로 유지하고, 반기마다 모의 훈련(강제청산 리허설)으로 검증한다.
 
