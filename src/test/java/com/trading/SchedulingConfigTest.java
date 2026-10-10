@@ -114,7 +114,7 @@ class SchedulingConfigTest {
     }
 
     @Test
-    @DisplayName("paper 배선 — 하트비트·미러는 실행기로 ioTaskScheduler를 받는다 (Executor 빈이 2개라 이름표가 틀리면 기동이 깨진다)")
+    @DisplayName("paper 배선 — 미러 업로드는 ioTaskScheduler, 하트비트는 피드와 나눠 쓰지 않는 전용 전송 스레드 (42_audit M-1)")
     void paper_heartbeat_and_mirror_receive_the_io_scheduler() {
         Clock clock = Clock.systemDefaultZone();
         // 프로필은 속성으로 — withBean 등록이 초기화기보다 먼저 적용돼 @Profile("paper") 빈이 빠지는 것을 막는다
@@ -133,8 +133,9 @@ class SchedulingConfigTest {
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     Object io = ctx.getBean(SchedulingConfig.IO_SCHEDULER);
-                    assertThat(ReflectionTestUtils.getField(ctx.getBean(DeadmanHeartbeat.class), "ioExecutor"))
-                            .isSameAs(io);
+                    assertThat(ReflectionTestUtils.getField(ctx.getBean(DeadmanHeartbeat.class), "sendExecutor"))
+                            .isNotNull()
+                            .isNotSameAs(io);
                     assertThat(ReflectionTestUtils.getField(ctx.getBean(SupabaseMirrorScheduler.class), "uploadExecutor"))
                             .isSameAs(io);
                 });

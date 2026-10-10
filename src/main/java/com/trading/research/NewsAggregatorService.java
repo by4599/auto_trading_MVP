@@ -1,5 +1,6 @@
 package com.trading.research;
 
+import com.trading.HttpTimeouts;
 import com.trading.SchedulingConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,11 +61,14 @@ public class NewsAggregatorService {
         this.newsRepository      = newsRepository;
         this.sentimentAnalyzer   = sentimentAnalyzer;
         this.httpClient          = RestClient.builder()
+                // 제한이 없으면 대답 없는 피드 하나가 I/O 스레드를 무기한 묶어 하트비트·미러가 밀린다 (42_audit M-1)
+                .requestFactory(HttpTimeouts.requestFactory(3_000, 10_000))
                 .defaultHeader("User-Agent", "AutoTrading-NewsBot/1.0")
                 .build();
     }
 
-    @Scheduled(fixedRate = 1_800_000, scheduler = SchedulingConfig.IO_SCHEDULER) // 30분
+    // fixedDelay — fixedRate면 PC가 절전에서 깨어날 때 밀린 횟수만큼 몰아서 돈다(10-09 실측 181회/약 9분)
+    @Scheduled(fixedDelay = 1_800_000, scheduler = SchedulingConfig.IO_SCHEDULER) // 30분
     public void aggregate() {
         List<WatchlistItem> watchlist = watchlistRepository.findAll();
         int total = 0;

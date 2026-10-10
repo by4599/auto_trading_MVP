@@ -103,8 +103,8 @@ class DeadmanHeartbeatTest {
     // ── 박동 판단은 기본 스케줄러 스레드, 느린 HTTP만 I/O 스레드 (BACKLOG [2026-09-21]) ──
 
     @Test
-    @DisplayName("박동 내용은 호출(기본 스케줄러) 스레드에서 만들고, HTTP는 I/O 실행기로 넘긴다 — 감시 루프를 붙잡지 않는다")
-    void ping_hands_http_to_the_io_executor() {
+    @DisplayName("박동 내용은 호출(기본 스케줄러) 스레드에서 만들고, HTTP는 전송 실행기로 넘긴다 — 감시 루프를 붙잡지 않는다")
+    void ping_hands_http_to_the_send_executor() {
         props.setUrl("https://hc-ping.com/test-uuid");
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

@@ -1,5 +1,9 @@
 package com.trading;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
+import ch.qos.logback.core.read.ListAppender;
 import com.trading.backtest.MutableClock;
 import com.trading.market.MarketCalendarProperties;
 import com.trading.market.MarketCalendarService;
@@ -8,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -161,6 +166,41 @@ class TelegramNotifierTest {
         sut.shutdownSender();
 
         assertThat(posted).containsExactly("다음");
+    }
+
+    @Test
+    @DisplayName("전송 실패 로그에 봇 토큰이 남지 않는다 — 예외 메시지 속 요청 URL의 토큰을 가린다 (42_audit M-2)")
+    void failure_log_masks_the_bot_token() {
+        String token = "123456789:AAEhBP0av28yP8Eu-xyz_ABCdef";
+        Logger logger = (Logger) LoggerFactory.getLogger(TelegramNotifier.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            TelegramNotifier sut = notifier(text -> {
+                throw new IllegalStateException("I/O error on POST request for \"https://api.telegram.org/bot"
+                        + token + "/sendMessage\": Read timed out",
+                        new IllegalStateException("POST https://api.telegram.org/bot" + token + "/sendMessage"));
+            });
+            sut.send("알림");
+            sut.shutdownSender();
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        List<String> logged = appender.list.stream().map(TelegramNotifierTest::fullText).toList();
+        assertThat(logged).isNotEmpty();
+        assertThat(logged).noneMatch(line -> line.contains(token));
+        assertThat(logged).anyMatch(line -> line.contains("bot***"));
+    }
+
+    /** 로그 한 건에 남는 글자 전부 — 형식화된 메시지와 예외(원인 사슬 포함) 메시지 */
+    private static String fullText(ILoggingEvent event) {
+        StringBuilder sb = new StringBuilder(event.getFormattedMessage());
+        for (IThrowableProxy t = event.getThrowableProxy(); t != null; t = t.getCause()) {
+            sb.append('\n').append(t.getClassName()).append(": ").append(t.getMessage());
+        }
+        return sb.toString();
     }
 
     @Test

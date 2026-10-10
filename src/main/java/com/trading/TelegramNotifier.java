@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * 텔레그램 봇 알림 — 체결/에러 이벤트를 운영자에게 전달한다.
@@ -36,6 +37,9 @@ public class TelegramNotifier implements NotificationService {
      * 8초씩 걸릴 때도 메모리는 지키는 선. 넘친 건은 본문째 WARN 로그로만 남는다.
      */
     static final int QUEUE_CAPACITY = 100;
+
+    /** 요청 URL 속 봇 토큰 — "bot" + 숫자 ID + ":" + 비밀 문자열 */
+    private static final Pattern BOT_TOKEN = Pattern.compile("bot\\d+:[A-Za-z0-9_-]+");
 
     private final TelegramProperties props;
     private final MarketCalendarService marketCalendar;
@@ -94,9 +98,24 @@ public class TelegramNotifier implements NotificationService {
         try {
             poster.accept(text);
         } catch (Exception e) {
-            // 알림 실패는 매매 흐름에 영향을 주지 않는다
-            log.error("Telegram 알림 전송 실패: {}", text, e);
+            // 알림 실패는 매매 흐름에 영향을 주지 않는다. 예외 메시지에 요청 URL(/bot<토큰>/sendMessage)이 들어 있어
+            // 토큰을 가리고, 같은 URL을 품은 원인 메시지까지 찍히는 스택은 남기지 않는다 (42_audit M-2)
+            log.error("Telegram 알림 전송 실패: {} — {}", text, maskToken(describe(e)));
         }
+    }
+
+    /** 예외와 원인 사슬을 한 줄로 — "클래스: 메시지 ← 클래스: 메시지" */
+    private static String describe(Throwable e) {
+        StringBuilder sb = new StringBuilder();
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (!sb.isEmpty()) sb.append(" ← ");
+            sb.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());
+        }
+        return sb.toString();
+    }
+
+    static String maskToken(String message) {
+        return message == null ? null : BOT_TOKEN.matcher(message).replaceAll("bot***");
     }
 
     /** 앱 종료 시 — 새 알림은 막고, 받아 둔 것은 최대 3초 동안 마저 보낸다 */
