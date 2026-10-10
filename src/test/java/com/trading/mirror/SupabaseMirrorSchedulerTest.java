@@ -15,8 +15,12 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -40,13 +44,18 @@ class SupabaseMirrorSchedulerTest {
     private final MirrorPublisher       publisher       = mock(MirrorPublisher.class);
     private final SupabaseProperties    props           = new SupabaseProperties();
 
+    /** 업로드를 곧바로 실행하는 실행기 — 기존 검증은 넘겨받은 업로드가 바로 돈다고 보고 쓴다 */
     private SupabaseMirrorScheduler schedulerAt(LocalDateTime now) {
+        return schedulerAt(now, Runnable::run);
+    }
+
+    private SupabaseMirrorScheduler schedulerAt(LocalDateTime now, Executor uploadExecutor) {
         Clock clock = Clock.fixed(now.atZone(KST).toInstant(), KST);
         MirrorSnapshotAssembler assembler = new MirrorSnapshotAssembler(
                 positionManager, mock(PositionRepository.class), mock(TradeResultRepository.class),
                 mock(PortfolioStateRepository.class), new TradingStatusManager(), props, clock);
         MarketCalendarService calendar = new MarketCalendarService(new MarketCalendarProperties(), clock);
-        return new SupabaseMirrorScheduler(assembler, publisher, calendar, props);
+        return new SupabaseMirrorScheduler(assembler, publisher, calendar, props, uploadExecutor);
     }
 
     private void configure() {
@@ -101,5 +110,34 @@ class SupabaseMirrorSchedulerTest {
         assertThatCode(() -> schedulerAt(THU_0820.atTime(10, 0)).push())
                 .doesNotThrowAnyException();
         verify(publisher, never()).publish(any());
+    }
+
+    // ── 조립은 기본 스케줄러 스레드, 업로드만 I/O 스레드 (BACKLOG [2026-09-21]) ──
+
+    @Test
+    @DisplayName("스냅샷 조립(잔고 캐시·KIS)은 호출 스레드에서 끝내고, Supabase 업로드만 I/O 실행기로 넘긴다")
+    void assemblesOnCallerThreadAndHandsUploadToIoExecutor() {
+        configure();
+        withEmptyAccount();
+        List<Runnable> handedOff = new ArrayList<>();
+
+        schedulerAt(THU_0820.atTime(10, 0), handedOff::add).push();
+
+        verify(positionManager, times(1)).snapshotAccount();   // 잔고 조회는 기본 스레드에서만
+        verify(publisher, never()).publish(any());              // 업로드는 아직 — 넘겨졌을 뿐
+        assertThat(handedOff).hasSize(1);
+        handedOff.get(0).run();
+        verify(publisher, times(1)).publish(any());
+    }
+
+    @Test
+    @DisplayName("I/O 실행기가 거부해도(앱 종료 중) 예외가 매매 스케줄로 새지 않는다")
+    void swallowsRejectedHandOff() {
+        configure();
+        withEmptyAccount();
+        Executor rejecting = task -> { throw new RejectedExecutionException("종료 중"); };
+
+        assertThatCode(() -> schedulerAt(THU_0820.atTime(10, 0), rejecting).push())
+                .doesNotThrowAnyException();
     }
 }

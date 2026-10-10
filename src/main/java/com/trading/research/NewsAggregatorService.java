@@ -1,5 +1,6 @@
 package com.trading.research;
 
+import com.trading.SchedulingConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,6 +28,9 @@ import java.util.Locale;
  *   미분류 뉴스는 stock_code = null로 저장 (시장 전체 뉴스).
  *
  * 30일 초과 뉴스는 매일 새벽 2시 자동 삭제.
+ *
+ * 두 작업 모두 I/O 스케줄러에서 돈다 (2026-10-10) — 외부 RSS HTTP + 뉴스 테이블 쓰기뿐이라
+ * KIS·매매 상태와 무관하다. 기본 스레드에 두면 피드 응답이 늦는 동안 손절·청산 감시가 멈춘다.
  */
 @Service
 public class NewsAggregatorService {
@@ -60,7 +64,7 @@ public class NewsAggregatorService {
                 .build();
     }
 
-    @Scheduled(fixedRate = 1_800_000) // 30분
+    @Scheduled(fixedRate = 1_800_000, scheduler = SchedulingConfig.IO_SCHEDULER) // 30분
     public void aggregate() {
         List<WatchlistItem> watchlist = watchlistRepository.findAll();
         int total = 0;
@@ -74,7 +78,7 @@ public class NewsAggregatorService {
         if (total > 0) log.info("[NewsAggregator] 뉴스 {}건 저장 완료", total);
     }
 
-    @Scheduled(cron = "0 0 2 * * *") // 매일 새벽 2시
+    @Scheduled(cron = "0 0 2 * * *", scheduler = SchedulingConfig.IO_SCHEDULER) // 매일 새벽 2시
     public void cleanOld() {
         LocalDateTime threshold = LocalDateTime.now().minusDays(30);
         int deleted = newsRepository.deleteOlderThan(threshold);

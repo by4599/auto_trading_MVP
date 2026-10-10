@@ -1,5 +1,6 @@
 package com.trading.position;
 
+import com.trading.BackgroundAlertSender;
 import com.trading.NotificationService;
 import com.trading.market.MarketCalendarService;
 import com.trading.risk.RiskLimitsProperties;
@@ -96,7 +97,7 @@ public class EvidenceBasedPeakEquityCalibrator implements PeakEquityCalibrator {
         this.notifier = notifier;
         this.clock = clock;
         this.marketCalendar = marketCalendar;
-        this.alertSender = new BackgroundAlertSender(notifier, "peak-alert-sender");
+        this.alertSender = new BackgroundAlertSender(notifier::sendCritical, "peak-alert-sender");
     }
 
 
