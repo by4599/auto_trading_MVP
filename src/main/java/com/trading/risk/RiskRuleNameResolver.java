@@ -44,6 +44,7 @@ final class RiskRuleNameResolver {
         BY_FRAGMENT.put("지수 추세 필터",            "IndexTrendRule");
         BY_FRAGMENT.put("지수 레짐 필터",            "IndexRegimeRule");
         BY_FRAGMENT.put("직전 주문 실패로 대기 중",  "OrderFailureCooldownRule");
+        BY_FRAGMENT.put("잔고 정보가 낡음",          "StaleAccountBuyGuardRule");
     }
 
     private RiskRuleNameResolver() {}

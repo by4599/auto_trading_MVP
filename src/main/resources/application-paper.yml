@@ -56,6 +56,11 @@ trading:
       enabled: true
       ma-period: 120
 
+  # 낡은 잔고로 신규 매수 금지 (28_audit M-3, 2026-10-10 사용자 결정) — 잔고 조회가 실패해 캐시·DB 폴백 값이면
+  # 사지 않는다(StaleAccountBuyGuardRule). 매도는 막지 않는다.
+  risk:
+    stale-account-buy-guard: true
+
   # ── 2026-10-01 A동(Sleeve A) 전환 — 사용자 결정 (ADR-001 2026-08-07 개정: A동 개시·자금 40%) ──
   # 검증 설정 = BACKTEST-DESIGN §15.7 D0: 돈치안(20/120) + P3 출구 + SZ2(0.25R·동시5) + 지수 MA120.
   # 당일 청산 3방식(B동)은 전부 백테스트 불합격이라 끈다 — 계좌 원장(daily_equity)으로 A동만 재기 위해.

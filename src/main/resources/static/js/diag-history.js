@@ -50,6 +50,7 @@ const RULE_LABEL = {
   IndexTrendRule:           '시장 전체가 내리막이라서',
   IndexRegimeRule:          '시장 분위기가 나빠서',
   OrderFailureCooldownRule: '조금 전 주문이 실패해서 쉬는 중',
+  StaleAccountBuyGuardRule: '잔고 정보를 못 받아서 (오래된 값)',
 };
 
 /** 룰 이름을 못 알아보면(UNKNOWN 등) 원문 사유를 그대로 보여준다 */
