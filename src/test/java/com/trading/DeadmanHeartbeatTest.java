@@ -10,10 +10,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -43,7 +48,8 @@ class DeadmanHeartbeatTest {
 
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
-        sut = new DeadmanHeartbeat(props, statusManager, positionRepository, builder.build());
+        // 바로 실행하는 실행기 — 기존 검증(요청·실패 삼킴)은 넘겨받은 작업이 곧바로 돈다고 보고 쓴다
+        sut = new DeadmanHeartbeat(props, statusManager, positionRepository, builder.build(), Runnable::run);
     }
 
     @Test
@@ -92,5 +98,39 @@ class DeadmanHeartbeatTest {
         sut.ping(); // 예외가 밖으로 새면 테스트 실패
 
         mockServer.verify();
+    }
+
+    // ── 박동 판단은 기본 스케줄러 스레드, 느린 HTTP만 I/O 스레드 (BACKLOG [2026-09-21]) ──
+
+    @Test
+    @DisplayName("박동 내용은 호출(기본 스케줄러) 스레드에서 만들고, HTTP는 전송 실행기로 넘긴다 — 감시 루프를 붙잡지 않는다")
+    void ping_hands_http_to_the_send_executor() {
+        props.setUrl("https://hc-ping.com/test-uuid");
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://hc-ping.com/test-uuid"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess());
+        List<Runnable> handedOff = new ArrayList<>();
+        DeadmanHeartbeat deferred =
+                new DeadmanHeartbeat(props, statusManager, positionRepository, builder.build(), handedOff::add);
+
+        deferred.ping();
+
+        verify(positionRepository).findAll();                                    // 박동 내용은 이미 만들어졌다
+        assertThat(handedOff).hasSize(1);                                         // HTTP는 넘겨졌을 뿐
+        assertThatThrownBy(server::verify).isInstanceOf(AssertionError.class);   // 아직 안 나갔다
+        handedOff.get(0).run();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("I/O 실행기가 거부해도(앱 종료 중) 예외가 밖으로 새지 않는다")
+    void rejected_hand_off_does_not_propagate() {
+        props.setUrl("https://hc-ping.com/test-uuid");
+        DeadmanHeartbeat rejecting = new DeadmanHeartbeat(props, statusManager, positionRepository,
+                RestClient.create(), task -> { throw new RejectedExecutionException("종료 중"); });
+
+        assertThatCode(rejecting::ping).doesNotThrowAnyException();
     }
 }

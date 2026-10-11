@@ -2,6 +2,8 @@ package com.trading.risk;
 
 import com.trading.market.AtrCalculator;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.market.MarketDataService;
 import com.trading.order.KisOrderClient;
 import com.trading.order.OrderEngine;
@@ -18,6 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,6 +47,13 @@ class StopLossMonitorTest {
     private KisProperties kisProperties;
     private StopLossMonitor sut;
 
+    /** 평일 장중(2026-10-01 12:00 KST)으로 고정된 캘린더 — 장 시간 게이트(감사 H-1(c))를 통과시킨다 */
+    static MarketCalendarService inHours() {
+        ZoneId kst = ZoneId.of("Asia/Seoul");
+        Clock fixed = Clock.fixed(LocalDateTime.of(2026, 10, 1, 12, 0).atZone(kst).toInstant(), kst);
+        return new MarketCalendarService(new MarketCalendarProperties(), fixed);
+    }
+
     @BeforeEach
     void setUp() {
         positionRepository = mock(PositionRepository.class);
@@ -59,12 +71,12 @@ class StopLossMonitorTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
-                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
-                new com.trading.strategy.ScalpingProperties());
+                new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
+                new com.trading.strategy.ScalpingProperties(), inHours());
     }
 
     /** 보유 33주 @72,500, 손절선 69,500, 현재가 currentPrice인 상태를 구성 */
@@ -125,6 +137,23 @@ class StopLossMonitorTest {
     }
 
     @Test
+    @DisplayName("낡은(폴백) 스냅샷 → 손절선 하회여도 매도 안 함 (옛 가격 헛매도 방지)")
+    void skips_when_snapshot_stale() {
+        Position pos = Position.empty("005930");
+        pos.applyBuy(33, 72_500.0);
+        pos.armStopLoss(69_500.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+        // 현재가 69,000 ≤ 손절선 69,500 이지만 스냅샷이 낡음(asStale)
+        when(positionManager.snapshotAccount()).thenReturn(new Account(
+                10_000_000, 0.0, 0,
+                List.of(new Account.PositionSnapshot("005930", 33, 72_500.0, 69_000.0))).asStale());
+
+        sut.checkStops();
+
+        verify(orderClient, never()).sell(anyString(), anyInt());
+    }
+
+    @Test
     @DisplayName("미체결 SELL 존재 → 중복 매도 방지")
     void skips_when_pending_sell_exists() {
         givenArmedPosition(69_500.0, 69_000.0);
@@ -171,12 +200,12 @@ class StopLossMonitorTest {
         OrderEngine orderEngine = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(mock(MarketDataService.class), positionManager, new AtrCalculator(), new RiskLimitsProperties(),
                         com.trading.bucket.BucketTestSupport.disabledProps(),
-                        com.trading.bucket.BucketTestSupport.disabledAccounts()),
+                        com.trading.bucket.BucketTestSupport.disabledAccounts(), com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
         sut = new StopLossMonitor(positionRepository, orderHistoryRepository, positionManager,
                 new RiskEngine(List.of()), orderEngine, statusManager, kisProperties,
-                new TrailingStopTracker(new com.trading.strategy.FilterProperties()),
-                scalpingProperties);
+                new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams()),
+                scalpingProperties, inHours());
     }
 
     private Position givenMixPosition(double avgPrice, double currentPrice) {

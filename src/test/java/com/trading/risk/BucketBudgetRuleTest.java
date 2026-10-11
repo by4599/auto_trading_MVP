@@ -39,7 +39,7 @@ class BucketBudgetRuleTest {
 
     private BucketBudgetRule rule(boolean enabled) {
         BucketProperties props = new BucketProperties(enabled, "2026-01-01",
-                10_000_000, 10_000_000, 10_000_000, false, false);
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
         return new BucketBudgetRule(props,
                 new BucketAccountService(props, positionRepository, tradeResultRepository));
     }

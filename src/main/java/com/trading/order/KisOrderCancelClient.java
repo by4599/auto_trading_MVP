@@ -30,7 +30,7 @@ public class KisOrderCancelClient implements OrderCancelClient {
     }
 
     @Override
-    public boolean cancelAll(String orderNo) {
+    public CancelOutcome cancelAll(String orderNo) {
         String[] acnt = split(kisApiClient.getProps().getAccountNo());
 
         Map<String, String> body = new LinkedHashMap<>();
@@ -53,11 +53,41 @@ public class KisOrderCancelClient implements OrderCancelClient {
                     .retrieve()
                     .body(CancelResponse.class);
 
-            return resp != null && resp.isSuccess();
+            if (resp == null) {
+                log.warn("취소 응답 없음: ordNo={}", orderNo);
+                return CancelOutcome.FAILED;
+            }
+            CancelOutcome outcome = classify(resp.rtCd(), resp.msg1());
+            if (outcome == CancelOutcome.FAILED) {
+                log.warn("취소 거부: ordNo={} rt_cd={} msg={}", orderNo, resp.rtCd(), resp.msg1());
+            }
+            return outcome;
         } catch (Exception e) {
             log.error("취소 API 오류: ordNo={}", orderNo, e);
-            return false;
+            return CancelOutcome.FAILED;
         }
+    }
+
+    /**
+     * KIS 취소 응답을 결과로 분류한다.
+     * 종료된 주문은 취소 잔량이 없거나("취소할 수량 없음") 원주문번호가 사라져
+     * ("원주문번호가 존재하지 않습니다") 취소가 거부된다 — 둘 다 NO_OPEN_QTY로 보고
+     * 호출 측이 실잔고 대사로 종결하게 한다.
+     *
+     * <p>"장종료"는 MARKET_CLOSED — 장이 닫혀 취소가 불가능하다는 뜻이다(실측 문구
+     * {@code 모의투자 장종료 입니다.}). 실전 계좌 문구가 다를 수 있어 부분 문자열로 느슨하게
+     * 잡는다. <b>검사 순서를 바꾸지 말 것</b>: 이미 체결된 주문(NO_OPEN_QTY)이 우선이며,
+     * 그 판정이 실잔고 대사로 desync를 복구하는 유일한 경로다.
+     */
+    static CancelOutcome classify(String rtCd, String msg1) {
+        if ("0".equals(rtCd)) return CancelOutcome.SENT;
+        if (msg1 != null && (msg1.contains("취소할 수량") || msg1.contains("원주문번호가 존재하지 않"))) {
+            return CancelOutcome.NO_OPEN_QTY;
+        }
+        if (msg1 != null && msg1.contains("장종료")) {
+            return CancelOutcome.MARKET_CLOSED;
+        }
+        return CancelOutcome.FAILED;
     }
 
     private static String[] split(String accountNo) {

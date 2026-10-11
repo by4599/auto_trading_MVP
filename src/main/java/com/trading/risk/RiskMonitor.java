@@ -2,6 +2,7 @@ package com.trading.risk;
 
 import com.trading.NotificationService;
 import com.trading.market.KisProperties;
+import com.trading.market.MarketCalendarService;
 import com.trading.position.Account;
 import com.trading.position.PositionManager;
 import com.trading.position.ShadowPortfolio;
@@ -23,6 +24,10 @@ import org.springframework.stereotype.Component;
  * 역할 분리: 룰(DailyLossRule/GlobalEquityStopRule) = 매수 거부,
  * RiskMonitor = 청산 트리거. 임계값은 RiskLimits 공유.
  * 중복 트리거는 LiquidationService의 phase 상태머신이 멱등 처리한다.
+ *
+ * 예외 하나: 전고점이 클램프 교정된 미검증 값이면(ShadowPortfolio.isPeakUnverified) MDD
+ * 자동 강제청산만 보류하고 사람 확인을 기다린다 — 그 MDD는 과대평가라 헛청산이 되기 때문이다.
+ * 보류 중에도 매수 차단·일일손실 청산·종목별 손절은 그대로 동작한다.
  */
 @Component
 @Profile("paper")
@@ -37,6 +42,10 @@ public class RiskMonitor {
     private final KisProperties kisProperties;
     private final NotificationService notifier;
     private final RiskLimitsProperties limits;
+    private final MarketCalendarService marketCalendar;
+
+    /** 1초 주기 감시라 "청산 보류" 통지는 보류가 시작될 때 한 번만 보낸다 (텔레그램·로그 폭주 방지) */
+    private volatile boolean unverifiedPeakNoticeSent = false;
 
     public RiskMonitor(PositionManager positionManager,
                        ShadowPortfolio shadowPortfolio,
@@ -44,7 +53,8 @@ public class RiskMonitor {
                        TradingStatusManager statusManager,
                        KisProperties kisProperties,
                        NotificationService notifier,
-                       RiskLimitsProperties limits) {
+                       RiskLimitsProperties limits,
+                       MarketCalendarService marketCalendar) {
         this.positionManager = positionManager;
         this.shadowPortfolio = shadowPortfolio;
         this.liquidationService = liquidationService;
@@ -52,6 +62,7 @@ public class RiskMonitor {
         this.kisProperties = kisProperties;
         this.notifier = notifier;
         this.limits = limits;
+        this.marketCalendar = marketCalendar;
     }
 
     @PostConstruct
@@ -63,6 +74,8 @@ public class RiskMonitor {
     @Scheduled(fixedDelay = 1000)
     public void monitor() {
         if (!kisProperties.isConfigured()) return;
+        // 장 시간 외에는 청산 판정을 하지 않는다 — 마감 후 낡은 데이터로 헛청산하던 오판 차단
+        if (!marketCalendar.isDuringMarketHoursNow()) return;
         TradingMode mode = statusManager.getCurrentMode();
         if (mode != TradingMode.RUNNING && mode != TradingMode.SAFE_MODE) return;
         if (liquidationService.isAnyLiquidationInProgress()) return;
@@ -72,6 +85,13 @@ public class RiskMonitor {
             account = positionManager.snapshotAccount();
         } catch (Exception e) {
             log.warn("[RiskMonitor] 계좌 스냅샷 실패 — 이번 틱 건너뜀: {}", e.getMessage());
+            return;
+        }
+
+        // 낡은(폴백) 스냅샷이면 청산 판정을 건너뛴다 — 잔고 API 실패 시 옛 값으로
+        // 오판해 헛청산하는 사고 방지 (2026-07-30 -11.19% 오판 사건)
+        if (!account.isFresh()) {
+            log.warn("[RiskMonitor] 계좌 스냅샷이 낡음(잔고 API 실패 폴백) — 청산 판정 건너뜀");
             return;
         }
 
@@ -95,6 +115,14 @@ public class RiskMonitor {
         if (peak > 0) {
             double drawdown = (peak - current) / peak;
             if (drawdown > limits.getMddLimit()) {
+                // 전고점이 클램프 교정된 미검증 값이면 이 MDD는 과대평가다 — 자동청산을 보류하고
+                // 사람 확인을 기다린다. 매수 차단(GlobalEquityStopRule)은 그대로라 노출은 늘지 않고,
+                // 일일 손실 -5% 청산(위 1번)과 종목별 손절(StopLossMonitor)도 그대로 살아 있다.
+                if (shadowPortfolio.isPeakUnverified()) {
+                    holdLiquidationForUnverifiedPeak(drawdown, peak, current);
+                    return;
+                }
+                unverifiedPeakNoticeSent = false;
                 log.error("[RiskMonitor] MDD {}% 초과 (peak={}, current={}) — 강제청산 트리거",
                         String.format("%.2f", drawdown * 100), peak, current);
                 notifier.sendCritical(String.format(
@@ -103,5 +131,22 @@ public class RiskMonitor {
                 liquidationService.triggerForceLiquidation();
             }
         }
+    }
+
+    private void holdLiquidationForUnverifiedPeak(double drawdown, double peak, double current) {
+        if (unverifiedPeakNoticeSent) {
+            log.debug("[RiskMonitor] 전고점 미검증 — MDD {}% 자동청산 보류 유지",
+                    String.format("%.2f", drawdown * 100));
+            return;
+        }
+        unverifiedPeakNoticeSent = true;
+        log.error("[RiskMonitor] 전고점 미검증(클램프 교정값) — MDD {}% 자동 강제청산 보류, 사람 확인 대기"
+                        + " (peak={}, current={})", String.format("%.2f", drawdown * 100), peak, current);
+        notifier.sendCritical(String.format(
+                "⏸ [RiskMonitor] 전고점 대비 MDD %.2f%%(한도 %.0f%%)이지만 전고점이 교정된 미검증 값이라"
+                        + " 자동 강제청산을 보류했습니다.%n전고점 %,.0f원 / 현재 자산 %,.0f원%n"
+                        + "실제 잔고를 확인한 뒤 확인 처리(/api/trading/peak-equity-ack)를 해야 자동청산이 돌아옵니다."
+                        + " 그동안 신규 매수는 계속 막혀 있습니다.",
+                drawdown * 100, limits.getMddLimit() * 100, peak, current));
     }
 }

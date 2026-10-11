@@ -7,15 +7,15 @@ import org.springframework.stereotype.Component;
 /**
  * 실현손익 기반 연속 손실 카운터 (감사 F-5 나머지).
  *
- * 매도 체결(FillStateUpdater)이 실현손익을 기록하면:
+ * 집계 단위는 라운드트립(진입~전량 청산) 1회다:
  *   손실(< 0)  → 카운트 +1
  *   수익/본전  → 카운트 0으로 리셋
  *
+ * 매도가 여러 조각으로 체결돼도 한 매매는 한 번만 센다 — 조각 손익은 Position에 누적되고
+ * 보유 수량이 0이 되는 순간 합계로 판정한다. 일부만 줄인 상태(Trim)는 아직 세지 않는다.
+ *
  * 카운트는 portfolio_state에 영속화되어 장중 재시작에도 유지된다 (peakEquity와 동일 패턴).
  * ConsecutiveLossRule이 3회 도달 시 1시간 매수 차단 + resetStreak() 호출.
- *
- * v1 한계: 매도 체결 청크 단위로 1회 기록한다. 주문 1주 고정이라 "1 거래 = 1 매도 = 1 기록"이
- * 성립하며, v2에서 부분 체결 매도가 생기면 라운드트립 단위 집계로 바꿔야 한다.
  */
 @Component
 public class TradeResultTracker {
@@ -29,23 +29,24 @@ public class TradeResultTracker {
     }
 
     /**
-     * 매도 체결의 실현손익을 반영한다. FillStateUpdater의 트랜잭션 안에서 호출되므로
-     * 포지션 갱신과 카운트 갱신이 원자적으로 커밋된다.
+     * 라운드트립 1회(진입~전량 청산)의 실현손익을 반영한다. 호출부(FillStateUpdater)의
+     * 트랜잭션 안에서 호출되므로 포지션 갱신과 카운트 갱신이 원자적으로 커밋된다.
+     *
+     * 조각 체결을 어떻게 합칠지는 호출부의 책임이다 — 여기는 이미 확정된 한 매매의 손익만 받는다.
      */
-    public void recordSellFill(String stockCode, int quantity, double sellPrice, double avgBuyPrice) {
-        double realized = (sellPrice - avgBuyPrice) * quantity;
+    public void recordRoundTrip(String stockCode, double realizedPnl) {
         int previous = getConsecutiveLossCount();
-        int updated = realized < 0 ? previous + 1 : 0;
+        int updated = realizedPnl < 0 ? previous + 1 : 0;
 
         portfolioStateRepository.save(
                 PortfolioState.of(PortfolioState.KEY_CONSECUTIVE_LOSS_COUNT, updated));
 
-        if (realized < 0) {
-            log.warn("[TradeResult] 손실 확정: stockCode={} qty={} 실현손익={} 연속손실={}회",
-                    stockCode, quantity, String.format("%.0f", realized), updated);
+        if (realizedPnl < 0) {
+            log.warn("[TradeResult] 손실 확정: stockCode={} 실현손익={} 연속손실={}회",
+                    stockCode, String.format("%.0f", realizedPnl), updated);
         } else {
-            log.info("[TradeResult] 수익/본전 확정: stockCode={} qty={} 실현손익={} — 연속손실 리셋",
-                    stockCode, quantity, String.format("%.0f", realized));
+            log.info("[TradeResult] 수익/본전 확정: stockCode={} 실현손익={} — 연속손실 리셋",
+                    stockCode, String.format("%.0f", realizedPnl));
         }
     }
 

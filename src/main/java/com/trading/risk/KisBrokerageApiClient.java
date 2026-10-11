@@ -60,11 +60,18 @@ public class KisBrokerageApiClient implements BrokerageApiClient {
         log.warn("[청산 준비] 미체결 주문 {}건 일괄 취소 개시", pending.size());
         for (OrderHistory order : pending) {
             try {
-                if (cancelClient.cancelAll(order.getOrderNo())) {
+                switch (cancelClient.cancelAll(order.getOrderNo())) {
                     // 최종 취소 확정은 FillPoller의 finalizeAfterCancel 경로가 담당
-                    fillStateUpdater.markCancelRequested(order.getId());
-                } else {
-                    log.error("[청산 준비] 취소 접수 실패 — 계속 진행: ordNo={}", order.getOrderNo());
+                    case SENT -> fillStateUpdater.markCancelRequested(order.getId());
+                    // 이미 체결/종료 — 취소할 잔량 없음. 잔고는 청산 본체가 실잔고 기준으로 처리
+                    case NO_OPEN_QTY -> log.warn(
+                            "[청산 준비] 취소할 잔량 없음(이미 체결/종료) — 건너뜀: ordNo={}", order.getOrderNo());
+                    // 장외 청산(예약 리허설 등)에서 KIS가 취소를 거부한 경우. 청산은 멈추지 않는다 —
+                    // 이 경로는 CancelRetryGate를 타지 않으므로 억제 없이 매번 시도한다(FillProcessor와 다름)
+                    case MARKET_CLOSED -> log.error(
+                            "[청산 준비] 장종료로 취소 거부 — 계속 진행: ordNo={}", order.getOrderNo());
+                    case FAILED -> log.error(
+                            "[청산 준비] 취소 접수 실패 — 계속 진행: ordNo={}", order.getOrderNo());
                 }
             } catch (Exception e) {
                 // 한 건의 실패가 전체 취소 루프를 멈추지 않는다 (종목별 예외 격리 — ADR 2.3)

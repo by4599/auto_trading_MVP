@@ -59,7 +59,7 @@ class ReviewServiceTest {
         sut = new ReviewService(
                 new TradingUniverseService(universeRepository),
                 marketDataService,
-                new QuoteCacheService(null, new KisProperties()), // 미설정 — 현재가 경로 미실행
+                new QuoteCacheService(null, new KisProperties(), 15_000L), // 미설정 — 현재가 경로 미실행
                 new StrategyParameters(),
                 filters,
                 disclosureRepository,

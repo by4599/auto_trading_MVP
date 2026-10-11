@@ -30,7 +30,7 @@ public class VolatilityBreakoutStrategy implements Strategy {
 
     @Override
     public List<Signal> evaluate(String stockCode, List<Candle> candles) {
-        if (candles.size() < 2) {
+        if (!parameters.isEnabled() || candles.size() < 2) {
             return List.of();
         }
 

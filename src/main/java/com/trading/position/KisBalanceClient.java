@@ -7,16 +7,24 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 
 /**
  * KIS 잔고조회 API(VTTC8434R) 래퍼.
  *
  * 반환하는 BalanceSnapshot의 totalAssetValue는 output2의 tot_evlu_amt로,
  * "예수금 + 보유종목 평가금액"이다 — 현금을 포함한 진짜 총자산.
+ * deposit은 output2의 dnca_tot_amt(예수금총액) — 수수료·세금이 이미 차감된 현금이다.
  * 보유종목의 currentPrice는 KIS가 계산해 주는 실시간 현재가(prpr)다.
  *
  * 감사 F-1(현금 미포함 + 평단가 근사로 인한 MDD 오탐/미탐)의 해소 지점.
+ *
+ * 2026-10-11(결함 6 — 총자산이 가끔 튄다): 응답 → 스냅샷 조립은 {@link KisBalanceRaw}(순수 계산)로 옮겼고,
+ * 스냅샷에 총자산 대조 판정({@link EquityCrossCheck})을 싣는다. 증권사가 보낸 원래 숫자는
+ * {@link BalanceRawDiagnostics}가 이상할 때·하루 1회 로그로 남긴다. 기존 세 값의 뜻은 그대로다.
+ * 이 클래스는 HTTP 호출과 결과코드 검사만 하는 얇은 래퍼다.
  */
 @Component
 @Profile("paper")
@@ -28,16 +36,43 @@ public class KisBalanceClient implements BalanceClient {
     private static final String TR_BALANCE  = "VTTC8434R"; // 모의투자 잔고조회
 
     private final KisApiClient kisApiClient;
+    private final BalanceRawDiagnostics diagnostics;
 
-    public KisBalanceClient(KisApiClient kisApiClient) {
+    /** @param clock KST 시계(ClockConfig) — 하루 1회 기준선의 "하루"를 가른다 */
+    public KisBalanceClient(KisApiClient kisApiClient, Clock clock) {
         this.kisApiClient = kisApiClient;
+        this.diagnostics = new BalanceRawDiagnostics(clock);
     }
 
     @Override
     public BalanceSnapshot fetchBalance() {
-        String[] acnt = splitAccountNo(kisApiClient.getProps().getAccountNo());
+        BalanceResponse resp = request();
 
-        BalanceResponse resp = kisApiClient.getClient().get()
+        if (resp == null) {
+            throw new IllegalStateException("잔고조회 응답이 비어있습니다 (null)");
+        }
+        // rt_cd(결과코드)를 먼저 확인해 KIS의 실제 오류 메시지(msg1)를 그대로 드러낸다.
+        // (output2 검사를 먼저 하면 "output2 없음"이 진짜 원인 메시지를 가려버린다)
+        if (resp.rtCd() != null && !"0".equals(resp.rtCd())) {
+            throw new IllegalStateException("잔고조회 실패: rt_cd=" + resp.rtCd() + " msg=" + resp.msg1());
+        }
+        if (resp.output2() == null || resp.output2().isEmpty() || resp.output2().get(0) == null) {
+            throw new IllegalStateException(
+                    "잔고조회 응답 비정상: output2 없음 (rt_cd=" + resp.rtCd() + " msg=" + resp.msg1() + ")");
+        }
+
+        KisBalanceRaw raw = KisBalanceRaw.of(resp.output2().get(0), resp.output1());
+        BalanceSnapshot snapshot = raw.toSnapshot();
+        recordDiagnostics(raw, snapshot);
+
+        log.debug("잔고조회 완료: 총자산={} 예수금={} 보유종목={}",
+                snapshot.totalAssetValue(), snapshot.deposit(), snapshot.holdings().size());
+        return snapshot;
+    }
+
+    private BalanceResponse request() {
+        String[] acnt = splitAccountNo(kisApiClient.getProps().getAccountNo());
+        return kisApiClient.getClient().get()
                 .uri(b -> b.path(BALANCE_URI)
                         .queryParam("CANO",                  acnt[0])
                         .queryParam("ACNT_PRDT_CD",          acnt[1])
@@ -55,56 +90,14 @@ public class KisBalanceClient implements BalanceClient {
                 .header("custtype", "P")
                 .retrieve()
                 .body(BalanceResponse.class);
-
-        if (resp == null) {
-            throw new IllegalStateException("잔고조회 응답이 비어있습니다 (null)");
-        }
-        // rt_cd(결과코드)를 먼저 확인해 KIS의 실제 오류 메시지(msg1)를 그대로 드러낸다.
-        // (output2 검사를 먼저 하면 "output2 없음"이 진짜 원인 메시지를 가려버린다)
-        if (resp.rtCd() != null && !"0".equals(resp.rtCd())) {
-            throw new IllegalStateException("잔고조회 실패: rt_cd=" + resp.rtCd() + " msg=" + resp.msg1());
-        }
-        if (resp.output2() == null || resp.output2().isEmpty()) {
-            throw new IllegalStateException(
-                    "잔고조회 응답 비정상: output2 없음 (rt_cd=" + resp.rtCd() + " msg=" + resp.msg1() + ")");
-        }
-
-        AccountSummary summary = resp.output2().get(0);
-        double totalAssetValue = parseDouble(summary.totalEvaluation());
-
-        List<Holding> holdings = resp.output1() == null ? List.of()
-                : resp.output1().stream()
-                        .filter(h -> parseInt(h.quantity()) > 0)
-                        .map(h -> new Holding(
-                                h.stockCode(),
-                                parseInt(h.quantity()),
-                                parseDouble(h.avgPrice()),
-                                parseDouble(h.currentPrice())))
-                        .toList();
-
-        log.debug("잔고조회 완료: 총자산={} 보유종목={}", totalAssetValue, holdings.size());
-        return new BalanceSnapshot(totalAssetValue, holdings);
     }
 
-    // ── 파싱 헬퍼 ─────────────────────────────────────────────────────────────
-
-    private static double parseDouble(String s) {
-        if (s == null || s.isBlank()) return 0.0;
+    /** 진단은 기록 전용이다 — 기록이 실패해도 잔고 조회(청산·손절 감시의 입력)를 막지 않는다 */
+    private void recordDiagnostics(KisBalanceRaw raw, BalanceSnapshot snapshot) {
         try {
-            return Double.parseDouble(s.trim());
-        } catch (NumberFormatException e) {
-            log.warn("잔고 숫자 파싱 실패 (0.0 반환): '{}'", s);
-            return 0.0;
-        }
-    }
-
-    private static int parseInt(String s) {
-        if (s == null || s.isBlank()) return 0;
-        try {
-            return Integer.parseInt(s.trim());
-        } catch (NumberFormatException e) {
-            log.warn("잔고 정수 파싱 실패 (0 반환): '{}'", s);
-            return 0;
+            diagnostics.record(raw, snapshot);
+        } catch (RuntimeException e) {
+            log.warn("잔고 원래 숫자 기록 실패(조회 결과는 그대로 사용): {}", e.toString());
         }
     }
 
@@ -121,22 +114,14 @@ public class KisBalanceClient implements BalanceClient {
 
     // ── KIS 응답 DTO ──────────────────────────────────────────────────────────
 
+    /**
+     * output2는 칸을 고르지 않고 키=값 전부를 받는다 — 이상할 때 증권사가 보낸 원래 숫자를 모두 남기기 위해서다.
+     * 상위 필드(연속조회키 등)는 받지 않는다(계좌번호를 품을 수 있다).
+     */
     private record BalanceResponse(
             @JsonProperty("rt_cd")   String rtCd,
             @JsonProperty("msg1")    String msg1,
-            @JsonProperty("output1") List<HoldingData> output1,
-            @JsonProperty("output2") List<AccountSummary> output2
-    ) {}
-
-    private record HoldingData(
-            @JsonProperty("pdno")          String stockCode,     // 종목코드
-            @JsonProperty("hldg_qty")      String quantity,       // 보유수량
-            @JsonProperty("pchs_avg_pric") String avgPrice,       // 매입평균가
-            @JsonProperty("prpr")          String currentPrice    // 현재가
-    ) {}
-
-    private record AccountSummary(
-            @JsonProperty("dnca_tot_amt") String deposit,          // 예수금총액
-            @JsonProperty("tot_evlu_amt") String totalEvaluation   // 총평가금액 (예수금+평가금액)
+            @JsonProperty("output1") List<KisBalanceRaw.Row> output1,
+            @JsonProperty("output2") List<Map<String, Object>> output2
     ) {}
 }

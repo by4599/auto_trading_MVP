@@ -2,7 +2,13 @@ package com.trading.market;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +41,14 @@ class MarketCalendarServiceTest {
 
     private static Clock fixedAt(LocalDate date, int hour, int minute) {
         return Clock.fixed(LocalDateTime.of(date, LocalTime.of(hour, minute)).atZone(KST).toInstant(), KST);
+    }
+
+    private static MarketCalendarProperties loadRealCalendarFile() throws IOException {
+        List<PropertySource<?>> sources = new YamlPropertySourceLoader()
+                .load("market-calendar", new ClassPathResource("market-calendar.yml"));
+        return new Binder(ConfigurationPropertySources.from(sources))
+                .bind("market-calendar", MarketCalendarProperties.class)
+                .get();
     }
 
     // ── 휴장일 판정 ──────────────────────────────────────────────────────────
@@ -146,5 +160,20 @@ class MarketCalendarServiceTest {
                 fixedAt(csat, 9, 30)); // 평시라면 장중이지만 수능일 개장 전(10:00 전)
 
         assertThat(sut.isDuringMarketHoursNow()).isFalse(); // 아직 개장 전
+    }
+
+    // ── 실제 캘린더 파일 ─────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("실제 market-calendar.yml — 2026 추석(9/24·9/25) 휴장, 연휴 전날(9/23)은 거래일")
+    void real_calendar_file_registers_chuseok_2026() throws IOException {
+        LocalDate chuseokEve = LocalDate.of(2026, 9, 24); // 목요일
+        LocalDate chuseok    = LocalDate.of(2026, 9, 25); // 금요일
+        LocalDate dayBefore  = LocalDate.of(2026, 9, 23); // 수요일
+        MarketCalendarService sut = new MarketCalendarService(loadRealCalendarFile(), fixedAt(chuseokEve, 10, 0));
+
+        assertThat(sut.isTradingDay(chuseokEve)).isFalse();
+        assertThat(sut.isTradingDay(chuseok)).isFalse();
+        assertThat(sut.isTradingDay(dayBefore)).isTrue();
     }
 }

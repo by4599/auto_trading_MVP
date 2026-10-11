@@ -3,30 +3,37 @@ package com.trading.dashboard;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.trading.market.KisApiClient;
 import com.trading.market.KisProperties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * KIS 현재가 조회 + 2초 TTL 캐시 (DashboardController에서 추출한 공용 컴포넌트).
+ * KIS 현재가 조회 + TTL 캐시 (DashboardController에서 추출한 공용 컴포넌트).
  *
  * 대시보드·검토종목 등 여러 조회 경로가 같은 캐시를 공유해 KIS 모의계좌
  * 레이트리밋(초당 2건)을 보호한다. 이 컴포넌트는 조회 전용이다.
+ *
+ * TTL을 짧게 두면 대시보드가 유니버스 20종목을 자주 재조회하며 KIS 초당 한도
+ * (EGW00201)를 넘겨 SAFE_MODE 플래핑을 유발한다. 표시용 가격은 다소 지연돼도
+ * 무방하므로 기본 15초로 두고 `dashboard.quote-cache-ttl-ms`로 조정한다.
  */
 @Component
 public class QuoteCacheService {
 
     private static final String TR_CURRENT_PRICE   = "FHKST01010100";
     private static final String MARKET_CODE        = "J";
-    private static final long   QUOTE_CACHE_TTL_MS = 2_000L;
 
     private final KisApiClient  kisApiClient;
     private final KisProperties kisProperties;
+    private final long          quoteCacheTtlMs;
     private final ConcurrentHashMap<String, CachedQuote> cache = new ConcurrentHashMap<>();
 
-    public QuoteCacheService(KisApiClient kisApiClient, KisProperties kisProperties) {
-        this.kisApiClient  = kisApiClient;
-        this.kisProperties = kisProperties;
+    public QuoteCacheService(KisApiClient kisApiClient, KisProperties kisProperties,
+                             @Value("${dashboard.quote-cache-ttl-ms:15000}") long quoteCacheTtlMs) {
+        this.kisApiClient    = kisApiClient;
+        this.kisProperties   = kisProperties;
+        this.quoteCacheTtlMs = quoteCacheTtlMs;
     }
 
     public boolean isConfigured() {
@@ -36,7 +43,7 @@ public class QuoteCacheService {
     /** 현재가 스냅샷 (2초 캐시). 미설정/응답 없음이면 예외. */
     public Quote fetch(String stockCode) {
         CachedQuote cached = cache.get(stockCode);
-        if (cached != null && !cached.isStale()) return cached.quote();
+        if (cached != null && !cached.isStale(quoteCacheTtlMs)) return cached.quote();
 
         PriceResponse resp = kisApiClient.getClient().get()
                 .uri(b -> b.path("/uapi/domestic-stock/v1/quotations/inquire-price")
@@ -66,7 +73,7 @@ public class QuoteCacheService {
                         double changeRate, long volume) {}
 
     private record CachedQuote(Quote quote, long timestamp) {
-        boolean isStale() { return System.currentTimeMillis() - timestamp > QUOTE_CACHE_TTL_MS; }
+        boolean isStale(long ttlMs) { return System.currentTimeMillis() - timestamp > ttlMs; }
     }
 
     private static long parseLong(String s) {

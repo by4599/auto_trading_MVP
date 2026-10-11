@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -59,8 +60,18 @@ public class CandleBackfillService {
         return List.copyOf(merged);
     }
 
-    /** 재생 시작일 이전 워밍업(전일봉·ATR 14) 여유를 포함해 적재한다 */
+    /**
+     * 재생 시작일 이전 워밍업(전일봉·ATR 14) 여유를 포함해 적재한다.
+     *
+     * <p>{@code backtest.backfill-from}이 설정돼 있으면 그 날짜를 저장 하한으로 쓴다 —
+     * 판정 창(전역 from/to)은 여전히 now-years라서 기존 모드 결과는 바뀌지 않고,
+     * "얼마나 오래된 것까지 저장하느냐"만 달라진다.
+     */
     public LocalDate rangeFrom() {
+        LocalDate override = properties.getBackfillFrom();
+        if (override != null) {
+            return override;
+        }
         return LocalDate.now(clock).minusYears(properties.getYears())
                 .minusDays(BacktestMarketDataService.WARMUP_CALENDAR_DAYS);
     }
@@ -122,8 +133,47 @@ public class CandleBackfillService {
             repository.saveAll(rows);
             saved += rows.size();
             log.info("[Backfill] {} {}~{} → {}건 저장", storageCode, gap.from(), gap.to(), rows.size());
+            warnIfIncomplete(storageCode, gap, fetched.size());
         }
         return saved;
+    }
+
+    // ── 불완전 수취 감지 ──────────────────────────────────────────────────────
+    //
+    // KIS 일봉 TR은 호출당 상한이 있고(실측: 종목 100행·지수 50행) 클라이언트가 날짜 커서로
+    // 페이지네이션하지만, 페이지 상한(MAX_PAGES)이나 일시 오류로 일부만 받고도 "성공"으로
+    // 보일 수 있다. 소급 백필처럼 긴 구간을 한 번에 요청할 때 이 구멍이 가장 위험하므로
+    // 기대 거래일 수 대비 현저히 적으면 경고를 남긴다.
+
+    /** 기대 평일 수 대비 이 비율 미만이면 불완전 수취로 본다 (공휴일 여유 포함) */
+    static final double COVERAGE_WARN_RATIO = 0.80;
+
+    /** 이보다 짧은 gap은 검사하지 않는다 — 연휴 낀 증분 수취의 헛경보 방지 */
+    static final int COVERAGE_MIN_WEEKDAYS = 20;
+
+    private void warnIfIncomplete(String storageCode, DateRange gap, int received) {
+        long weekdays = weekdaysBetween(gap.from(), gap.to());
+        if (!isSuspiciouslyIncomplete(weekdays, received)) return;
+        log.warn("[Backfill] ⚠ {} {}~{} 수취 {}건 — 기대 거래일(평일 {}일)에 크게 못 미친다. "
+                        + "상장 전 구간·장기 거래정지면 정상이지만, 아니라면 API 페이지 상한/일시 오류로 "
+                        + "데이터에 구멍이 난 것이니 재실행해 확인할 것",
+                storageCode, gap.from(), gap.to(), received, weekdays);
+    }
+
+    /** [from, to] 양끝 포함 평일 수 (한국 공휴일은 세지 않는다 — 근사 상한) */
+    static long weekdaysBetween(LocalDate from, LocalDate to) {
+        long count = 0;
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) count++;
+        }
+        return count;
+    }
+
+    /** 수취 건수가 기대 거래일 수에 크게 못 미치는가 (짧은 구간은 판정하지 않음) */
+    static boolean isSuspiciouslyIncomplete(long expectedWeekdays, int received) {
+        if (expectedWeekdays < COVERAGE_MIN_WEEKDAYS) return false;
+        return received < expectedWeekdays * COVERAGE_WARN_RATIO;
     }
 
     record DateRange(LocalDate from, LocalDate to) {}
@@ -144,13 +194,38 @@ public class CandleBackfillService {
         LocalDate storedTo   = latest.get().getCandleDate();
 
         // 앞쪽 공백 — 휴장일 여유 7일: 저장 최초일이 from+7 이내면 이미 커버로 간주
-        if (storedFrom.isAfter(from.plusDays(7))) {
+        if (storedFrom.isAfter(from.plusDays(SLACK_DAYS))) {
             gaps.add(new DateRange(from, storedFrom.minusDays(1)));
         }
-        // 뒤쪽 공백 — 최신 저장일 이후 7일 넘게 비면 증분 수취
-        if (storedTo.isBefore(to.minusDays(7))) {
+        if (needsTailFill(storedTo, to, properties.requiredCoverageThrough(), SLACK_DAYS)) {
             gaps.add(new DateRange(storedTo.plusDays(1), to));
         }
         return gaps;
+    }
+
+    /** 뒤쪽 공백 슬랙 (달력일) — 매일 실행할 때 최근 며칠 때문에 매번 API를 때리지 않기 위한 여유 */
+    static final int SLACK_DAYS = 7;
+
+    /**
+     * 뒤쪽 공백을 수취해야 하는가.
+     *
+     * <p>슬랙은 유지한다 — 목적(매일 실행 시 불필요한 API 호출 억제)이 여전히 유효하다.
+     * 다만 <b>고정 판정 창의 끝({@code mustCoverThrough})은 슬랙의 예외</b>로 둔다:
+     * 판정 창 끝은 저장소에 못 박힌 날짜인데 {@code to}(= 실행일−1)는 실행일 따라 움직여,
+     * 둘의 간격이 슬랙 안에 들어간 날 기준선을 찍으면 창 끝자락이 캔들 없이 채점된다
+     * (2026-07 §14.1 드리프트, `_workspace/7_quant_baseline-drift.md`). 한 번 채우면
+     * {@code storedTo ≥ mustCoverThrough}가 되어 추가 호출은 더 이상 생기지 않는다.
+     *
+     * <p>{@code mustCoverThrough}가 {@code to}보다 미래면(=아직 받을 수 없는 구간) 이 예외는
+     * 적용하지 않는다 — 못 채우는 것을 매번 시도할 이유가 없고, 그 상태는
+     * {@link CandleCoverageChecker}가 채점 전에 잡는다.
+     */
+    static boolean needsTailFill(LocalDate storedTo, LocalDate to,
+                                 LocalDate mustCoverThrough, int slackDays) {
+        if (!storedTo.isBefore(to)) return false;
+        if (storedTo.isBefore(to.minusDays(slackDays))) return true;
+        return mustCoverThrough != null
+                && !mustCoverThrough.isAfter(to)
+                && storedTo.isBefore(mustCoverThrough);
     }
 }

@@ -33,11 +33,14 @@ public class KisOrderClientImpl implements KisOrderClient {
 
     private final KisApiClient kisApiClient;
     private final OrderHistoryRepository orderHistoryRepository;
+    private final OrderFailureTracker failureTracker;
 
     public KisOrderClientImpl(KisApiClient kisApiClient,
-                              OrderHistoryRepository orderHistoryRepository) {
+                              OrderHistoryRepository orderHistoryRepository,
+                              OrderFailureTracker failureTracker) {
         this.kisApiClient = kisApiClient;
         this.orderHistoryRepository = orderHistoryRepository;
+        this.failureTracker = failureTracker;
     }
 
     @Override
@@ -77,25 +80,37 @@ public class KisOrderClientImpl implements KisOrderClient {
 
         String[] acnt = splitAccountNo(kisApiClient.getProps().getAccountNo());
 
-        OrderResponse resp = kisApiClient.getClient().post()
-                .uri(ORDER_URI)
-                .header("tr_id",    trId)
-                .header("custtype", "P")
-                .body(Map.of(
-                        "CANO",         acnt[0],
-                        "ACNT_PRDT_CD", acnt[1],
-                        "PDNO",         stockCode,
-                        "ORD_DVSN",     ORD_DVSN,
-                        "ORD_QTY",      String.valueOf(quantity),
-                        "ORD_UNPR",     "0"
-                ))
-                .retrieve()
-                .body(OrderResponse.class);
+        // 실패한 주문 시도는 예전에 아무 흔적도 남기지 않아, PendingOrderRule이 중복을 못 막고
+        // 전략이 매 틱 같은 매수를 재시도했다(2026-08-04 실측). 이제 두 갈래로 나눠 기록한다:
+        //   응답 불명(예외) = 실제 체결됐을 수 있음 → 길게 차단
+        //   명시적 거부(rt_cd≠0) = 미성립 확실   → 짧게 차단
+        OrderResponse resp;
+        try {
+            resp = kisApiClient.getClient().post()
+                    .uri(ORDER_URI)
+                    .header("tr_id",    trId)
+                    .header("custtype", "P")
+                    .body(Map.of(
+                            "CANO",         acnt[0],
+                            "ACNT_PRDT_CD", acnt[1],
+                            "PDNO",         stockCode,
+                            "ORD_DVSN",     ORD_DVSN,
+                            "ORD_QTY",      String.valueOf(quantity),
+                            "ORD_UNPR",     "0"
+                    ))
+                    .retrieve()
+                    .body(OrderResponse.class);
+        } catch (RuntimeException e) {
+            recordFailure(stockCode, side, quantity, bucket, true);
+            throw e;
+        }
 
         if (resp == null) {
+            recordFailure(stockCode, side, quantity, bucket, true);
             throw new IllegalStateException(side + " 주문 응답 없음: " + stockCode);
         }
         if (!"0".equals(resp.rtCd())) {
+            recordFailure(stockCode, side, quantity, bucket, false);
             throw new IllegalStateException(
                     String.format("%s 주문 실패: stockCode=%s rtCd=%s msg=%s",
                             side, stockCode, resp.rtCd(), resp.msg1()));
@@ -106,6 +121,24 @@ public class KisOrderClientImpl implements KisOrderClient {
         orderHistoryRepository.save(OrderHistory.accepted(stockCode, side, quantity, ordNo, bucket));
         log.info("주문 접수 완료 — 저장됨: side={} stockCode={} qty={} ordNo={} bucket={}",
                 side, stockCode, quantity, ordNo, bucket);
+    }
+
+    /**
+     * 접수 실패를 장부와 쿨다운에 남긴다. 기록 자체가 실패해도 원래 예외를 가리지 않는다.
+     *
+     * @param ambiguous 응답을 못 받아 실제 체결 여부를 모르는 경우 true (더 길게 차단)
+     */
+    private void recordFailure(String stockCode, OrderSide side, int quantity,
+                               StrategyBucket bucket, boolean ambiguous) {
+        try {
+            orderHistoryRepository.save(OrderHistory.failed(stockCode, side, quantity, bucket));
+            if (side == OrderSide.BUY) {
+                if (ambiguous) failureTracker.recordAmbiguous(stockCode);
+                else           failureTracker.recordRejected(stockCode);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[Order] 실패 기록 실패 — 무시하고 원래 오류를 올린다: {} {}", stockCode, e.getMessage());
+        }
     }
 
     /**
