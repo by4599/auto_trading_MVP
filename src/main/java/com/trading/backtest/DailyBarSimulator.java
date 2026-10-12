@@ -10,6 +10,7 @@ import com.trading.risk.RiskResult;
 import com.trading.risk.TrailingStopTracker;
 import com.trading.signal.Signal;
 import com.trading.signal.SignalDispatcher;
+import com.trading.strategy.AccumulationProperties;
 import com.trading.strategy.RsiProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,7 @@ public class DailyBarSimulator {
     // (PostTimeCutBuyRuleTest가 이 두 상수를 직접 대조한다).
     public static final LocalTime BREAKOUT_ENTRY_AT = LocalTime.of(10, 0);
     public static final LocalTime CLOSE_ENTRY_AT    = LocalTime.of(15, 0);
+    public static final LocalTime OPEN_ENTRY_AT     = LocalTime.of(9, 0); // 매집 흔적 시가 진입 — DailyBarNextOpenEntryTest가 타임컷과 대조
 
     private final BacktestMarketDataService market;
     private final SignalDispatcher signalDispatcher;
@@ -54,6 +56,7 @@ public class DailyBarSimulator {
     private final DailyBarExitSimulator exits;
     private final MutableClock clock;
     private final RsiProperties rsiProperties;
+    private final AccumulationProperties accumulationProperties;
 
     public DailyBarSimulator(BacktestMarketDataService market,
                              SignalDispatcher signalDispatcher,
@@ -64,7 +67,8 @@ public class DailyBarSimulator {
                              TrailingStopTracker trailingStopTracker,
                              DailyBarExitSimulator exits,
                              MutableClock clock,
-                             RsiProperties rsiProperties) {
+                             RsiProperties rsiProperties,
+                             AccumulationProperties accumulationProperties) {
         this.market = market;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -75,6 +79,7 @@ public class DailyBarSimulator {
         this.exits = exits;
         this.clock = clock;
         this.rsiProperties = rsiProperties;
+        this.accumulationProperties = accumulationProperties;
     }
 
     public void simulateDay(String stockCode, LocalDate date) {
@@ -98,7 +103,11 @@ public class DailyBarSimulator {
             return;
         }
 
-        checkEntry(stockCode, date, bar);
+        if (accumulationProperties.isEnabled()) {
+            checkNextOpenEntry(stockCode, date, bar, carriedAtOpen);
+        } else {
+            checkEntry(stockCode, date, bar);
+        }
         exits.checkSameDayStop(stockCode, date, bar);
         exits.checkTakeProfit(stockCode, date, bar);
         exits.checkBracketTarget(stockCode, date, bar); // 손절 판정 뒤 — 같은 날이면 손절 우선
@@ -155,6 +164,33 @@ public class DailyBarSimulator {
             // 트레일링 baseline = 진입 종가 (당일 고가는 진입 전에 성립하므로 쓰지 않는다)
             trailingStopTracker.updateHigh(stockCode, bar.getClose());
         }
+    }
+
+    // ── ③″ 다음 날 시가 진입 (매집 흔적, 흔적레이더 검증 §18 — 2026-10) ──────────────
+    //
+    // 매집 흔적 신호는 신호일 t의 "완성 봉"(하루치 거래량·종가)으로만 확정된다 — 장중에는 그날 거래량을
+    // 다 알 수 없다(§15.8 거래량 필터 선견편향). 그래서 t+1일 시가 시점(09:00)에 전략을 평가하고, 발화하면
+    // t+1 시가에 산다. 시뮬 현재가를 시가로 두므로 전략이 보는 당일 봉도 시가 하나뿐이다(고가·저가·종가 미노출).
+    // 장 시작 때 이미 보유 중이던 종목은 사지 않는다: 시가 시점엔 보유 중이라 실제로도 중복 매수가 막히고,
+    // 이월 손절(09:05·10:00)로 판 뒤 같은 시가로 되사는 시간 역행을 막는다. 당일 손절·트레일 판정은
+    // 돌파 경로와 같은 순서로 이어진다(시가 진입이라 그날 고가·저가는 전부 진입 이후다).
+
+    void checkNextOpenEntry(String stockCode, LocalDate date, Candle bar, boolean carriedAtOpen) {
+        if (carriedAtOpen) return;
+        clock.setTo(date, OPEN_ENTRY_AT);
+
+        market.setSimPrice(stockCode, bar.getOpen());
+        List<Signal> signals = signalDispatcher.dispatch(
+                stockCode, market.getRecentCandles(stockCode));
+        Signal buy = signals.stream().filter(Signal::isBuy).findFirst().orElse(null);
+        if (buy == null) return;
+
+        RiskResult result = riskEngine.check(buy, positionManager.snapshotAccount());
+        if (!result.isPass()) {
+            log.debug("[Sim] {} {} 시가 매수 거부: {}", date, stockCode, result.getReason());
+            return;
+        }
+        orderEngine.execute(buy);
     }
 
     /**

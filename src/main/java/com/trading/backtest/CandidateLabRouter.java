@@ -33,6 +33,7 @@ public class CandidateLabRouter {
     private final DonchianLab donchianLab;
     private final VbFilterLab vbFilterLab;
     private final BracketLab bracketLab;
+    private final AccumulationLab accumulationLab;
 
     public CandidateLabRouter(BacktestDataProperties properties,
                               CandleBackfillService backfillService,
@@ -44,7 +45,8 @@ public class CandidateLabRouter {
                               RegimeLab regimeLab,
                               DonchianLab donchianLab,
                               VbFilterLab vbFilterLab,
-                              BracketLab bracketLab) {
+                              BracketLab bracketLab,
+                              AccumulationLab accumulationLab) {
         this.properties = properties;
         this.backfillService = backfillService;
         this.coverageChecker = coverageChecker;
@@ -56,6 +58,7 @@ public class CandidateLabRouter {
         this.donchianLab = donchianLab;
         this.vbFilterLab = vbFilterLab;
         this.bracketLab = bracketLab;
+        this.accumulationLab = accumulationLab;
     }
 
     /** 이 라우터가 처리한 모드면 true */
@@ -64,7 +67,21 @@ public class CandidateLabRouter {
                 || routeRegimeLabs(mode)
                 || routeDonchianLabs(mode)
                 || routeVbLabs(mode)
-                || routeBracketLabs(mode);
+                || routeBracketLabs(mode)
+                || routeAccumulationLab(mode);
+    }
+
+    // §18 흔적레이더(사용자 요청 연구) — 진입만 매집 흔적 10칸으로 바꾸고 같은 실행 첫 행에 돈치안 D0를 둔다.
+    // 창 stress · 지수 MA120 ON · 사이징 SZ2. 신호는 t일 완성 봉, 진입은 t+1 시가(DailyBarSimulator 시가 경로).
+    // accumulation-sens = 사전 등록 §0.5-5 조건부 후속(A3 거래량 평균창 16·24일).
+    private boolean routeAccumulationLab(String mode) {
+        boolean sens = "accumulation-sens".equalsIgnoreCase(mode);
+        if (!sens && !"accumulation-lab".equalsIgnoreCase(mode)) return false;
+        LabScope scope = stressScope(mode,
+                "매집 흔적(흔적레이더) 진입 + P3 + SZ2(0.25R·동시5) + 지수MA120", "ACCUM-P3-SZ2-IDX120");
+        if (sens) accumulationLab.runSensitivity(scope);
+        else accumulationLab.run(scope);
+        return true;
     }
 
     // ── 고정% 브래킷 출구 A/B (창: stress, 지수 MA120 ON, 사이징 SZ2) ────────────

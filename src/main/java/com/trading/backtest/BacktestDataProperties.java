@@ -131,6 +131,13 @@ public class BacktestDataProperties {
      */
     private boolean writeBaseline = false;
 
+    /**
+     * 오프라인 실행 — true면 백필이 KIS를 부르지 않고 저장된 캔들로만 재생한다(기본 false = 기존 동작).
+     * 모의투자 앱이 같은 계좌 호출 한도를 쓰는 동안 연구용 재생을 돌릴 때 켠다(2026-10-13 흔적레이더 검증).
+     * 데이터가 모자라면 {@link CandleCoverageChecker}가 채점 전에 경고(기준선 실행이면 중단)한다.
+     */
+    private boolean offline = false;
+
     public List<String> getSymbols() { return symbols; }
     public void setSymbols(List<String> symbols) { this.symbols = symbols; }
 
@@ -198,6 +205,9 @@ public class BacktestDataProperties {
 
     public boolean isWriteBaseline() { return writeBaseline; }
     public void setWriteBaseline(boolean writeBaseline) { this.writeBaseline = writeBaseline; }
+
+    public boolean isOffline() { return offline; }
+    public void setOffline(boolean offline) { this.offline = offline; }
 
     /**
      * 캔들 저장이 반드시 도달해야 하는 날 = 고정 판정 창들의 끝 중 가장 늦은 날.

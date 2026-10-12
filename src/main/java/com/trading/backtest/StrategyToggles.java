@@ -1,5 +1,7 @@
 package com.trading.backtest;
 
+import com.trading.strategy.AccumulationProperties;
+import com.trading.strategy.AccumulationRule;
 import com.trading.strategy.DonchianProperties;
 import com.trading.strategy.MaBreakoutProperties;
 import com.trading.strategy.RsiProperties;
@@ -25,17 +27,20 @@ public class StrategyToggles {
     private final ScalpingProperties scalpingProperties;
     private final DonchianProperties donchianProperties;
     private final RsiProperties rsiProperties;
+    private final AccumulationProperties accumulationProperties;
 
     public StrategyToggles(StrategyParameters strategyParameters,
                            MaBreakoutProperties maBreakoutProperties,
                            ScalpingProperties scalpingProperties,
                            DonchianProperties donchianProperties,
-                           RsiProperties rsiProperties) {
+                           RsiProperties rsiProperties,
+                           AccumulationProperties accumulationProperties) {
         this.strategyParameters = strategyParameters;
         this.maBreakoutProperties = maBreakoutProperties;
         this.scalpingProperties = scalpingProperties;
         this.donchianProperties = donchianProperties;
         this.rsiProperties = rsiProperties;
+        this.accumulationProperties = accumulationProperties;
     }
 
     /** VB(방식1)만 — MA돌파·스캘핑 OFF (돈치안·RSI는 건드리지 않음) */
@@ -101,6 +106,25 @@ public class StrategyToggles {
         scalpingProperties.setEnabled(false);
         donchianProperties.setEnabled(false);
         rsiProperties.setEnabled(true);
+    }
+
+    /**
+     * 매집 흔적(흔적레이더 §18)만 — 나머지 5종 OFF, 규칙 지정. 켜면 시뮬레이터가 다음 날 시가 진입 경로를 탄다.
+     * 다른 메서드들은 이 스위치를 건드리지 않으므로 랩이 끝날 때 {@link #accumulation()}으로 반드시 복원한다.
+     */
+    public void enableAccumulationOnly(AccumulationRule rule) {
+        strategyParameters.setEnabled(false);
+        maBreakoutProperties.setEnabled(false);
+        scalpingProperties.setEnabled(false);
+        donchianProperties.setEnabled(false);
+        rsiProperties.setEnabled(false);
+        accumulationProperties.setRule(rule);
+        accumulationProperties.setEnabled(true);
+    }
+
+    /** 매집 흔적 스위치 (기준선 실행 전 OFF · 랩 종료 복원용) */
+    public AccumulationProperties accumulation() {
+        return accumulationProperties;
     }
 
     /** VB의 K (변동성 돌파 계수) — K 민감도 스윕 전용 */

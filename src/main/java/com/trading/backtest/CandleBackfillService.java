@@ -120,6 +120,10 @@ public class CandleBackfillService {
             log.info("[Backfill] {} 커버리지 충족 — 스킵", storageCode);
             return 0;
         }
+        if (properties.isOffline()) {   // KIS 호출 금지 실행 — 모자란 구간만 남기고 저장분으로 재생한다
+            log.info("[Backfill] {} 오프라인 실행 — 누락 구간 {} 수취 생략", storageCode, gaps);
+            return 0;
+        }
 
         int saved = 0;
         for (DateRange gap : gaps) {

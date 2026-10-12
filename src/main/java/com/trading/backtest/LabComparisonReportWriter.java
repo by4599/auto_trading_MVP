@@ -61,6 +61,10 @@ public class LabComparisonReportWriter {
         return writeComparison(LabReportTemplates.REGIME_SENS, scope, rows, false, null);
     }
 
+    public Path writeAccumulationLabReport(LabScope scope, List<ExitLabRow> rows) {
+        return writeComparison(LabReportTemplates.ACCUMULATION_LAB, scope, rows, false, null);
+    }
+
     private Path writeComparison(ComparisonTemplate template, LabScope scope, List<ExitLabRow> rows,
                                  boolean baselineOnPass, String baselineSlug) {
         StringBuilder md = new StringBuilder();
