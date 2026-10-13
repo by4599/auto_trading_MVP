@@ -3,6 +3,7 @@ package com.trading.research;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.trading.HttpTimeouts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,7 +43,11 @@ public class HttpDartApiClient implements DartApiClient {
 
     public HttpDartApiClient(DartProperties dartProperties) {
         this.dartProperties = dartProperties;
-        this.httpClient = RestClient.builder().baseUrl(BASE_URL).build();
+        // 제한이 없으면 대답 없는 DART가 I/O 스레드를 무기한 묶는다 (42_audit M-1). 읽기 30초는 corpCode ZIP(가장 큰 응답) 기준
+        this.httpClient = RestClient.builder()
+                .baseUrl(BASE_URL)
+                .requestFactory(HttpTimeouts.requestFactory(5_000, 30_000))
+                .build();
     }
 
     @Override

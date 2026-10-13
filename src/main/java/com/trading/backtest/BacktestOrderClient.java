@@ -43,6 +43,7 @@ public class BacktestOrderClient implements KisOrderClient {
     private final BacktestPositionManager positionManager;
     private final TradeRecorder tradeRecorder;
     private final Clock clock;
+    private final BacktestCostProperties costProperties;
 
     private final AtomicLong orderSeq = new AtomicLong();
     /** 시뮬레이터가 매도 직전에 설정하는 청산 사유 (TradeRecorder 표기용) */
@@ -55,7 +56,8 @@ public class BacktestOrderClient implements KisOrderClient {
                                BacktestMarketDataService market,
                                BacktestPositionManager positionManager,
                                TradeRecorder tradeRecorder,
-                               Clock clock) {
+                               Clock clock,
+                               BacktestCostProperties costProperties) {
         this.orderHistoryRepository = orderHistoryRepository;
         this.positionRepository = positionRepository;
         this.tradeResultTracker = tradeResultTracker;
@@ -64,6 +66,7 @@ public class BacktestOrderClient implements KisOrderClient {
         this.positionManager = positionManager;
         this.tradeRecorder = tradeRecorder;
         this.clock = clock;
+        this.costProperties = costProperties;
     }
 
     public void setExitContext(String exitContext) {
@@ -87,7 +90,7 @@ public class BacktestOrderClient implements KisOrderClient {
             throw new IllegalArgumentException("매수 수량은 1 이상이어야 합니다: " + quantity);
         }
         double raw = requireSimPrice(stockCode);
-        double fillPrice = BacktestCosts.buyFillPrice(raw);
+        double fillPrice = BacktestCosts.buyFillPrice(raw, costProperties.getSlippageRate());
         double cashOut = BacktestCosts.buyCashOut(fillPrice, quantity);
 
         if (cashOut > positionManager.getCash()) {
@@ -122,7 +125,7 @@ public class BacktestOrderClient implements KisOrderClient {
             throw new IllegalArgumentException("매도 수량은 1 이상이어야 합니다: " + quantity);
         }
         double raw = requireSimPrice(stockCode);
-        double fillPrice = BacktestCosts.sellFillPrice(raw);
+        double fillPrice = BacktestCosts.sellFillPrice(raw, costProperties.getSlippageRate());
 
         Position pos = positionRepository.findByStockCode(stockCode)
                 .orElseThrow(() -> new IllegalStateException("보유 없는 매도: " + stockCode));
@@ -132,10 +135,11 @@ public class BacktestOrderClient implements KisOrderClient {
         order.markFilled(quantity, fillPrice);
         orderHistoryRepository.save(order);
 
-        // applySell 전에 기록 — 평단가는 매도 반영 전 값 (FillStateUpdater와 동일 순서, F-5)
-        tradeResultTracker.recordSellFill(stockCode, quantity, fillPrice, pos.getAveragePrice());
+        // 평단가는 매도 반영 전 값 (FillStateUpdater와 동일 순서, F-5)
+        pos.accrueRealized((fillPrice - pos.getAveragePrice()) * quantity);
         pos.applySell(quantity);
         if (pos.getQuantity() == 0) {
+            tradeResultTracker.recordRoundTrip(stockCode, pos.getRealizedPnlAccum());
             positionRepository.delete(pos);
         } else {
             positionRepository.save(pos);

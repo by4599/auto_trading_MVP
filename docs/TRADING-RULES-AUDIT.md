@@ -115,6 +115,19 @@
 - 결과: 미보유 종목은 weight 0으로 항상 통과, 보유 종목은 N종목 균등 시 항상 1/N (1종목이면 100%). 즉 "총자산의 10%까지만 배분"이라는 의도가 아니라 "이미 들고 있으면 차단"으로 동작하며, 이는 `PendingOrderRule`과 완전 중복이다. ADR의 Sleeve B 30% 자금 한도도 같은 분모 문제를 공유하게 된다.
 - 권고: F-1과 동일하게 분모를 현금 포함 총자산으로 교체. 아울러 현재 주문이 1주 고정(`ORD_QTY=1`)이라 비중 룰이 사실상 무의미한 점도 v2 주문 수량 로직 설계 시 함께 해결.
 
+### F-15. GlobalEquityStopRule이 매도까지 거부한다 — 낙폭이 클수록 출구가 닫힌다
+
+> ✅ **해소 (2026-09-12)**: `validate` 첫 줄에 `if (!signal.isBuy()) return RiskResult.pass();` 추가.
+> 회귀 테스트 2건(`GlobalEquityStopRuleTest` — MDD 초과 매도 통과 / 미검증 전고점 + MDD 초과 매도 통과),
+> Red-Green 확인, 전체 618/618 통과(종료 코드 0).
+
+- 위치: [GlobalEquityStopRule.java](../src/main/java/com/trading/risk/GlobalEquityStopRule.java) — 리스크 룰 14개 중 **유일하게 `isBuy()` 가드가 없었다**(`grep -c "isBuy()" src/main/java/com/trading/risk/*Rule.java`로 검산 가능).
+- 증상: 전고점 대비 MDD가 한도(10%)를 넘으면 **매도 신호까지 거부**됐다. 타임컷(`TimeCutScheduler`)·손절/익절(`StopLossMonitor`)·최대보유(`MaxHoldScheduler`)가 전부 `Signal → RiskEngine → OrderEngine` 경로라 한꺼번에 막힌다. 거부 사유 문자열이 "신규 매수 금지"인 채로 매도를 거부해 로그만 봐서는 알아채기 어려웠다.
+- 코드가 자기 문서와 어긋난 사례다 — 같은 파일 주석이 세 곳에서 "매수 거부만 담당한다"고 말한다.
+- 위험 구간: `RiskMonitor`의 자동 강제청산이 보류되는 분기(미검증 전고점 / 낡은 스냅샷)에서는 청산도 안 돌고 매도도 막혀 **출구가 전부 닫힌다**. 강제청산 자체는 `LiquidationService`가 RiskEngine을 우회하므로 영향 없음.
+- 실측: 백테스트에서 거부된 매도 **기준선 창 19건 · 약세장 24창 23건**(가드 추가 후 양쪽 0건).
+- 판정 영향 없음: 회귀 앵커 5지표 일치, §14.4 MA120 프로필 소수점까지 동일 — 근거 `_workspace/7_quant_equitystop-guard-ab.md`, `8_quant_equitystop-guard-bear-window.md`.
+
 ---
 
 ## MEDIUM

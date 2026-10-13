@@ -1,0 +1,13 @@
+# 백테스트 기준선 (B-3) — 거버넌스 강등 판정의 분모 (PERFORMANCE-GOVERNANCE §2)
+# 자동 생성: BacktestReportWriter — 수동 편집 금지
+generated-at: 2026-08-17
+period: 2023-07-22 ~ 2026-07-21
+method: daily-bar-approximation-v1
+validation:   # Walk-Forward 검증 구간 집계 (비용 차감 후)
+  trades: 781
+  profit-factor: 1.959
+  expectancy-pct: 0.0130
+  max-drawdown: 0.0987
+  win-rate: 0.5186
+chosen-k-per-window: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+adopted-filters: []

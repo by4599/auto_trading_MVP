@@ -1,5 +1,6 @@
 package com.trading.research;
 
+import com.trading.SchedulingConfig;
 import com.trading.universe.TradingUniverseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,8 +67,13 @@ public class DartDisclosureService {
         log.info("[DART] 기존 공시 {}건 이벤트 유형 재분류 완료", legacy.size());
     }
 
-    /** 기동 2분 후 첫 수집, 이후 30분 주기 */
-    @Scheduled(fixedRate = 1_800_000, initialDelay = 120_000)
+    /**
+     * 기동 2분 후 첫 수집, 이후 30분 주기.
+     * I/O 스케줄러에서 돈다 (2026-10-10) — DART HTTP + 공시 테이블 쓰기뿐이고 유니버스·워치리스트는
+     * DB에서 읽기만 한다(KIS·매매 상태 무관). corpCode ZIP 내려받기가 느려도 손절 감시를 멈추지 않는다.
+     * fixedDelay — fixedRate면 PC가 절전에서 깨어날 때 밀린 횟수만큼 몰아서 돈다(42_audit M-1).
+     */
+    @Scheduled(fixedDelay = 1_800_000, initialDelay = 120_000, scheduler = SchedulingConfig.IO_SCHEDULER)
     public void scheduledAggregate() {
         aggregate();
     }

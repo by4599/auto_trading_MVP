@@ -171,6 +171,8 @@ public enum ParamCatalog {
             switch (type) {
                 case NUMBER -> {
                     double v = Double.parseDouble(value);
+                    // NaN은 아래 범위 비교가 둘 다 거짓이라 그대로 통과한다 — 한도에 들어가면 `x > NaN`이 늘 거짓이 돼 가드가 꺼진다
+                    if (!Double.isFinite(v)) return "숫자가 아닙니다 (NaN·무한대는 쓸 수 없습니다)";
                     if (min != null && v < Double.parseDouble(min)) return rangeMessage();
                     if (max != null && v > Double.parseDouble(max)) return rangeMessage();
                 }

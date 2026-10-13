@@ -19,6 +19,47 @@
 - 실전 전환 게이트에 "VPS 이전 완료"를 추가한다 (TRADING-RULES-AUDIT의 F-1~F-4와 동급).
 - 집 PC로 모의 운영하는 동안에도: Windows 자동 업데이트 재부팅 시간대를 장외로 강제,
   절전 모드 해제, 장중 노트북 덮개 닫힘 방지 설정을 운영 체크리스트로 관리한다.
+  ⚠ 2026-09-15 실측: 업데이트 사용 시간이 21:00~12:00으로 잡혀 있어 **14:29 장중에 자동 재부팅**됐다
+  (System 이벤트 1074). 사용 시간은 PC 설정이라 사람이 바꾼다 — 설정 → Windows 업데이트 →
+  고급 옵션 → 사용 시간 → 수동, 08:00 시작 · 18:00 이후 끝.
+
+### 1.1 자동 기동 — 작업 스케줄러 (2026-09-16)
+
+앱은 `start-paper-if-needed.ps1`이 켠다. 두 예약 작업이 같은 스크립트를 부른다:
+
+| 작업 | 언제 | 목적 |
+|---|---|---|
+| `AutoTrading-Paper-0830` | 평일 08:30 (PC가 꺼져 있었으면 켜진 뒤 곧바로) | 개장 전 기동 |
+| `AutoTrading-Paper-Logon` | 로그온 2분 뒤 | 장중 재부팅 뒤 복구 — 15:15 타임컷·손절 감시를 되살린다 |
+
+- 주말이거나, 이미 실행 중(8080 리슨)이거나, **켜지는 중(paper 프로필 java 프로세스)**이면
+  아무것도 하지 않는다. 포트는 기동 1~2분 뒤에야 열려서, 포트만 보면 두 작업이 겹칠 때
+  gradle이 두 번 뜬다.
+- 기록은 `logs/auto-start.log` — 기동·생략·종료 시각이 남는다. "앱 기동 시작" 뒤에
+  "앱 종료" 줄 없이 끊겼으면 PC가 꺼졌거나 재부팅된 것이다.
+- 스크립트(작업)는 앱이 떠 있는 동안 계속 살아 있다. 그래서 두 작업 모두 배터리 조건을 껐다
+  ("배터리면 시작 안 함"·"배터리로 전환하면 중지" 해제) — 이 PC는 노트북이라 예전 설정에서는
+  전원선이 빠지면 작업과 함께 앱까지 꺼질 수 있었다.
+- 기동하면 재동기화(미체결 전량 취소·브로커 잔고 대조) 뒤 **곧바로 RUNNING**이다
+  (`ShadowPortfolioReconciler.onStartup`, 2026-07-16 사용자 정책). 장중 재부팅 뒤 자동 기동도
+  같다 — §3 ⑤의 "장중 재시작은 SAFE_MODE 대기"는 이 정책으로 없어졌다.
+- 장중 재부팅 뒤 자동 기동은 **그날의 연속 무중단 기록을 살리지 못한다** — 09:00 이후 기동은
+  무중단으로 치지 않는다(`RunStreakRecorder`). 재부팅 자체는 위 사용 시간 설정으로 막는다.
+- **일부러 앱을 꺼 둘 때는 두 작업을 함께 끈다.** 안 그러면 다음 08:30이나 로그온 때 다시 켜진다:
+
+```powershell
+Get-ScheduledTask -TaskName AutoTrading-Paper-0830, AutoTrading-Paper-Logon | Disable-ScheduledTask   # 다시 켤 때는 Enable-ScheduledTask
+```
+
+- 기동기를 `.bat`로 두지 않는 이유: 이 PC의 은행·증권 보안 모듈(AhnLab Safe Transaction 등)이
+  **새로 만든 `.bat`/`.cmd` 파일을 열지 못하게 붙잡는다** (2026-09-16 실측 — 새 `.txt`/`.ps1`은 즉시
+  열리고 `.bat`/`.cmd`만 읽기·실행·삭제가 멈춤, Defender 탐지 기록 없음). 이미 있던 `run-paper.bat`은 영향 없다.
+- 다른 PC로 옮길 때는 두 작업을 XML로 내보내 가져온다 (경로·사용자 이름이 다르면 XML 안을 먼저 고친다):
+
+```powershell
+Export-ScheduledTask -TaskName AutoTrading-Paper-Logon | Out-File AutoTrading-Paper-Logon.xml
+Register-ScheduledTask -TaskName AutoTrading-Paper-Logon -Xml (Get-Content AutoTrading-Paper-Logon.xml -Raw)
+```
 
 ## 2. 데드맨 스위치 — 죽은 시스템은 자기가 죽었다고 알릴 수 없다
 
@@ -33,6 +74,14 @@
 - 하트비트에는 현재 모드(RUNNING 등)·보유 포지션 수를 포함해, 경고 수신 시
   "지금 시장에 노출된 게 있는가"를 폰에서 바로 판단할 수 있게 한다.
 - 구현: `@Scheduled` 5분 주기 HTTP GET 1건 — Phase 2에서 half-day 작업량.
+
+> ⚠ **현재 상태 (2026-10-11 확인): 꺼져 있다.** 코드(`DeadmanHeartbeat` — 실제로는 5분마다 POST, 24시간)와 시험은 있지만
+> 보낼 주소 `HEARTBEAT_URL`이 설정된 적이 없어 매번 건너뛴다. 그래서 10-06~10-08 배터리 절전으로 앱이 꺼졌을 때도
+> 경고가 오지 않았다. 켜는 순서:
+> 1. (사람) healthchecks.io 무료 계정을 만들고 체크를 하나 만든다 — 주기 5분, 유예 10분, 알림 채널은 텔레그램 또는 이메일
+> 2. 실패 로그에 ping 주소가 그대로 남는 문제(`_workspace/44_audit` L-5)를 먼저 고친다 — 주소를 아는 사람은 가짜 박동을 보낼 수 있다
+> 3. ping 주소를 Windows 사용자 환경변수 `HEARTBEAT_URL`에 넣는다
+> 4. 앱을 다시 켠다 → healthchecks 화면에 5분 간격으로 박동이 찍히는지 본다. 앱을 끄고 10분 뒤 경고가 오는지도 한 번 확인한다
 
 ## 3. 크래시 후 재시작 — SAFE_MODE 기동 시퀀스
 
@@ -49,6 +98,10 @@
           손절·타임컷만 활성) → 사람이 상태 확인 후 RUNNING 전환
      → ⑥ 장외 재시작이면 다음 개장 전 자동 RUNNING 복귀 허용
 ```
+
+> ⚠ **현재 구현은 ⑤·⑥과 다르다 (2026-07-16 사용자 정책)** — 장중·장외 구분 없이 ①~④ 재동기화가
+> 끝나면 곧바로 RUNNING으로 시작한다(`ShadowPortfolioReconciler.onStartup`). 런타임 중 증권사 연결이
+> 끊기면 SAFE_MODE로 자동 정지하고 회복 시 자동 재개하는 장치는 그대로다. 자동 기동은 §1.1.
 
 - `TradingMode`에 `SAFE_MODE` 추가 필요 (신규 매수 차단 + 방어 로직만 활성).
 - ①~③은 기존 `ShadowPortfolioReconciler`를 기동 시 1회 강제 실행하는 것으로 재사용.
@@ -117,6 +170,7 @@
 | 🔇 데드맨 스위치 경고 (시스템 침묵) | ① MTS로 보유 포지션 확인 → ② 노출이 있으면 수동 손절선 주문 예약 → ③ 원격 접속으로 앱 상태 확인/재시작 (§3 시퀀스 자동 수행됨) |
 | 📉 API 장애 중 보유 포지션 존재 | 시스템이 SAFE_MODE로 스스로 전환됨 → MTS에서 수동 관리로 전환, 복구 알림 후 §6 재가동 |
 | 💾 DB 손상 | `position_rebuild.sql` + Reconciler로 브로커 기준 재구축 (기존 도구 활용) |
+| 🔒 칸 손실 상한 잠금 알림 (A동 `TREND` −12% · B동 칸 −20%, ADR-001 §2.2) | 앱이 이미 한 일: **그 칸만** 신규 매수를 막고(`SleeveLockRule`) 그 칸 보유를 정상 매도 경로로 판다. 다른 칸·계좌 전체 가드는 그대로 돈다. ① `GET /api/buckets/sleeve-status`로 칸 자산·최고 기록·낙폭·잠금 사유 확인 → ② 원인 진단([PERFORMANCE-GOVERNANCE §6](PERFORMANCE-GOVERNANCE.md) 4범주 — 특히 데이터 오염인지 실제 손실인지. 칸 자산은 매도가 추정치를 포함한다) → ③ 풀기로 정했을 때만 **사람이** 사유를 적어 해제: `Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/buckets/TREND/unlock -ContentType 'application/json' -Body '{"reason":"원인 진단 결과"}'` → ④ 해제하면 그 칸의 최고 기록이 **지금 칸 자산으로 다시 잡힌다**(다음 잠금은 거기서 다시 12%/20% 빠질 때) |
 
 런북은 인쇄 가능한 1페이지로 유지하고, 반기마다 모의 훈련(강제청산 리허설)으로 검증한다.
 
@@ -134,6 +188,45 @@ curl -X POST localhost:8080/api/trading/liquidation-drill -H "Content-Type: appl
 > HTS/MTS에서 수동으로 낸 주문은 취소되지 않으므로, 청산 알림을 받으면 수동 주문 여부를
 > HTS에서 함께 확인할 것.
 
+### 7.1 리허설을 누가 실행하는가 — 역할 경계
+
+| 주체 | 하는 일 | 하지 않는 일 |
+|---|---|---|
+| 사람 | 리허설을 할지 결정, 예약을 켜고 날짜를 지정, 실전(real) 전환 승인 | — |
+| 앱(예약 스케줄러) | 지정된 날짜·시각에 매수·청산을 **자동 실행** | 지정 없이 스스로 발동 |
+| Claude(AI 조수) | 사전 점검, 설정·코드 작성, 실행 후 로그·잔고로 결과 검증, 문서 갱신 | **주문·청산 버튼을 대신 누르는 것** |
+
+Claude는 사람 승인이 있어도 매매 실행을 대행하지 않는다. 사람이 그 시각에 자리에 없어
+진행이 막히는 문제는 **대행이 아니라 예약(§7.2)으로 푼다** — 조작 권한의 경계를 흐리면
+실전 전환 뒤에 사고가 난다.
+
+### 7.2 예약 청산 리허설 — 사람이 자리에 없어도 훈련이 돌게
+
+`application-paper.yml`의 `trading.drill`을 켜고 날짜를 지정하면, 앱이 그날 스스로 리허설을
+수행한다. 기본은 꺼져 있고, **날짜를 콕 집지 않으면 절대 발동하지 않는다**(상시 반복 금지 —
+리허설은 보유분을 전부 팔고 매매를 멈추는 조작이라 매일 돌면 매매 자체가 불가능하다).
+
+```yaml
+trading:
+  drill:
+    enabled: true
+    date: "2026-08-20"   # 이 날짜에만 1회
+    at: "10:00"          # 개시 시각
+    deadline: "14:00"    # 이 시각까지는 못 했으면 다시 시도 (타임컷 15:15보다 앞)
+    buy-if-flat: true    # 보유가 없으면 005930 10주를 먼저 사서 대상을 만든다
+```
+
+진행 방식: 개시 시각이 지나면 매 분 조건을 확인해서, 보유가 없으면 **매수만 접수하고 끝낸다**
+(체결은 3초 주기 체결확인이 반영). 다음 분에 보유가 확인되면 그때 청산을 개시한다.
+스레드를 붙잡고 기다리지 않으므로 체결이 늦어도 다음 틱이 이어받는다.
+
+안전장치: 모의 프로필 전용 · 거래일에만 · 매수와 청산 각각 하루 1회 표시를 남겨 중복 발동 차단
+· 실제 조작은 수동 실행과 **같은 관문**(`DrillService`)을 지나므로 리스크 룰이 막으면 그대로 멈춘다
+· 단계마다 텔레그램 보고.
+
+끝난 뒤 상태는 수동 리허설과 같다 — EMERGENCY_STOPPED이며 재가동은 §6 절차를 따른다.
+**리허설이 끝난 날은 그 이후 매매가 멈춘다**는 뜻이므로, 날짜는 그래도 되는 날로 고른다.
+
 ## 8. 구현 매핑 (Phase 2 편입 항목)
 
 | 항목 | 작업 | 우선순위 |
@@ -146,6 +239,57 @@ curl -X POST localhost:8080/api/trading/liquidation-drill -H "Content-Type: appl
 | 거래일 캘린더 + 시각 상수 설정화 | market-calendar.yml + MarketCloseRule 리팩터 | Phase 2 |
 | VI 진입 금지 룰, 권리락 리포트 | 신규 RiskRule / 리포트 확장 | Phase 3 |
 | VPS 이전 | 인프라 작업 + 키 이전 절차 | 실전 전환 직전 |
+
+---
+
+## 9. 데이터 백업 · 복구
+
+**잃으면 되찾을 수 없는 것부터 본다.**
+
+| 데이터 | 파일 | 재취득 |
+|---|---|---|
+| 분봉 (전방 축적) | `trading-db.mv.db` | **불가능** — KIS가 과거 분봉을 소급 제공하지 않는다 (`MinuteCandleCollector` 주석) |
+| 거래 기록 (주문·체결·실현손익) | `trading-db.mv.db` | **불가능** — 실제 계좌 이력 |
+| 일봉 3~7년치 | `backtest-db.mv.db` | 가능하지만 느리다 (모의 레이트리밋 1건/초) |
+
+기존 `backup.sh`는 **같은 디스크의 `backup/`** 에 `trading-db`만 복사한다 — 디스크가
+죽으면 원본과 사본이 함께 죽고, 캔들 DB는 대상에도 없다.
+
+### 9.1 백업 실행
+
+```powershell
+.\backup-to-supabase.ps1                                  # 두 DB 백업 + Supabase 업로드
+.\backup-to-supabase.ps1 -SkipUpload                      # 로컬 zip만
+.\backup-to-supabase.ps1 -MirrorDir "G:\내 드라이브\backup" # 동기화 폴더에도 복사
+```
+
+- **앱을 멈추지 않아도 된다.** H2 `BACKUP TO`로 온라인 스냅샷을 뜨므로 쓰기 도중에도
+  정합성이 보장된다 (단순 파일 복사와 다른 점). 실측: 18MB → 4.5MB zip, 0.6초.
+- 보관 개수는 로컬 5개 · 원격 7개가 기본 (`-KeepLocal` / `-KeepRemote`).
+- `SUPABASE_URL`·`SUPABASE_KEY`(secret key)가 없으면 업로드만 건너뛰고 로컬 zip은 남긴다.
+- **등록 완료 (2026-08-21)**: 예약 작업 `AutoTrading-DB-Backup-2330` — 매일 23:30, PC가 꺼져 있었으면 켜진 뒤 곧바로 실행. 아래는 재등록·다른 PC 이전용 명령이다:
+
+```powershell
+schtasks /create /tn "AutoTrading-DB-Backup-2330" /sc daily /st 23:30 /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\Users\SAMSUNG\Desktop\workspace\auto_trading\backup-to-supabase.ps1'"
+```
+
+> ⚠ **예약 작업은 폴더를 옮기거나 이름을 바꾸면 조용히 죽는다.** 2026-08-21에 확인한 실사고:
+> 평일 08:30 기동 작업 `AutoTrading-Paper-0830`이 7월 폴더 rename(`개발`→`workspace`) 이후
+> 옛 경로를 가리킨 채 **한 달 넘게 매일 실패**했고(오류 267 ERROR_DIRECTORY), 그동안 "5거래일
+> 연속 가동" 검증이 시작조차 못 했다. 경로를 바꿨다면 두 작업의 `-File` 경로와 시작 위치를
+> 반드시 함께 고치고, `Get-ScheduledTaskInfo`의 `LastTaskResult`가 0인지 확인한다.
+
+### 9.2 복구 절차
+
+1. 앱을 중지한다 (복구 중 쓰기가 섞이면 안 된다)
+2. 되돌릴 zip을 받는다 — 로컬 `backup/` 또는 Supabase Storage `db-backup` 버킷
+3. zip을 풀면 `trading-db.mv.db`(또는 `backtest-db.mv.db`) 하나가 나온다
+4. 프로젝트 루트의 같은 이름 파일을 **다른 이름으로 옮겨 두고**(사고 시 되돌릴 여지) 교체한다
+5. `trading-db.lock.db` / `*.trace.db`가 남아 있으면 지운다
+6. 앱을 시작하고, SAFE_MODE 기동 시퀀스(§3)가 브로커 실잔고와 대조하는지 확인한다
+
+> 복구 후 첫 기동은 반드시 **개장 전**에 한다 — 개장 후 재시작은 그날의 연속 무중단
+> 가동 기록을 리셋시킨다 (`RunStreakRecorder`).
 
 ---
 

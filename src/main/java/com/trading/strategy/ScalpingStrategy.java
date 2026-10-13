@@ -23,11 +23,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * 청산은 기존 ATR 손절/15:15 타임컷에 더해 StopLossMonitor의 목표 익절(takeProfitPct)이
  * MIX 버킷 포지션에 한해 추가로 작동한다.
  *
- * @Profile("paper") — 백테스트 결정성 보호 (MovingAverageBreakoutStrategy와 동일 이유).
+ * @Profile({"paper","backtest"}) — BACKTEST-DESIGN §13 소급 검증을 위해 backtest 프로필도
+ * 허용한다. B-3(VB) 결정성은 {@link ScalpingProperties#isEnabled()} 스위치로 보호한다
+ * (기본 false — VB/MA돌파만 백테스트할 때는 이 전략이 신호를 내지 않는다).
  * 롤링 창은 인메모리라 앱 재시작 시 초기화된다 — 리스크 1차 방어선이 아니라 진입 신호일 뿐.
  */
 @Component
-@Profile("paper")
+@Profile({"paper", "backtest"})
 public class ScalpingStrategy implements Strategy {
 
     private final ScalpingProperties properties;

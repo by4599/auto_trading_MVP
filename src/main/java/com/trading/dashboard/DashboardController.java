@@ -1,7 +1,6 @@
 package com.trading.dashboard;
 
 import com.trading.market.KisProperties;
-import com.trading.order.OrderHistory;
 import com.trading.order.OrderHistoryRepository;
 import com.trading.order.OrderStatus;
 import com.trading.position.Account;
@@ -17,21 +16,21 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * 대시보드용 읽기 전용 API.
+ * 대시보드용 읽기 전용 API (현재가·보유 포지션·당일 손익·리스크 상태).
  * 모든 쓰기는 OrderEngine을 통하며, 이 컨트롤러는 조회만 담당한다.
  * KIS 현재가 조회는 QuoteCacheService(2초 캐시 공유)를 경유한다.
+ *
+ * <p>주문 내역 조회(/api/orders/**)는 {@link OrderQueryController}로 분리했다 —
+ * 기간·페이징과 미체결 조회를 얹으면 이 파일이 300줄 상한을 넘기 때문이다.
  */
 @RestController
 @RequestMapping("/api")
 public class DashboardController {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardController.class);
-
-    private static final int MAX_ORDERS = 20;
 
     private final QuoteCacheService      quoteCache;
     private final KisProperties          kisProperties;
@@ -178,35 +177,7 @@ public class DashboardController {
         return result;
     }
 
-    // ── 4. 최근 체결 내역 ─────────────────────────────────────────────────────
-
-    @GetMapping("/orders/filled")
-    public List<Map<String, Object>> getFilledOrders() {
-        List<OrderStatus> targetStatuses = List.of(
-                OrderStatus.FILLED,   OrderStatus.PARTIAL_FILLED,
-                OrderStatus.CANCELLED, OrderStatus.FAILED, OrderStatus.CANCEL_FAILED
-        );
-        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM/dd HH:mm");
-
-        return orderHistoryRepository.findByStatusIn(targetStatuses).stream()
-                .sorted(Comparator.comparing(OrderHistory::getRequestedAt).reversed())
-                .limit(MAX_ORDERS)
-                .map(o -> {
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("id",          o.getId());
-                    item.put("stockCode",   o.getStockCode());
-                    item.put("side",        o.getSide().name());
-                    item.put("quantity",    o.getQuantity());
-                    item.put("filledQty",   o.getFilledQuantity());
-                    item.put("filledPrice", o.getFilledPrice() != null ? Math.round(o.getFilledPrice()) : null);
-                    item.put("status",      o.getStatus().name());
-                    item.put("requestedAt", o.getRequestedAt().format(fmt));
-                    return item;
-                })
-                .toList();
-    }
-
-    // ── 5. 리스크 상태 ────────────────────────────────────────────────────────
+    // ── 4. 리스크 상태 ────────────────────────────────────────────────────────
 
     @GetMapping("/risk/status")
     public Map<String, Object> getRiskStatus() {

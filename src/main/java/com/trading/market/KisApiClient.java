@@ -17,14 +17,23 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 /**
  * 한국투자증권 Open API 공통 클라이언트.
@@ -46,10 +55,25 @@ public class KisApiClient {
     private static final int TOKEN_REFRESH_MAX_ATTEMPTS = 3;
     private static final int CONSECUTIVE_FAILURE_THRESHOLD = 3;
     private static final int RESUME_SUCCESS_THRESHOLD = 2;
+    /**
+     * SAFE_MODE로 가기 전에 요구하는 최소 "눈먼 시간" — 연속 실패가 이만큼 이어져야 한다.
+     *
+     * 횟수만 보던 판정은 지나치게 예민했다. 2026-09-22 실측: 장중 SAFE_MODE가 9회(합계 6분 38초)
+     * 걸렸는데 그중 둘은 11초짜리 실패 뭉치였다(10:04:03 · 14:54:35). 같은 날 장중 실패 뭉치
+     * 108개의 대다수는 0초(고립된 단발)이고 90초를 넘긴 것은 1개(229초 = 13:34:38의 실제 장애)뿐이다.
+     * 이 하한을 그 측정표에 적용하면 9회 → 1회로 줄고, 남는 1회가 그 실제 장애다.
+     * 근거: _workspace/25_ops_safemode-flapping-diagnosis.md §6
+     *
+     * CONSECUTIVE_FAILURE_THRESHOLD를 올리는 대신 조건을 하나 더 붙였다 —
+     * 문턱을 올리면 오발동만 줄지 않고 진짜 장애 감지도 함께 둔해진다.
+     */
+    private static final long BLIND_MILLIS_BEFORE_SAFE_MODE = 90_000L;
 
     private final KisProperties props;
     private final TradingStatusManager statusManager;
     private final NotificationService notifier;
+    private final KisRateLimiter rateLimiter;
+    private final Clock clock;
     // 토큰 발급 전용 — 인터셉터 없음 (순환 참조 방지)
     private volatile RestClient tokenClient;
     // 모든 API 호출용 — 인터셉터(인증 주입 + 401 재시도)가 붙어있음
@@ -57,15 +81,28 @@ public class KisApiClient {
     private final AtomicReference<TokenHolder> tokenRef = new AtomicReference<>();
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final AtomicInteger consecutiveSuccesses = new AtomicInteger(0);
+    /**
+     * 시야를 잃은 시각 — 지금 이어지고 있는 연속 실패가 시작된 순간. 성공하면
+     * consecutiveFailures가 0으로 리셋되므로 다음 실패에서 다시 찍힌다
+     * (= 중간에 성공이 한 번 끼면 눈먼 시간도 리셋된다).
+     *
+     * "마지막 성공 시각"을 그대로 기준점으로 쓰지 않는 이유: 장외에는 잔고 폴링이 멈춰
+     * 호출 자체가 없다(KisPositionManager). 그러면 마지막 성공이 전날 오후가 되어, 개장 직후
+     * 첫 실패 3회가 곧바로 "17시간째 눈먼 상태"로 계산되고 원래 막으려던 아침 오발동이 그대로 남는다.
+     */
+    private final AtomicReference<Instant> blindSince = new AtomicReference<>();
     // 이 클라이언트가 "연결 끊김"으로 SAFE_MODE를 걸었을 때만 true — 연결 회복 시 자동복귀 대상 판별용.
     // (앱 재시작·사람 조작으로 들어간 SAFE_MODE는 자동복귀시키지 않는다)
     private final AtomicBoolean pausedByConnectionLoss = new AtomicBoolean(false);
 
     @Autowired
-    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier) {
+    public KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
+                        KisRateLimiter rateLimiter, Clock clock) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
+        this.clock = clock;
         // 자격증명 미설정 시 placeholder — 실제 요청 시 getBearerToken()에서 명시적 오류 발생
         buildClients(props.isConfigured() ? props.getBaseUrl() : "https://placeholder.invalid");
     }
@@ -77,10 +114,13 @@ public class KisApiClient {
      * 인터셉터가 빠진 채로 조립돼 아무 것도 검증하지 못한다).
      */
     KisApiClient(KisProperties props, TradingStatusManager statusManager, NotificationService notifier,
+                 KisRateLimiter rateLimiter, Clock clock,
                  RestClient.Builder tokenBuilder, RestClient.Builder apiBuilder) {
         this.props = props;
         this.statusManager = statusManager;
         this.notifier = notifier;
+        this.rateLimiter = rateLimiter;
+        this.clock = clock;
         this.tokenClient = tokenBuilder.build();
         this.apiClient = apiBuilder.requestInterceptor(this::intercept).build();
     }
@@ -192,34 +232,81 @@ public class KisApiClient {
     private ClientHttpResponse intercept(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
 
-        ClientHttpResponse response = executeTracked(request, body, execution);
+        ClientHttpResponse response = buffer(executeTracked(request, body, execution));
         int status = response.getStatusCode().value();
 
-        // 401: 토큰 만료 → 재발급 후 1회만 재시도
-        if (status == 401) {
-            response.close();
-            log.warn("401 수신 — 토큰 강제 재발급 후 재시도");
+        // 401(표준) 또는 토큰 만료 → 재발급 후 1회만 재시도.
+        // KIS는 토큰 만료를 401이 아니라 HTTP 500 본문(EGW00123 "만료된 token")으로 돌려주므로
+        // 본문까지 확인해야 한다. 이걸 놓치면 죽은 토큰으로 재시도만 하다 SAFE_MODE에 갇힌다.
+        if (status == 401 || isTokenExpiredResponse(status, response)) {
+            log.warn("인증 만료 감지(status={}) — 토큰 강제 재발급 후 재시도", status);
             tokenRef.set(null);
-            response = executeTracked(request, body, execution);
+            response = buffer(executeTracked(request, body, execution));
             recordOutcome(response.getStatusCode().value());
             return response;
         }
 
         // 429 / 5xx: 한투 서버 과부하, 장 시작 직후 응답 지연 등
         for (int attempt = 1; attempt <= 3 && (status == 429 || status / 100 == 5); attempt++) {
+            // 본문을 함께 남긴다 — 2026-09-22 하루 HTTP 500이 379건인데 본문이 없어 원인 진단이 막혔다.
+            // (토큰 만료 EGW00123은 위에서 이미 걸러져 이 경로로 오지 않는다)
+            String bodySnippet = KisErrorBodySnippet.of(response, secretsToMask());
             response.close();
             long waitMs = (1L << (attempt - 1)) * 1_000L; // 1s, 2s, 4s
-            log.warn("HTTP {} 수신 — {}ms 후 재시도 ({}/3)", status, waitMs, attempt);
+            log.warn("HTTP {} 수신 — {}ms 후 재시도 ({}/3) 본문={}", status, waitMs, attempt, bodySnippet);
             sleepQuietly(waitMs);
-            response = executeTracked(request, body, execution);
+            response = buffer(executeTracked(request, body, execution));
             status  = response.getStatusCode().value();
         }
         recordOutcome(status);
         return response;
     }
 
+    /**
+     * 오류 본문 로깅에서 가려야 할 값들 — 응답에 계좌번호가 되돌아오거나, 서버가 요청을
+     * 그대로 되뿜을 수 있다. 빈 값은 넣지 않는다(빈 문자열 치환은 로그를 전부 ***로 만든다).
+     */
+    private List<String> secretsToMask() {
+        TokenHolder holder = tokenRef.get();
+        return Stream.of(props.getAppkey(), props.getSecretkey(), props.getAccountNo(),
+                        holder == null ? null : holder.token())
+                .filter(s -> s != null && !s.isBlank())
+                .toList();
+    }
+
+    /** KIS의 토큰 만료 응답(HTTP 5xx 본문에 EGW00123/"만료된 token")을 401과 동등하게 감지한다. */
+    private boolean isTokenExpiredResponse(int status, ClientHttpResponse response) {
+        if (status / 100 != 5) return false;
+        try {
+            String body = new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
+            return body.contains("EGW00123") || body.contains("만료된 token");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 응답 본문을 바이트로 미리 읽어 재판독 가능한 응답으로 감싼다.
+     * 인터셉터가 본문(토큰 만료 여부)을 들여다봐도 호출 측이 그대로 다시 읽을 수 있게 한다.
+     */
+    private static ClientHttpResponse buffer(ClientHttpResponse original) throws IOException {
+        byte[] bytes = StreamUtils.copyToByteArray(original.getBody());
+        HttpStatusCode statusCode = original.getStatusCode();
+        String statusText = original.getStatusText();
+        HttpHeaders headers = HttpHeaders.readOnlyHttpHeaders(original.getHeaders());
+        original.close();
+        return new ClientHttpResponse() {
+            @Override public HttpStatusCode getStatusCode() { return statusCode; }
+            @Override public String getStatusText()          { return statusText; }
+            @Override public HttpHeaders getHeaders()        { return headers; }
+            @Override public InputStream getBody()           { return new ByteArrayInputStream(bytes); }
+            @Override public void close()                    { /* 버퍼 — 닫을 자원 없음 */ }
+        };
+    }
+
     private ClientHttpResponse executeTracked(
             HttpRequest request, byte[] body, ClientHttpRequestExecution execution) throws IOException {
+        rateLimiter.acquire();  // 초당 한도 준수 — 모든 물리 호출(최초·재시도 포함)이 예산 슬롯을 받는다
         try {
             return execution.execute(withAuth(request), body);
         } catch (IOException e) {
@@ -243,13 +330,34 @@ public class KisApiClient {
         maybeAutoResume(successes);
     }
 
+    /**
+     * 실패를 집계하고, <b>연속 {@value #CONSECUTIVE_FAILURE_THRESHOLD}회 실패 AND 눈먼 시간
+     * {@value #BLIND_MILLIS_BEFORE_SAFE_MODE}ms 경과</b>를 모두 만족할 때만 SAFE_MODE로 간다.
+     * 둘 중 하나만 만족하면 멈추지 않는다 — 모의 서버의 단발 실패로 모드가 진동하던 것을 끊기 위함.
+     */
     private void recordFailure() {
         consecutiveSuccesses.set(0);
         int failures = consecutiveFailures.incrementAndGet();
-        if (failures >= CONSECUTIVE_FAILURE_THRESHOLD) {
-            triggerSafeModeIfRunning(String.format(
-                    "KIS API 연속 %d회 호출 실패 — 시세를 못 보는 채로 매매하지 않습니다", failures));
+        if (failures == 1) {
+            blindSince.set(clock.instant());  // 연속 실패 시작 — 여기부터 눈먼 시간을 센다
         }
+        if (failures < CONSECUTIVE_FAILURE_THRESHOLD) return;
+
+        long blindMillis = blindMillis();
+        if (blindMillis < BLIND_MILLIS_BEFORE_SAFE_MODE) {
+            log.warn("KIS API 연속 {}회 실패 — 아직 {}초째라 멈추지 않습니다 (하한 {}초)",
+                    failures, blindMillis / 1000, BLIND_MILLIS_BEFORE_SAFE_MODE / 1000);
+            return;
+        }
+        triggerSafeModeIfRunning(String.format(
+                "KIS API 연속 %d회 호출 실패 · %d초째 응답 없음 — 시세를 못 보는 채로 매매하지 않습니다",
+                failures, blindMillis / 1000));
+    }
+
+    /** 지금 이어지는 연속 실패가 시작된 뒤 흐른 시간(ms). 실패 이력이 없으면 0. */
+    private long blindMillis() {
+        Instant since = blindSince.get();
+        return since == null ? 0L : Duration.between(since, clock.instant()).toMillis();
     }
 
     /** 연결 끊김으로 스스로 멈춘다. 연결 회복 시 자동복귀 대상으로 표시(pausedByConnectionLoss). */

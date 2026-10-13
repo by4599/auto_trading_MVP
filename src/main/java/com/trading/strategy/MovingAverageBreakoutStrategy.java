@@ -22,11 +22,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * 매수: 5/20/60/120일 이동평균선이 정배열(MA5 > MA20 > MA60 > MA120)이고
  * 현재가가 20일선을 상향 돌파했을 때.
  *
- * @Profile("paper") — B-3 백테스트(DailyBarSimulator도 SignalDispatcher를 공유)에
- * 이 미검증 전략의 신호가 섞여 들어가 결정성을 깨뜨리지 않도록 배제한다.
+ * @Profile({"paper","backtest"}) — BACKTEST-DESIGN §13 소급 검증을 위해 backtest 프로필도
+ * 허용한다. B-3(VB) 결정성은 {@link MaBreakoutProperties#isEnabled()} 스위치로 보호한다 —
+ * VB만 백테스트할 때는 이 전략을 false로 꺼서 신호가 섞이지 않게 한다.
  */
 @Component
-@Profile("paper")
+@Profile({"paper", "backtest"})
 public class MovingAverageBreakoutStrategy implements Strategy {
 
     private static final Logger log = LoggerFactory.getLogger(MovingAverageBreakoutStrategy.class);
@@ -39,15 +40,18 @@ public class MovingAverageBreakoutStrategy implements Strategy {
     private final MarketDataService marketDataService;
     private final MovingAverageCalculator calculator;
     private final Clock clock;
+    private final MaBreakoutProperties properties;
 
     private final Map<String, CachedHistory> historyCache = new ConcurrentHashMap<>();
 
     public MovingAverageBreakoutStrategy(MarketDataService marketDataService,
                                          MovingAverageCalculator calculator,
-                                         Clock clock) {
+                                         Clock clock,
+                                         MaBreakoutProperties properties) {
         this.marketDataService = marketDataService;
         this.calculator = calculator;
         this.clock = clock;
+        this.properties = properties;
     }
 
     @Override
@@ -57,7 +61,7 @@ public class MovingAverageBreakoutStrategy implements Strategy {
 
     @Override
     public List<Signal> evaluate(String stockCode, List<Candle> candles) {
-        if (candles.isEmpty()) return List.of();
+        if (!properties.isEnabled() || candles.isEmpty()) return List.of();
         double currentPrice = candles.get(candles.size() - 1).getClose();
 
         List<Candle> history = dailyHistory(stockCode);

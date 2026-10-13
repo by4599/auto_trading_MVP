@@ -87,13 +87,93 @@ class FilterRulesTest {
     }
 
     @Nested
+    @DisplayName("IndexTrendRule (§14.4 지수 장기추세)")
+    class IndexTrend {
+
+        /** isBelowTrend만 응답하는 데이터원 — 갭다운(isBearishRegime)과 독립임을 보이려고 empty 고정 */
+        private static IndexRegimeSource trendSource(java.util.function.IntFunction<Optional<Boolean>> f) {
+            return new IndexRegimeSource() {
+                @Override public Optional<Boolean> isBearishRegime() { return Optional.empty(); }
+                @Override public Optional<Boolean> isBelowTrend(int maPeriod) { return f.apply(maPeriod); }
+            };
+        }
+
+        @Test
+        @DisplayName("기본값은 OFF · MA200이다 (켜지 않으면 기존 결과 불변)")
+        void defaults_offAndMa200() {
+            FilterProperties filters = new FilterProperties();
+            assertThat(filters.getIndexTrend().isEnabled()).isFalse();
+            assertThat(filters.getIndexTrend().getMaPeriod()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("OFF(기본)이면 하락 추세여도 통과한다")
+        void off_passes() {
+            IndexTrendRule rule = new IndexTrendRule(
+                    new FilterProperties(), trendSource(p -> Optional.of(true)));
+            assertThat(rule.validate(Signal.buy("005930", "t"), account()).isPass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("ON + 추세 이탈이면 매수를 거부하고, 데이터 없으면 통과한다 (오탐 방지)")
+        void on_rejectsBelowTrend_passesUnknown() {
+            FilterProperties filters = new FilterProperties();
+            filters.getIndexTrend().setEnabled(true);
+
+            IndexTrendRule below = new IndexTrendRule(filters, trendSource(p -> Optional.of(true)));
+            assertThat(below.validate(Signal.buy("005930", "t"), account()).isPass()).isFalse();
+
+            IndexTrendRule above = new IndexTrendRule(filters, trendSource(p -> Optional.of(false)));
+            assertThat(above.validate(Signal.buy("005930", "t"), account()).isPass()).isTrue();
+
+            IndexTrendRule unknown = new IndexTrendRule(filters, trendSource(p -> Optional.empty()));
+            assertThat(unknown.validate(Signal.buy("005930", "t"), account()).isPass()).isTrue();
+        }
+
+        @Test
+        @DisplayName("설정한 MA 기간이 데이터원에 그대로 전달된다")
+        void passesConfiguredMaPeriod() {
+            FilterProperties filters = new FilterProperties();
+            filters.getIndexTrend().setEnabled(true);
+            filters.getIndexTrend().setMaPeriod(120);
+
+            IndexTrendRule rule = new IndexTrendRule(filters, trendSource(p -> Optional.of(p == 120)));
+            assertThat(rule.validate(Signal.buy("005930", "t"), account()).isPass()).isFalse();
+        }
+
+        @Test
+        @DisplayName("갭다운 필터와 독립이다 — 한쪽만 켜면 다른 쪽 판정은 관여하지 않는다")
+        void independentOfGapDownFilter() {
+            FilterProperties filters = new FilterProperties();
+            filters.getIndexTrend().setEnabled(true);   // 추세 ON, 갭다운은 기본 OFF
+
+            // 갭다운은 '약세'라고 답하지만 추세는 '아래 아님' → 매수 통과
+            IndexRegimeSource source = new IndexRegimeSource() {
+                @Override public Optional<Boolean> isBearishRegime() { return Optional.of(true); }
+                @Override public Optional<Boolean> isBelowTrend(int maPeriod) { return Optional.of(false); }
+            };
+            assertThat(new IndexTrendRule(filters, source)
+                    .validate(Signal.buy("005930", "t"), account()).isPass()).isTrue();
+            assertThat(new IndexRegimeRule(filters, source)
+                    .validate(Signal.buy("005930", "t"), account()).isPass()).isTrue(); // 갭다운 OFF
+        }
+
+        @Test
+        @DisplayName("isBelowTrend 기본 구현은 empty다 — 기존 구현체(paper NoOp)는 그대로 통과")
+        void defaultImplementation_isEmpty() {
+            IndexRegimeSource legacy = () -> Optional.of(true); // isBearishRegime만 구현
+            assertThat(legacy.isBelowTrend(200)).isEmpty();
+        }
+    }
+
+    @Nested
     @DisplayName("TrailingStopTracker")
     class Trailing {
 
         @Test
         @DisplayName("OFF(기본)이면 절대 청산 신호를 내지 않는다")
         void off_neverExits() {
-            TrailingStopTracker tracker = new TrailingStopTracker(new FilterProperties());
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), new FilterProperties()));
             tracker.updateHigh("005930", 110);
             assertThat(tracker.exitPrice("005930", 90, 100)).isEmpty();
         }
@@ -104,7 +184,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true); // arm 3%, trail 2% 기본
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 104);          // 진입가 100 → +4% 도달 (armed)
 
             // 고점 104 × 0.98 = 101.92 — 현재가 101이면 청산
@@ -119,7 +199,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true);
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 102);          // +2% — 미장착
 
             assertThat(tracker.exitPrice("005930", 99, 100)).isEmpty();
@@ -131,7 +211,7 @@ class FilterRulesTest {
             FilterProperties filters = new FilterProperties();
             filters.getTrailingStop().setEnabled(true);
 
-            TrailingStopTracker tracker = new TrailingStopTracker(filters);
+            TrailingStopTracker tracker = new TrailingStopTracker(com.trading.bucket.BucketTestSupport.defaultParams(new RiskLimitsProperties(), filters));
             tracker.updateHigh("005930", 110);
             tracker.clear("005930");
 

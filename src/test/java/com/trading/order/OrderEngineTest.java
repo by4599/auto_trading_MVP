@@ -55,12 +55,12 @@ class OrderEngineTest {
         positionRepository = mock(PositionRepository.class);
         // 칸 나누기 OFF — 기존 사이징 동작 유지 (칸 동작은 OrderSizingServiceTest에서 검증)
         BucketProperties bucketProps = new BucketProperties(
-                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, false, false);
+                false, "2026-07-20", 10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
         BucketAccountService bucketAccounts = new BucketAccountService(
                 bucketProps, positionRepository, mock(TradeResultRepository.class));
         sut = new OrderEngine(orderClient, statusManager,
                 new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
-                        new RiskLimitsProperties(), bucketProps, bucketAccounts),
+                        new RiskLimitsProperties(), bucketProps, bucketAccounts, com.trading.bucket.BucketTestSupport.defaultParams()),
                 positionRepository);
     }
 
@@ -129,6 +129,52 @@ class OrderEngineTest {
 
         sut.execute(Signal.buy("005930", "test"));
         sut.execute(Signal.sell("005930", "test"));
+
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+        verify(orderClient, never()).buy(anyString(), anyInt());
+        verify(orderClient, never()).sell(anyString(), anyInt());
+    }
+
+    // ── executeManualBuy (리허설용 고정 수량 매수) ─────────────────────────────
+
+    @Test
+    @DisplayName("수동 매수: 사이징을 거치지 않고 지정 수량 그대로 주문")
+    void manual_buy_uses_fixed_quantity_without_sizing() {
+        // ATR 산출 불가 → 자동 경로였다면 사이징 스킵될 상황
+        when(marketDataService.getDailyCandles(anyString(), anyInt())).thenReturn(List.of());
+
+        sut.executeManualBuy(Signal.buy("005930", "MANUAL_DRILL"), 10);
+
+        verify(orderClient).buy("005930", 10, StrategyBucket.VB);
+    }
+
+    @Test
+    @DisplayName("수동 매수: SAFE_MODE면 차단 (자동 매수와 동일 게이팅)")
+    void manual_buy_blocked_in_safe_mode() {
+        statusManager.changeMode(TradingMode.SAFE_MODE);
+
+        sut.executeManualBuy(Signal.buy("005930", "MANUAL_DRILL"), 10);
+
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+        verify(orderClient, never()).buy(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("수동 매수: EMERGENCY_STOPPED면 차단")
+    void manual_buy_blocked_when_stopped() {
+        statusManager.changeMode(TradingMode.EMERGENCY_STOPPED);
+
+        sut.executeManualBuy(Signal.buy("005930", "MANUAL_DRILL"), 10);
+
+        verify(orderClient, never()).buy(anyString(), anyInt(), any());
+        verify(orderClient, never()).buy(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("수동 매수: 매도 신호·수량 0 이하는 무시")
+    void manual_buy_ignores_sell_signal_and_non_positive_quantity() {
+        sut.executeManualBuy(Signal.sell("005930", "MANUAL_DRILL"), 10);
+        sut.executeManualBuy(Signal.buy("005930", "MANUAL_DRILL"), 0);
 
         verify(orderClient, never()).buy(anyString(), anyInt(), any());
         verify(orderClient, never()).buy(anyString(), anyInt());
