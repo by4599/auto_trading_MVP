@@ -89,7 +89,7 @@ class TradingUniverseServiceTest {
     }
 
     @Test
-    @DisplayName("상한 20종목 도달 → 편입 거부 (방법론 §2.5)")
+    @DisplayName("상한(60종목) 도달 → 편입 거부 (방법론 §2.5)")
     void rejects_beyond_cap() {
         for (int i = 0; i < TradingUniverseService.MAX_UNIVERSE_SIZE; i++) {
             store.add(TradingUniverseItem.of(String.format("%06d", i), null));

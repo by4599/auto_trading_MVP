@@ -121,7 +121,8 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
 
 ## 현재 스코프 (이거 넘어서는 기능 제안하지 말 것)
 
-- 종목: `trading_universe` 테이블 (최초 시드 005930, 최대 20종목).
+- 종목: `trading_universe` 테이블 (최초 시드 005930, 최대 60종목 — 2026-10-25 사용자 요청으로 20 → 60, 돈치안 검증 표본
+  54종목(`backtest.candidate-symbols`)을 모두 담기 위해).
   편입/제외는 대시보드 UI에서 **사람이 직접** (수동 게이트 G1) — 뉴스 워치리스트와 별개.
   KIS 모의 레이트리밋 때문에 스케줄러는 틱당 1종목 라운드로빈 (N종목 = 종목당 N초 간격)
 - 전략 (2026-10-01~, 사용자 결정): 모의투자에서 매수하는 전략은 **A동 하나** —
@@ -373,7 +374,7 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
 - P2-A (2026-07-08) — `AtrCalculator`(ATR 14) + `OrderSizingService`(R 수량 역산) +
   `StopLossArmer`/`StopLossMonitor`(체결가 기준 ATR 손절 장착·1초 감시) + `ClockConfig`(KST)
 - `universe` 패키지 (2026-07-09) — `trading_universe` 매매 대상 관리 (시드 005930,
-  상한 20, 웹 UI 편입/제외) + `TradingScheduler` 라운드로빈 + 대시보드 유니버스 카드
+  상한 60(2026-10-25 20→60), 웹 UI 편입/제외) + `TradingScheduler` 라운드로빈 + 대시보드 유니버스 카드
 - DART 공시 수집 (2026-07-09, Phase 3a 수집부) — `DartDisclosureService`(30분 주기,
   접수번호 중복 방지) + `HttpDartApiClient`(corpCode ZIP StAX 파싱)
   + 대시보드 공시 카드. HTTP는 `DartApiClient` 인터페이스 뒤 (Mockito 제약 대응)
