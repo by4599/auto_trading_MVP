@@ -118,8 +118,18 @@ Gradle 빌드에 포함되지 않지만 이름이 같아 혼동하기 쉽다.
    `SleeveLockRule`, `trading.bucket.sleeve-drawdown` — 상한에 닿으면 그 칸만 신규 매수 금지 + 그 칸 보유 매도 + 텔레그램,
    해제는 사람만, `docs/OPERATIONS.md` §7). B동을 다시 켜기 전 필수 과제는 BACKLOG [2026-10-11]
    (`_workspace/30_audit` M-4는 8% 정본화만 남았다).
+   ⚠⚠ **2026-11-13 — 위 "모두 통과한 조합"의 근거는 무효다 (BACKTEST-DESIGN §19).** 백테스트 엔진이 2026-07-19~11-13 사이
+   매수에 ATR 손절선을 붙이지 않아, 통과 판정은 **손절 없는 전략**의 성적이었다. 고친 엔진에서 §15.7 D0(= 지금 paper A동,
+   ATR 1.0 손절)은 비관 가정 PF 0.53·MDD 75.8% / 낙관 가정 PF 1.01·MDD 19.9%로 **§4 불합격**이고, 손절 폭 1.0~3.0배 중
+   최종 합격은 없다. **지금 이 칸에 검증된 조합은 없다** — paper 설정은 바꾸지 않았다(유지·중단·출구 재설계는 사용자 결정 대기).
 
 ## 현재 스코프 (이거 넘어서는 기능 제안하지 말 것)
+
+> ⚠⚠ **2026-11-13 — 이 절의 백테스트 수치 중 2026-07-19 이후 것은 손절선이 붙지 않던 엔진 결과다 (BACKTEST-DESIGN §19).**
+> 해당: Exit Lab/Risk Lab(§14)·약세장 스트레스(§14.3)·지수 필터(§14.4)·진입 교체 트랙(§15)·사이징 재스윕·
+> 고정% 브래킷의 트레일링 기준선 행·흔적레이더(§18)·3방식 재검증(§12·§13). 아래 수치는 **이력으로만** 읽고 판정 근거로 쓰지 말 것.
+> `docs/BACKTEST-BASELINE-EXITLAB-MA-P3.yml`도 손절 없는 엔진 값이며 아직 다시 찍지 않았다 — 고친 엔진의 risk-lab은
+> 합격 프로필이 없어 앵커 대조가 "대조 못 함"으로 나온다(드리프트 사고가 아니다).
 
 - 종목: `trading_universe` 테이블 (최초 시드 005930, 최대 60종목 — 2026-10-25 사용자 요청으로 20 → 60, 돈치안 검증 표본
   54종목(`backtest.candidate-symbols`)을 모두 담기 위해).
@@ -499,6 +509,16 @@ TradingScheduler (1초 루프, 유니버스 라운드로빈)
    ② 모의 서버가 이 식을 실제로 지키는지는 **재기동 후 하루 1회 기준선 로그로 검증 대기**다(안 지키면 매매 뒤 이틀
    동안 정당한 고점도 막혀, 전고점이 낮게 유지되고 강제정지 기준이 느슨해지는 쪽으로 틀린다) ③ 불일치 판정은 아직
    청산·손절·일일 손실 관문에 쓰지 않는다. 근거·확인 목록은 `_workspace/47_impl`·`48_audit_peak-spike-defense.md` §4.
+
+7. **백테스트 엔진 손절선 미장착 — 엔진은 고쳤고, 판정은 무효가 됐다 (2026-11-13, BACKTEST-DESIGN §19)**.
+   `BacktestOrderClient`가 3인자 `buy(code, qty, bucket)`를 구현하지 않아 인터페이스 default의 자기 호출이 `@Transactional`
+   프록시를 건너뛰었고, `StopLossArmer`(AFTER_COMMIT)가 체결 이벤트를 버렸다. 2026-07-19(`baf92f5`, 정황 추정)~11-13.
+   ✅ 수정: 3인자 `buy`를 `@Transactional`로 직접 구현 + 회귀 테스트 `BacktestOrderClientStopArmingTest`.
+   ⚠ **`KisOrderClient`에 default 메서드를 더하거나 새 구현체를 만들 때 같은 함정을 조심할 것** — 자기 호출은 트랜잭션을 열지 않는다.
+   ⚠ 남은 것: 기준선 yml 재기록 여부 · A동 출구 재설계 여부 · §12·§13·§15.8·§15.9·§18 재측정 · 시험 54(나눠 사기)·55(약세장 상대강도)
+   미실행 — 전부 사용자 결정 대기. paper 쪽 구현(`KisOrderClientImpl`)은 3인자를 직접 구현하나 A동 실매수 0건이라 운영 로그로는 미확인.
+   새 실행 모드: `--backtest.mode=stop-width-lab` · `stop-width-sens --backtest.stop-width-base=<코드>` · `scale-in-anchor|scale-in-lab|scale-in-sens`.
+   근거 `_workspace/54_quant_scale-in-full-account.md` · `56_quant_stop-width-sweep.md`.
 
 해소됨: F-1/F-2/F-7 (Gate 1, 2026-07-07) · F-3 (Gate 2) · F-4/F-5 (Gate 3) · F-8 (P2-A, 2026-07-08)
 · 부분 체결 매수 손절 미장착 (2026-07-20 — `OrderPartialFilledEvent` 신설, 부분 체결분도
