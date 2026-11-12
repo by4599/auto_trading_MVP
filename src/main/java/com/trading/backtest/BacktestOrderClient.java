@@ -83,6 +83,18 @@ public class BacktestOrderClient implements KisOrderClient {
         sell(stockCode, 1);
     }
 
+    /**
+     * 칸 이름표 매수 — {@code OrderEngine}이 실제로 부르는 경로. 인터페이스 default({@code this.buy(code, qty)} 자기 호출)를
+     * 그대로 쓰면 @Transactional 프록시를 건너뛰어 체결 이벤트가 트랜잭션 없이 발행되고, AFTER_COMMIT 리스너인
+     * {@code StopLossArmer}가 이를 버려 ATR 손절선이 붙지 않았다(2026-07-19 baf92f5 ~ 2026-11-13 수정).
+     * 여기서 트랜잭션을 열면 안쪽 자기 호출도 그 트랜잭션에 합류해 커밋 후 손절선이 장착된다. 칸 값은 백테스트에서 쓰지 않는다.
+     */
+    @Override
+    @Transactional
+    public void buy(String stockCode, int quantity, com.trading.bucket.StrategyBucket bucket) {
+        buy(stockCode, quantity);
+    }
+
     @Override
     @Transactional
     public void buy(String stockCode, int quantity) {

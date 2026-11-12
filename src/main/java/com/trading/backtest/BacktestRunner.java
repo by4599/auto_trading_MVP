@@ -52,6 +52,7 @@ public class BacktestRunner {
     private final MutableClock clock;
     private final RiskLimitsProperties limits;
     private final ExitLabProperties exitLab;
+    private final ScaleInRunStats runStats; // 기록 전용(현금 비중) — 매매 판단에 쓰이지 않는다
 
     public BacktestRunner(BacktestMarketDataService market,
                           DailyBarSimulator simulator,
@@ -65,7 +66,8 @@ public class BacktestRunner {
                           BacktestDataProperties properties,
                           MutableClock clock,
                           RiskLimitsProperties limits,
-                          ExitLabProperties exitLab) {
+                          ExitLabProperties exitLab,
+                          ScaleInRunStats runStats) {
         this.market = market;
         this.simulator = simulator;
         this.exitSimulator = exitSimulator;
@@ -79,10 +81,12 @@ public class BacktestRunner {
         this.clock = clock;
         this.limits = limits;
         this.exitLab = exitLab;
+        this.runStats = runStats;
     }
 
     public RunResult run(RunConfig config) {
         stateReset.reset();
+        runStats.beginRun(config.label());
         market.loadSeries(config.symbols(), config.from(), config.to());
 
         List<LocalDate> dates = market.tradingDates(config.from(), config.to());
@@ -182,7 +186,9 @@ public class BacktestRunner {
             }
         }
 
-        tradeRecorder.recordDayEnd(positionManager.snapshotAccount().getTotalAssetValue());
+        double dayEndEquity = positionManager.snapshotAccount().getTotalAssetValue();
+        tradeRecorder.recordDayEnd(dayEndEquity);
+        runStats.sampleDayEnd(positionManager.getCash(), dayEndEquity);
     }
 
     private List<Position> heldPositions() {

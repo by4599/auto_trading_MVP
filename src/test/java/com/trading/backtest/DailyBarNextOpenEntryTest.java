@@ -123,7 +123,16 @@ class DailyBarNextOpenEntryTest {
         accumulation.setEnabled(true);
         SignalDispatcher dispatcher = new SignalDispatcher(List.of(traceStrategy()));
         sut = new DailyBarSimulator(market, dispatcher, riskEngine, orderEngine, positions, positionManager,
-                trailing, exits, clock, new RsiProperties(), accumulation);
+                trailing, exits, clock, new RsiProperties(), accumulation,
+                new ScaleInExecutor(new ScaleInProperties(), market, positions, positionManager, orderEngine,
+                        List.of(), mock(com.trading.risk.IndexRegimeSource.class), new AtrCalculator(), clock,
+                        new BacktestCostProperties(), new ScaleInRunStats(), stopFixOff(positions)),
+                stopFixOff(positions));
+    }
+
+    /** 손절 규칙 기본값 — 엔진 기본 동작 그대로 */
+    private BacktestStopRules stopFixOff(PositionRepository positions) {
+        return new BacktestStopRules(positions, market, new AtrCalculator());
     }
 
     /** 가격과 무관하게 발화하는 대역 전략 — 받은 당일 봉(마지막 캔들)을 기록한다 */

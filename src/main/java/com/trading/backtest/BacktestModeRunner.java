@@ -33,6 +33,7 @@ public class BacktestModeRunner {
     private final ExitLab exitLab;
     private final FullBacktestLab fullBacktestLab;
     private final CandidateLabRouter candidateLabRouter;
+    private final ScaleInLabRouter scaleInLabRouter;
 
     public BacktestModeRunner(CandleBackfillService backfillService,
                               BacktestDataProperties properties,
@@ -45,7 +46,8 @@ public class BacktestModeRunner {
                               SingleStrategyLab singleStrategyLab,
                               ExitLab exitLab,
                               FullBacktestLab fullBacktestLab,
-                              CandidateLabRouter candidateLabRouter) {
+                              CandidateLabRouter candidateLabRouter,
+                              ScaleInLabRouter scaleInLabRouter) {
         this.backfillService = backfillService;
         this.properties = properties;
         this.liquidityScreener = liquidityScreener;
@@ -58,6 +60,7 @@ public class BacktestModeRunner {
         this.exitLab = exitLab;
         this.fullBacktestLab = fullBacktestLab;
         this.candidateLabRouter = candidateLabRouter;
+        this.scaleInLabRouter = scaleInLabRouter;
     }
 
     public void execute() {
@@ -76,6 +79,7 @@ public class BacktestModeRunner {
         if (runDataMode(mode, symbols, from, to)) return;
         if (runStrategyMode(mode, symbols, from, to)) return;
         if (candidateLabRouter.route(mode)) return;
+        if (scaleInLabRouter.route(mode)) return;
 
         fullBacktestLab.run(symbols, from, to);
     }

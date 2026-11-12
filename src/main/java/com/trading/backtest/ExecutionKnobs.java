@@ -72,6 +72,11 @@ public class ExecutionKnobs {
         riskLimits.setMaxPositionCount(maxPositions);
     }
 
+    /** 사이징·손절 장착에 쓰는 ATR 배수(전역) — 손절 폭 스윕용. 출구 프로필 적용 뒤에 덮어쓴다 */
+    public void setAtrStopMultiplier(double multiplier) {
+        riskLimits.setAtrStopMultiplier(multiplier);
+    }
+
     public void resetSizing() {
         riskLimits.setRiskFractionPerTrade(RiskLimits.RISK_FRACTION_PER_TRADE);
         riskLimits.setMaxPositionCount(RiskLimits.MAX_POSITION_COUNT);

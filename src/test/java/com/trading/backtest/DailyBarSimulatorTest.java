@@ -120,7 +120,8 @@ class DailyBarSimulatorTest {
                 trailingStopTracker, clock, scalpingProperties, exitLab);
         sut = new DailyBarSimulator(market, dispatcher, riskEngine,
                 orderEngine, positionRepository, positionManager,
-                trailingStopTracker, exits, clock, new RsiProperties(), new AccumulationProperties());
+                trailingStopTracker, exits, clock, new RsiProperties(), new AccumulationProperties(),
+                disabledScaleIn(positionRepository, orderEngine), disabledStopFix(positionRepository));
 
         market.setSimDate(TODAY);
     }
@@ -302,6 +303,18 @@ class DailyBarSimulatorTest {
     }
 
     // ── 픽스처 ────────────────────────────────────────────────────────────────
+
+    /** 분할 매수 OFF(기본값) — 기존 R 사이징 경로 그대로 */
+    private ScaleInExecutor disabledScaleIn(PositionRepository positions, OrderEngine orderEngine) {
+        return new ScaleInExecutor(new ScaleInProperties(), market, positions, positionManager, orderEngine,
+                List.of(), mock(com.trading.risk.IndexRegimeSource.class), new AtrCalculator(), clock,
+                new BacktestCostProperties(), new ScaleInRunStats(), disabledStopFix(positions));
+    }
+
+    /** 손절 규칙 기본값 — 엔진 기본 동작 그대로 */
+    private BacktestStopRules disabledStopFix(PositionRepository positions) {
+        return new BacktestStopRules(positions, market, new AtrCalculator());
+    }
 
     private void givenHeldPosition(int qty, double avgPrice, double stopPrice) {
         Position pos = Position.empty(CODE);

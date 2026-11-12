@@ -57,6 +57,8 @@ public class DailyBarSimulator {
     private final MutableClock clock;
     private final RsiProperties rsiProperties;
     private final AccumulationProperties accumulationProperties;
+    private final ScaleInExecutor scaleIn; // 기본 OFF — 켜졌을 때만 금액 비중 진입·분할 매수 (2026-11 연구)
+    private final BacktestStopRules stopRules; // 기본값 = 엔진 기본 동작(진입 당일부터 손절 판정, 손절 배수 = 사이징 배수)
 
     public DailyBarSimulator(BacktestMarketDataService market,
                              SignalDispatcher signalDispatcher,
@@ -68,7 +70,9 @@ public class DailyBarSimulator {
                              DailyBarExitSimulator exits,
                              MutableClock clock,
                              RsiProperties rsiProperties,
-                             AccumulationProperties accumulationProperties) {
+                             AccumulationProperties accumulationProperties,
+                             ScaleInExecutor scaleIn,
+                             BacktestStopRules stopRules) {
         this.market = market;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -80,6 +84,8 @@ public class DailyBarSimulator {
         this.clock = clock;
         this.rsiProperties = rsiProperties;
         this.accumulationProperties = accumulationProperties;
+        this.scaleIn = scaleIn;
+        this.stopRules = stopRules;
     }
 
     public void simulateDay(String stockCode, LocalDate date) {
@@ -108,7 +114,12 @@ public class DailyBarSimulator {
         } else {
             checkEntry(stockCode, date, bar);
         }
-        exits.checkSameDayStop(stockCode, date, bar);
+        if (scaleIn.isEnabled()) {
+            scaleIn.checkAddOns(stockCode, date, bar); // 손절선 터치일엔 생략, 추가분은 아래 당일 손절 판정을 받는다
+        }
+        if (stopRules.judgeSameDayStop(stockCode, date)) {
+            exits.checkSameDayStop(stockCode, date, bar); // 다음 날부터 규칙이면 진입일 손절 판정을 건너뛴다
+        }
         exits.checkTakeProfit(stockCode, date, bar);
         exits.checkBracketTarget(stockCode, date, bar); // 손절 판정 뒤 — 같은 날이면 손절 우선
         exits.checkTrailingStop(stockCode, date, bar, carriedAtOpen);
@@ -134,7 +145,12 @@ public class DailyBarSimulator {
             log.debug("[Sim] {} {} 매수 거부: {}", date, stockCode, result.getReason());
             return;
         }
-        orderEngine.execute(buy);
+        if (scaleIn.isEnabled()) {
+            scaleIn.enter(stockCode, buy, entryPrice); // 수량만 금액 비중 — 흐름은 RiskEngine 통과 후 OrderEngine
+        } else {
+            orderEngine.execute(buy);
+            stopRules.applyAfterEntry(stockCode, date);
+        }
     }
 
     // ── ③′ 평균회귀 종가 진입 (RSI2, 전략3=스캘핑 대체 — 2026-08) ─────────────────
@@ -160,6 +176,7 @@ public class DailyBarSimulator {
             return;
         }
         orderEngine.execute(buy);
+        stopRules.applyAfterEntry(stockCode, date);
         if (heldPosition(stockCode) != null) {
             // 트레일링 baseline = 진입 종가 (당일 고가는 진입 전에 성립하므로 쓰지 않는다)
             trailingStopTracker.updateHigh(stockCode, bar.getClose());
@@ -191,6 +208,7 @@ public class DailyBarSimulator {
             return;
         }
         orderEngine.execute(buy);
+        stopRules.applyAfterEntry(stockCode, date);
     }
 
     /**

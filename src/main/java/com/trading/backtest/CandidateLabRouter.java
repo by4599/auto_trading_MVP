@@ -269,7 +269,7 @@ public class CandidateLabRouter {
         return new LabScope(label, slug, prepareCandidateUniverse(mode, from, to), from, to);
     }
 
-    private LabScope stressScope(String mode, String label, String slug) {
+    LabScope stressScope(String mode, String label, String slug) {
         LocalDate from = properties.getStressFrom();
         LocalDate to = properties.getStressTo();
         return new LabScope(label, slug, prepareCandidateUniverse(mode, from, to), from, to);
