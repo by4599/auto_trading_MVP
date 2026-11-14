@@ -101,7 +101,7 @@ public class BacktestReportWriter {
         md.append("# 백테스트 리포트 (B-3) — ").append(data.strategyLabel()).append(" 소급 검증\n\n");
         md.append(String.format("- 실행: %s%n- 기간: %s ~ %s%n- 종목: %s%n- 초기 자본: 10,000,000원%n",
                 LocalDateTime.now(), data.from(), data.to(), String.join(", ", data.symbols())));
-        md.append("- 비용 모델: 슬리피지 0.1%×2 + 수수료 0.015%×2 + 매도 제세 0.18% (왕복 ≈0.41%)\n\n");
+        md.append("- 비용 모델: 슬리피지 0.1%×2 + 수수료 0.015%×2 + 매도 제세 0.20% (왕복 ≈0.43%)\n\n");
 
         md.append("## 판정: ").append(judgment.pass() ? "✅ 합격" : "❌ 불합격").append("\n\n");
         judgment.reasons().forEach(r -> md.append("- ").append(r).append('\n'));

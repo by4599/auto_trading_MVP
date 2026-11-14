@@ -21,33 +21,33 @@ class BacktestCostPropertiesTest {
     }
 
     @Test
-    @DisplayName("기본 왕복비용은 기존 상수 0.41%와 같다 (다른 모드 회귀 방지)")
+    @DisplayName("기본 왕복비용은 기존 상수 0.43%와 같다 (다른 모드 회귀 방지)")
     void defaultMatchesLegacyConstant() {
         assertThat(costs.getSlippageRate()).isCloseTo(BacktestCosts.SLIPPAGE_RATE, within(EPS));
-        assertThat(costs.roundTripCost()).isCloseTo(0.0041, within(EPS));
+        assertThat(costs.roundTripCost()).isCloseTo(0.0043, within(EPS));
         assertThat(costs.roundTripCost()).isCloseTo(BacktestCosts.ROUND_TRIP_COST, within(EPS));
     }
 
     @Test
-    @DisplayName("목표 왕복 0.60% → 편도 슬리피지 0.195%로 역산")
+    @DisplayName("목표 왕복 0.60% → 편도 슬리피지 0.185%로 역산")
     void setRoundTripCost60bp() {
         costs.setRoundTripCost(0.006);
 
-        assertThat(costs.getSlippageRate()).isCloseTo(0.00195, within(EPS));
+        assertThat(costs.getSlippageRate()).isCloseTo(0.00185, within(EPS));
         assertThat(costs.roundTripCost()).isCloseTo(0.006, within(EPS));
     }
 
     @Test
-    @DisplayName("목표 왕복 0.80% → 편도 슬리피지 0.295%로 역산")
+    @DisplayName("목표 왕복 0.80% → 편도 슬리피지 0.285%로 역산")
     void setRoundTripCost80bp() {
         costs.setRoundTripCost(0.008);
 
-        assertThat(costs.getSlippageRate()).isCloseTo(0.00295, within(EPS));
+        assertThat(costs.getSlippageRate()).isCloseTo(0.00285, within(EPS));
         assertThat(costs.roundTripCost()).isCloseTo(0.008, within(EPS));
     }
 
     @Test
-    @DisplayName("법정 확정비용(수수료×2+제세=0.21%) 하한 미만 목표는 거부한다")
+    @DisplayName("법정 확정비용(수수료×2+제세=0.23%) 하한 미만 목표는 거부한다")
     void rejectsTargetBelowStatutoryFloor() {
         assertThatThrownBy(() -> costs.setRoundTripCost(0.001))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -56,13 +56,13 @@ class BacktestCostPropertiesTest {
     }
 
     @Test
-    @DisplayName("resetDefaults()는 왕복 0.41%로 되돌린다 (모드 간 누출 방지)")
+    @DisplayName("resetDefaults()는 왕복 0.43%로 되돌린다 (모드 간 누출 방지)")
     void resetDefaultsRestoresBaseline() {
         costs.setRoundTripCost(0.008);
         costs.resetDefaults();
 
         assertThat(costs.getSlippageRate()).isCloseTo(BacktestCosts.SLIPPAGE_RATE, within(EPS));
-        assertThat(costs.roundTripCost()).isCloseTo(0.0041, within(EPS));
+        assertThat(costs.roundTripCost()).isCloseTo(0.0043, within(EPS));
     }
 
     @Test

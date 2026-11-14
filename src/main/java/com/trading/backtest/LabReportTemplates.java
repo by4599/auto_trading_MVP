@@ -14,7 +14,7 @@ final class LabReportTemplates {
 
     /** 비교 리포트 헤더의 비용 문구 기본값 — 비용 스윕(cost-lab)이 아닌 모드는 왕복 0.41% 고정 */
     private static final String DEFAULT_COST_LINE =
-            "- 비용 모델: 왕복 ≈0.41%. 합격 기준(§4): 트레이드≥100·PF≥1.3·기대값>0·MDD≤15%";
+            "- 비용 모델: 왕복 ≈0.43%. 합격 기준(§4): 트레이드≥100·PF≥1.3·기대값>0·MDD≤15%";
 
     /**
      * Exit Lab(§14) 출구 프로필 비교 — 진입 고정, 출구만 스윕. 거버넌스 기준선은 쓰지 않는다

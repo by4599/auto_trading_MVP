@@ -60,6 +60,11 @@ public class ExecutionKnobs {
         }
     }
 
+    /** 고정% 손절만 덮어쓴다 (0이면 기존 ATR 손절 경로). 출구 프로필 적용 뒤에 부른다 */
+    public void setFixedStopPct(double stopPct) {
+        exitLab.setStopPct(stopPct);
+    }
+
     public void resetExitProfile() {
         riskLimits.setAtrStopMultiplier(RiskLimits.ATR_STOP_MULTIPLIER);
         exitLab.resetDefaults();
@@ -75,6 +80,17 @@ public class ExecutionKnobs {
     /** 사이징·손절 장착에 쓰는 ATR 배수(전역) — 손절 폭 스윕용. 출구 프로필 적용 뒤에 덮어쓴다 */
     public void setAtrStopMultiplier(double multiplier) {
         riskLimits.setAtrStopMultiplier(multiplier);
+    }
+
+    /** 고가 종목 1주 매수 허용 (59_quant) — 기본 OFF */
+    public void setSizingMinOneShare(boolean enabled) {
+        setSizingMinOneShare(enabled, 0);
+    }
+
+    /** maxRiskMultiple: 1주 리스크 ≤ 1R × 이 값일 때만 1주를 산다 (0 = 상한 없음) */
+    public void setSizingMinOneShare(boolean enabled, double maxRiskMultiple) {
+        riskLimits.setSizingMinOneShare(enabled);
+        riskLimits.setSizingMinOneShareMaxRiskMultiple(maxRiskMultiple);
     }
 
     public void resetSizing() {

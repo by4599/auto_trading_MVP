@@ -47,6 +47,40 @@ public class ScaleInLabRouter {
             stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL, STOP_SLUG), StopWidthProfile.grid(), "본 격자");
             return true;
         }
+        if ("stop-pct-lab".equalsIgnoreCase(mode)) {
+            stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL + " · 고정% 손절", STOP_SLUG + "-PCT"),
+                    StopWidthProfile.pctGrid(), "고정% 격자");
+            return true;
+        }
+        if ("stop-size-lab".equalsIgnoreCase(mode)) {   // 59_quant — −15% 손절에서 1R 비율 · 1주 강제 매수
+            List<StopWidthProfile> f15 = List.of(findStopProfile("F15-S"), findStopProfile("F15-X"));
+            runSizing(mode, f15, 0.0025, false, "R025");
+            runSizing(mode, f15, 0.0050, false, "R050");
+            runSizing(mode, f15, 0.0025, true, "R025-MIN1");
+            runSizing(mode, f15, 0.0050, true, "R050-MIN1");
+            stopWidthLab.useSizing(StopWidthLab.SZ2_RISK_FRACTION, false);
+            return true;
+        }
+        if ("stop-size-cap-lab".equalsIgnoreCase(mode)) {   // 61_quant — 1주 강제 매수 상한 배수
+            List<StopWidthProfile> f15 = List.of(findStopProfile("F15-S"), findStopProfile("F15-X"));
+            for (double cap : List.of(2.0, 3.0, 5.0)) {
+                stopWidthLab.useSizing(0.0025, true, cap);
+                String tag = String.format("R025-MIN1-CAP%.0f", cap);
+                stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL + " · 사이징 " + tag, STOP_SLUG + "-SIZE-" + tag),
+                        f15, "사이징 " + tag);
+            }
+            stopWidthLab.useSizing(StopWidthLab.SZ2_RISK_FRACTION, false);
+            return true;
+        }
+        if ("stop-size-sens".equalsIgnoreCase(mode)) {  // 59_quant §3 — 0.25R + 1주 강제 매수의 민감도·비용
+            stopWidthLab.useSizing(0.0025, true);
+            for (String code : List.of("F15-S", "F15-X")) {
+                stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL + " · R025-MIN1 민감도 " + code,
+                        STOP_SLUG + "-SIZE-R025-MIN1-SENS-" + code), StopWidthProfile.sensitivity(findStopProfile(code)), "민감도");
+            }
+            stopWidthLab.useSizing(StopWidthLab.SZ2_RISK_FRACTION, false);
+            return true;
+        }
         if ("stop-width-sens".equalsIgnoreCase(mode)) {
             StopWidthProfile base = findStopProfile(stopWidthBase);
             stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL + " · 민감도 " + base.code(),
@@ -69,8 +103,15 @@ public class ScaleInLabRouter {
         return false;
     }
 
+    private void runSizing(String mode, List<StopWidthProfile> profiles, double riskFraction, boolean minOneShare, String tag) {
+        stopWidthLab.useSizing(riskFraction, minOneShare);
+        stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL + " · 사이징 " + tag, STOP_SLUG + "-SIZE-" + tag),
+                profiles, "사이징 " + tag);
+    }
+
     static StopWidthProfile findStopProfile(String code) {
-        List<StopWidthProfile> grid = StopWidthProfile.grid();
+        List<StopWidthProfile> grid = new java.util.ArrayList<>(StopWidthProfile.grid());
+        grid.addAll(StopWidthProfile.pctGrid());
         return grid.stream().filter(p -> p.code().equalsIgnoreCase(code)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
                         "--backtest.stop-width-base 코드를 격자에서 찾지 못함: '" + code + "' — 가능: "

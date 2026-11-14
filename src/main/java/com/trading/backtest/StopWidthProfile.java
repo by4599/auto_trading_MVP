@@ -8,9 +8,16 @@ import java.util.List;
  *
  * @param sizingMult 사이징 배수(수량 = 1R ÷ (ATR × 이 값)). 손절선도 일단 이 배수로 장착된다
  * @param stopMult   손절선 배수 — NaN이면 사이징 배수 그대로, 0이면 손절 없음(손절가 0원)
+ * @param fixedStopPct 0이면 ATR 손절. >0이면 손절선 = 진입가 × (1 − 이 값) 고정% (58_quant)
  */
 record StopWidthProfile(String code, String name, double sizingMult, double stopMult,
-                        BacktestStopRules.EntryDayStop entryDay, int lookback, int trendMa, double roundTripCost) {
+                        BacktestStopRules.EntryDayStop entryDay, int lookback, int trendMa, double roundTripCost,
+                        double fixedStopPct) {
+
+    StopWidthProfile(String code, String name, double sizingMult, double stopMult,
+                     BacktestStopRules.EntryDayStop entryDay, int lookback, int trendMa, double roundTripCost) {
+        this(code, name, sizingMult, stopMult, entryDay, lookback, trendMa, roundTripCost, 0);
+    }
 
     static final BacktestStopRules.EntryDayStop SAME = BacktestStopRules.EntryDayStop.SAME_DAY;
     static final BacktestStopRules.EntryDayStop NEXT = BacktestStopRules.EntryDayStop.FROM_NEXT_DAY;
@@ -29,6 +36,23 @@ record StopWidthProfile(String code, String name, double sizingMult, double stop
     static StopWidthProfile fixedSize(double m, BacktestStopRules.EntryDayStop day) {
         return new StopWidthProfile(String.format("B%02d-%s", Math.round(m * 10), tag(day)),
                 String.format("수량 ATR×1.0 고정 · 손절 ATR×%.1f · %s", m, dayName(day)), 1.0, m, day, 20, 120, 0);
+    }
+
+    /** 고정%(F): 수량은 ATR×1.0, ATR 손절은 끄고 손절선 = 진입가 × (1 − pct) */
+    static StopWidthProfile fixedPct(double pct, BacktestStopRules.EntryDayStop day) {
+        return new StopWidthProfile(String.format("F%02d-%s", Math.round(pct * 100), tag(day)),
+                String.format("수량 ATR×1.0 고정 · 손절 −%.0f%% 고정 · %s", pct * 100, dayName(day)),
+                1.0, 0.0, day, 20, 120, 0, pct);
+    }
+
+    /** 고정% 손절 격자 (58_quant §0, 순서 고정) */
+    static List<StopWidthProfile> pctGrid() {
+        List<StopWidthProfile> grid = new ArrayList<>();
+        for (double pct : List.of(0.05, 0.07, 0.10, 0.15)) {
+            grid.add(fixedPct(pct, SAME));
+            grid.add(fixedPct(pct, NEXT));
+        }
+        return grid;
     }
 
     /** 사전 등록 15칸 (순서 고정) */
@@ -52,8 +76,15 @@ record StopWidthProfile(String code, String name, double sizingMult, double stop
         double m = coupled ? base.sizingMult() : base.stopMult();
         List<StopWidthProfile> grid = new ArrayList<>();
         grid.add(base.renamed(base.code() + "-base", base.name() + " (본 실행 재현)"));
-        grid.add(scaled(base, m * 0.8, coupled).renamed(base.code() + "-Mm", String.format("손절 배수 %.2f (−20%%)", m * 0.8)));
-        grid.add(scaled(base, m * 1.2, coupled).renamed(base.code() + "-Mp", String.format("손절 배수 %.2f (+20%%)", m * 1.2)));
+        if (base.fixedStopPct() > 0) {
+            grid.add(base.withFixedStopPct(base.fixedStopPct() * 0.8).renamed(base.code() + "-Mm",
+                    String.format("고정 손절 −%.1f%% (−20%%)", base.fixedStopPct() * 80)));
+            grid.add(base.withFixedStopPct(base.fixedStopPct() * 1.2).renamed(base.code() + "-Mp",
+                    String.format("고정 손절 −%.1f%% (+20%%)", base.fixedStopPct() * 120)));
+        } else {
+            grid.add(scaled(base, m * 0.8, coupled).renamed(base.code() + "-Mm", String.format("손절 배수 %.2f (−20%%)", m * 0.8)));
+            grid.add(scaled(base, m * 1.2, coupled).renamed(base.code() + "-Mp", String.format("손절 배수 %.2f (+20%%)", m * 1.2)));
+        }
         grid.add(base.withDonchian(16, 120).renamed(base.code() + "-L16", "돈치안 고가16 (−20%)"));
         grid.add(base.withDonchian(24, 120).renamed(base.code() + "-L24", "돈치안 고가24 (+20%)"));
         grid.add(base.withDonchian(20, 96).renamed(base.code() + "-T96", "종목 추세96 (−20%)"));
@@ -70,15 +101,19 @@ record StopWidthProfile(String code, String name, double sizingMult, double stop
     }
 
     StopWidthProfile renamed(String newCode, String newName) {
-        return new StopWidthProfile(newCode, newName, sizingMult, stopMult, entryDay, lookback, trendMa, roundTripCost);
+        return new StopWidthProfile(newCode, newName, sizingMult, stopMult, entryDay, lookback, trendMa, roundTripCost, fixedStopPct);
     }
 
     StopWidthProfile withDonchian(int newLookback, int newTrendMa) {
-        return new StopWidthProfile(code, name, sizingMult, stopMult, entryDay, newLookback, newTrendMa, roundTripCost);
+        return new StopWidthProfile(code, name, sizingMult, stopMult, entryDay, newLookback, newTrendMa, roundTripCost, fixedStopPct);
+    }
+
+    StopWidthProfile withFixedStopPct(double pct) {
+        return new StopWidthProfile(code, name, sizingMult, stopMult, entryDay, lookback, trendMa, roundTripCost, pct);
     }
 
     StopWidthProfile withCost(double cost) {
-        return new StopWidthProfile(code, name, sizingMult, stopMult, entryDay, lookback, trendMa, cost);
+        return new StopWidthProfile(code, name, sizingMult, stopMult, entryDay, lookback, trendMa, cost, fixedStopPct);
     }
 
     private static String tag(BacktestStopRules.EntryDayStop day) {

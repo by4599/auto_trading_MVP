@@ -103,6 +103,43 @@ class OrderSizingServiceTest {
     }
 
     @Test
+    @DisplayName("1주 강제 매수 스위치 ON — 고가 종목도 1주는 산다 (기본 OFF)")
+    void buys_one_share_when_min_one_share_enabled() {
+        givenAtr(100_000);            // 손절폭 = 150,000 > 1R 100,000
+        givenEquity(10_000_000);
+        RiskLimitsProperties limits = new RiskLimitsProperties();
+        limits.setSizingMinOneShare(true);
+        BucketProperties props = bucketProps(false);
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
+                new BucketAccountService(props, positionRepository, tradeResultRepository),
+                com.trading.bucket.BucketTestSupport.defaultParams());
+
+        OrderSizingService.SizingResult result = sut.sizeBuy("005930");
+
+        assertThat(result.executable()).isTrue();
+        assertThat(result.quantity()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("1주 강제 매수 상한 — 1주 리스크가 1R × 배수를 넘으면 스킵, 이하면 1주")
+    void one_share_cap_limits_forced_buy() {
+        givenAtr(100_000);            // 손절폭 150,000 = 1R(100,000)의 1.5배
+        givenEquity(10_000_000);
+        RiskLimitsProperties limits = new RiskLimitsProperties();
+        limits.setSizingMinOneShare(true);
+        BucketProperties props = bucketProps(false);
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
+                new BucketAccountService(props, positionRepository, tradeResultRepository),
+                com.trading.bucket.BucketTestSupport.defaultParams());
+
+        limits.setSizingMinOneShareMaxRiskMultiple(1.2);
+        assertThat(sut.sizeBuy("005930").executable()).isFalse();
+
+        limits.setSizingMinOneShareMaxRiskMultiple(2.0);
+        assertThat(sut.sizeBuy("005930").quantity()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("단주 내림 왜곡 40% > 한도 20% → 스킵")
     void skips_on_rounding_distortion() {
         givenAtr(40_000);             // 손절폭 = 60,000 → qty=1, 실제리스크 60,000 (1R 대비 -40%)
