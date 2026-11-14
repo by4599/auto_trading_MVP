@@ -40,10 +40,10 @@ public class NewsAggregatorService {
 
     /** 국내 금융 뉴스 RSS 목록 (공개 피드, 인증 불필요) */
     private static final List<RssFeed> RSS_FEEDS = List.of(
-            new RssFeed("edaily",   "https://rss.edaily.co.kr/edaily_stock.xml"),
-            new RssFeed("newspim",  "https://www.newspim.com/rss/stock"),
-            new RssFeed("heraldkorea", "https://biz.heraldkorea.com/rss"),
-            new RssFeed("inews24",  "https://www.inews24.com/rss/feed/newsstock")
+            new RssFeed("edaily",   "http://rss.edaily.co.kr/stock_news.xml"),
+            new RssFeed("newspim",  "https://rss.newspim.com/news/category/105"),
+            new RssFeed("heraldkorea", "https://biz.heraldcorp.com/rss/google/finance"),
+            new RssFeed("inews24",  "https://www.inews24.com/rss/news_economy.xml")
     );
 
     private static final DateTimeFormatter RFC822 =

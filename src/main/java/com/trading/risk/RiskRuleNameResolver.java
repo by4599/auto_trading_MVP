@@ -29,6 +29,7 @@ final class RiskRuleNameResolver {
     static {
         BY_FRAGMENT.put("이미 보유 중인 종목",       "PendingOrderRule");
         BY_FRAGMENT.put("미체결 매수 주문 대기 중",  "PendingOrderRule");
+        BY_FRAGMENT.put("취소 확인 중인 매수 주문",  "PendingOrderRule");
         BY_FRAGMENT.put("종목 비중 한도 초과",       "PositionLimitRule");
         BY_FRAGMENT.put("최대 보유 종목 수 초과",    "MaxPositionCountRule");
         BY_FRAGMENT.put("장 마감 임박",              "MarketCloseRule");

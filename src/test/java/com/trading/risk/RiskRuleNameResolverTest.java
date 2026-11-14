@@ -21,6 +21,7 @@ class RiskRuleNameResolverTest {
     @CsvSource(delimiter = '|', value = {
         "이미 보유 중인 종목: 005930                                              | PendingOrderRule",
         "미체결 매수 주문 대기 중: 005930                                         | PendingOrderRule",
+        "취소 확인 중인 매수 주문 있음: 005930                                    | PendingOrderRule",
         "종목 비중 한도 초과: 005930 (현재 12.0% >= 최대 10%)                    | PositionLimitRule",
         "최대 보유 종목 수 초과: 현재 5개 (최대 5개)                              | MaxPositionCountRule",
         "15:20 이후 신규 매수 금지 (장 마감 임박)                                 | MarketCloseRule",
