@@ -112,7 +112,7 @@ class OrderSizingServiceTest {
         BucketProperties props = bucketProps(false);
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
                 new BucketAccountService(props, positionRepository, tradeResultRepository),
-                com.trading.bucket.BucketTestSupport.defaultParams());
+                com.trading.bucket.BucketTestSupport.defaultParams(limits, new com.trading.strategy.FilterProperties()));
 
         OrderSizingService.SizingResult result = sut.sizeBuy("005930");
 
@@ -130,7 +130,7 @@ class OrderSizingServiceTest {
         BucketProperties props = bucketProps(false);
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
                 new BucketAccountService(props, positionRepository, tradeResultRepository),
-                com.trading.bucket.BucketTestSupport.defaultParams());
+                com.trading.bucket.BucketTestSupport.defaultParams(limits, new com.trading.strategy.FilterProperties()));
 
         limits.setSizingMinOneShareMaxRiskMultiple(1.2);
         assertThat(sut.sizeBuy("005930").executable()).isFalse();

@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 2026-10-01 A동 전환 — 배포될 {@code application-paper.yml}이 검증된 설정(BACKTEST-DESIGN §15.7 D0)과
- * 같은지 고정한다: 돈치안(20/120) · 0.25R · ATR 1.0 · 트레일 arm1%/trail3% · 타임컷 제외 ·
+ * 같은지 고정한다: 돈치안(20/120) · 0.25R · 수량 ATR 1.0 · 손절 −15% 고정 · 1주 강제(3배 상한) · 트레일 arm1%/trail3% · 타임컷 제외 ·
  * 최대 20거래일 · 지수 MA120 ON · 공시 쿨다운 OFF, 그리고 당일 청산 3방식(B동) OFF.
  */
 @DisplayName("paper 설정 — A동(돈치안) ON · B동 3방식 OFF · 지수 MA120")
@@ -141,14 +141,19 @@ class PaperTrendSleeveConfigTest {
                 .isEqualTo(new BucketParameterResolver.Trailing(true, 0.01, 0.03));
         assertThat(resolver.multiDayHold(StrategyBucket.TREND)).isTrue();
         assertThat(resolver.maxHoldDays(StrategyBucket.TREND)).isEqualTo(20);
+        assertThat(resolver.fixedStopPct(StrategyBucket.TREND)).isEqualTo(0.15);
+        assertThat(resolver.minOneShare(StrategyBucket.TREND)).isTrue();
+        assertThat(resolver.minOneShareMaxRiskMultiple(StrategyBucket.TREND)).isEqualTo(3.0);
 
         assertThat(resolver.riskFractionPerTrade(StrategyBucket.VB)).isEqualTo(0.01);
         assertThat(resolver.multiDayHold(StrategyBucket.VB)).isFalse();
         assertThat(resolver.maxHoldDays(StrategyBucket.VB)).isZero();
+        assertThat(resolver.fixedStopPct(StrategyBucket.VB)).isZero();
+        assertThat(resolver.minOneShare(StrategyBucket.VB)).isFalse();
     }
 
     @Test
-    @DisplayName("칸 스위치 — TREND ON(400만원 = ADR 40% × 원금 1,000만원), EVENT·MIX OFF")
+    @DisplayName("칸 스위치 — TREND ON(1,000만원 = ADR 개정 2026-11-14 A동 100%), EVENT·MIX OFF")
     void bucket_switch_trend_on_b_sleeve_off() {
         BucketProperties props = PaperProfileYaml.bucketProperties();
 
@@ -156,6 +161,6 @@ class PaperTrendSleeveConfigTest {
         assertThat(props.isBucketActive(StrategyBucket.TREND)).isTrue();
         assertThat(props.isBucketActive(StrategyBucket.EVENT)).isFalse();
         assertThat(props.isBucketActive(StrategyBucket.MIX)).isFalse();
-        assertThat(props.allocationOf(StrategyBucket.TREND)).isEqualTo(0.40 * 10_000_000);
+        assertThat(props.allocationOf(StrategyBucket.TREND)).isEqualTo(10_000_000);
     }
 }

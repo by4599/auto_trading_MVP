@@ -81,9 +81,9 @@ trading:
     trend-ma-period: 120
 
   # 지갑 칸 (2026-07-19 설계) — paper 전용: backtest 프로필에서는 켜지 않는다 (B-3 결정성 보존).
-  # A동 배분 400만원 = ADR 40% x 초기 원금 1,000만원. 백테스트는 계좌 전체(1,000만원, 복리)에 0.25R였으므로
-  # 여기서는 건당 위험(1R = 400만원 x 0.25% = 1만원)이 백테스트 출발점의 40%다 — 성적 비교 시 분모가 다르다.
-  # B동 칸(vb/event/mix-allocation)은 신호를 끈 채 값만 남긴다(재가동 시 ADR의 B동 30% 한도부터 맞출 것).
+  # A동 배분 1,000만원 = 초기 원금 100% (ADR-001 개정 2026-11-14). 백테스트와 같은 계좌 전체 기준 — 1R = 1,000만원 x 0.25% = 2.5만원.
+  # (2026-10-01~11-14는 400만원·40%였다.) A동이 100%라 칸 상한(-12%)보다 계좌 낙폭 가드(8%)가 먼저 걸린다.
+  # B동 칸(vb/event/mix-allocation)은 신호를 끈 채 값만 남긴다 — 재가동하려면 ADR을 먼저 개정하고 A동 배분부터 줄일 것.
   bucket:
     enabled: true
     experiment-start: 2026-07-20
@@ -93,7 +93,7 @@ trading:
     event-enabled: false
     mix-enabled: false
     trend-enabled: true
-    trend-allocation: 4000000
+    trend-allocation: 10000000   # A동 100% (ADR-001 개정 2026-11-14 — 검증 백테스트와 같은 계좌 전체 기준)
     # 칸별 낙폭 상한 (ADR-001 §2.2 개정 2026-08-07) — 칸 자산이 그 칸의 최고 기록보다 이만큼 줄면(1분 간격 2회 연속)
     # 그 칸만 잠근다: 신규 매수 중지 + 보유를 평시 매도 경로로 정리. 다른 칸은 계속 운영한다(SleeveDrawdownMonitor).
     # 칸 자산 = 배분금 + 실현손익(TradeResult, 없으면 매도가 추정) + 보유 평가손익. 해제는 사람만:
@@ -107,7 +107,10 @@ trading:
     overrides:
       TREND:
         risk-fraction-per-trade: 0.0025   # SZ2 0.25R
-        atr-stop-multiplier: 1.0          # P3 ATR 손절 1.0배
+        atr-stop-multiplier: 1.0          # 수량 계산용(1R ÷ ATR×1.0). 손절선은 아래 고정%가 대신한다
+        fixed-stop-pct: 0.15              # 진입가 −15% 고정 손절 (58_quant F15 — ATR 손절은 수정 엔진에서 불합격)
+        min-one-share: true               # 수량 0주인 고가 종목도 1주는 산다 (59_quant ①+③)
+        min-one-share-max-risk-multiple: 3.0   # 단 1주 리스크가 1R의 3배 이하일 때만 (61_quant, 60_audit M-1)
         trailing-enabled: true
         trailing-arm-profit-pct: 0.01     # +1% 도달 후 트레일 무장
         trailing-trail-pct: 0.03          # 무장 후 고점 대비 3% 하락 시 청산

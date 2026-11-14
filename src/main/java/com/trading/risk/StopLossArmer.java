@@ -5,6 +5,7 @@ import com.trading.market.MarketDataService;
 import com.trading.order.OrderFilledEvent;
 import com.trading.order.OrderPartialFilledEvent;
 import com.trading.order.OrderSide;
+import com.trading.position.Position;
 import com.trading.position.PositionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +74,7 @@ public class StopLossArmer {
      */
     public void arm(String stockCode, double fillPrice) {
         try {
+            if (armFixedPctStop(stockCode, fillPrice)) return;
             OptionalDouble atrOpt = atrCalculator.atr(
                     marketDataService.getDailyCandles(stockCode, AtrCalculator.PERIOD + 1));
             if (atrOpt.isEmpty()) {
@@ -95,5 +97,20 @@ public class StopLossArmer {
         } catch (Exception e) {
             log.error("[StopLoss] 손절선 장착 실패 — 수동 확인 필요: {}", stockCode, e);
         }
+    }
+
+    /** 보유 칸이 고정% 손절을 쓰면 진입가 × (1 − pct)를 장착한다 (ATR 조회 불필요). 아니면 false */
+    private boolean armFixedPctStop(String stockCode, double fillPrice) {
+        Position pos = positionRepository.findByStockCode(stockCode).orElse(null);
+        if (pos == null) return false;
+        double pct = bucketParams.fixedStopPct(pos.getBucket());
+        if (pct <= 0) return false;
+        double stopPrice = fillPrice * (1 - pct);
+        pos.armStopLoss(stopPrice);
+        positionRepository.save(pos);
+        log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (고정 −{}%)",
+                stockCode, String.format("%.0f", fillPrice), String.format("%.0f", stopPrice),
+                String.format("%.1f", pct * 100));
+        return true;
     }
 }

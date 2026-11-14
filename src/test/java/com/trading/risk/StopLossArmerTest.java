@@ -63,6 +63,26 @@ class StopLossArmerTest {
     }
 
     @Test
+    @DisplayName("칸에 고정% 손절이 지정되면 ATR 대신 진입가 × (1 − pct) — ATR이 없어도 장착된다")
+    void arms_fixed_pct_stop_for_bucket_override() {
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        com.trading.bucket.BucketParameters.Overrides trend = new com.trading.bucket.BucketParameters.Overrides();
+        trend.setFixedStopPct(0.15);
+        params.setOverrides(new java.util.EnumMap<>(java.util.Map.of(com.trading.bucket.StrategyBucket.TREND, trend)));
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository,
+                new com.trading.bucket.BucketParameterResolver(params, new com.trading.risk.RiskLimitsProperties(),
+                        new com.trading.strategy.FilterProperties()));
+        Position pos = Position.empty("005930");
+        pos.assignBucketIfAbsent(com.trading.bucket.StrategyBucket.TREND);
+        pos.applyBuy(10, 100_000.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.arm("005930", 100_000.0);
+
+        assertThat(pos.getStopPrice()).isEqualTo(85_000.0);
+    }
+
+    @Test
     @DisplayName("ATR 산출 불가 → 손절선 미장착 (타임컷이 최후 방어선)")
     void no_arm_when_atr_unavailable() {
         when(marketDataService.getDailyCandles(anyString(), anyInt())).thenReturn(List.of());

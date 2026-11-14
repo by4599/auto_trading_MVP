@@ -84,7 +84,8 @@ public class OrderSizingService {
         double oneR = equity * bucketParams.riskFractionPerTrade(bucket);
 
         int quantity = (int) Math.floor(oneR / stopDistance);
-        boolean forcedOneShare = quantity < 1 && limits.isSizingMinOneShare() && withinOneShareCap(stopDistance, oneR);
+        boolean forcedOneShare = quantity < 1 && bucketParams.minOneShare(bucket)
+                && withinOneShareCap(stopDistance, oneR, bucketParams.minOneShareMaxRiskMultiple(bucket));
         if (forcedOneShare) {
             quantity = 1;
         }
@@ -118,15 +119,14 @@ public class OrderSizingService {
             }
         }
 
-        log.info("[Sizing] {} 수량={} (칸={}, 1R={}, 손절폭={}, 실제리스크={})",
-                stockCode, quantity, bucket, String.format("%.0f", oneR),
+        log.info("[Sizing] {} 수량={}{} (칸={}, 1R={}, 손절폭={}, 실제리스크={})",
+                stockCode, quantity, forcedOneShare ? " [1주 강제]" : "", bucket, String.format("%.0f", oneR),
                 String.format("%.0f", stopDistance), String.format("%.0f", quantity * stopDistance));
         return SizingResult.ok(quantity, stopDistance);
     }
 
     /** 1주 강제 매수 상한 — 1주 리스크가 1R × 배수 이하일 때만 (배수 0 이하면 상한 없음) */
-    private boolean withinOneShareCap(double stopDistance, double oneR) {
-        double cap = limits.getSizingMinOneShareMaxRiskMultiple();
+    private static boolean withinOneShareCap(double stopDistance, double oneR, double cap) {
         return cap <= 0 || stopDistance <= oneR * cap;
     }
 

@@ -60,6 +60,9 @@ public class BucketParameters {
         private Double trailingTrailPct;
         private Boolean multiDayHold;
         private Integer maxHoldDays;
+        private Double fixedStopPct;
+        private Boolean minOneShare;
+        private Double minOneShareMaxRiskMultiple;
 
         public Double getRiskFractionPerTrade() { return riskFractionPerTrade; }
         public void setRiskFractionPerTrade(Double v) { this.riskFractionPerTrade = v; }
@@ -83,5 +86,17 @@ public class BucketParameters {
         /** 최대 보유 거래일 — 초과하면 종가 청산. null/0 이하면 제한 없음 */
         public Integer getMaxHoldDays() { return maxHoldDays; }
         public void setMaxHoldDays(Integer v) { this.maxHoldDays = v; }
+
+        /** 진입가 대비 고정% 손절 — 지정하면 ATR 손절선 대신 진입가 × (1 − 이 값)을 장착한다. null/0 이하면 ATR 손절 */
+        public Double getFixedStopPct() { return fixedStopPct; }
+        public void setFixedStopPct(Double v) { this.fixedStopPct = v; }
+
+        /** true면 R 사이징 수량이 0주인 고가 종목도 1주는 산다 (상한은 {@link #getMinOneShareMaxRiskMultiple()}) */
+        public Boolean getMinOneShare() { return minOneShare; }
+        public void setMinOneShare(Boolean v) { this.minOneShare = v; }
+
+        /** 1주 강제 매수 상한 — 1주 리스크 ≤ 1R × 이 값일 때만. null이면 전역값 */
+        public Double getMinOneShareMaxRiskMultiple() { return minOneShareMaxRiskMultiple; }
+        public void setMinOneShareMaxRiskMultiple(Double v) { this.minOneShareMaxRiskMultiple = v; }
     }
 }

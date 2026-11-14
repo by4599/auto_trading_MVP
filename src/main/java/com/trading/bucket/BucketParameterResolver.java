@@ -63,5 +63,23 @@ public class BucketParameterResolver {
         return v != null ? v : 0;
     }
 
+    /** 고정% 손절 — 0이면 ATR 손절(기본). 칸 오버라이드만 있고 전역값은 없다 */
+    public double fixedStopPct(StrategyBucket bucket) {
+        Double v = params.forBucket(bucket).getFixedStopPct();
+        return v != null && v > 0 ? v : 0;
+    }
+
+    /** 고가 종목 1주 강제 매수 여부 */
+    public boolean minOneShare(StrategyBucket bucket) {
+        Boolean v = params.forBucket(bucket).getMinOneShare();
+        return v != null ? v : limits.isSizingMinOneShare();
+    }
+
+    /** 1주 강제 매수 상한 배수 (0 이하면 상한 없음) */
+    public double minOneShareMaxRiskMultiple(StrategyBucket bucket) {
+        Double v = params.forBucket(bucket).getMinOneShareMaxRiskMultiple();
+        return v != null ? v : limits.getSizingMinOneShareMaxRiskMultiple();
+    }
+
     public record Trailing(boolean enabled, double armProfitPct, double trailPct) {}
 }
