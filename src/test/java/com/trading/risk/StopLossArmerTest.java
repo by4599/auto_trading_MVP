@@ -83,6 +83,28 @@ class StopLossArmerTest {
     }
 
     @Test
+    @DisplayName("이름표 없는 포지션은 TREND 고정% 손절을 쓰지 않고 전역 ATR 손절로 장착된다")
+    void untagged_position_falls_back_to_global_atr_stop() {
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        com.trading.bucket.BucketParameters.Overrides trend = new com.trading.bucket.BucketParameters.Overrides();
+        trend.setFixedStopPct(0.15);
+        trend.setAtrStopMultiplier(1.0);
+        params.setOverrides(new java.util.EnumMap<>(java.util.Map.of(com.trading.bucket.StrategyBucket.TREND, trend)));
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository,
+                new com.trading.bucket.BucketParameterResolver(params, new com.trading.risk.RiskLimitsProperties(),
+                        new com.trading.strategy.FilterProperties()));
+        givenAtr(2_000);
+        Position pos = Position.empty("005930");
+        pos.applyBuy(10, 100_000.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.arm("005930", 100_000.0);
+
+        assertThat(pos.getBucket()).isNull();
+        assertThat(pos.getStopPrice()).isEqualTo(100_000.0 - 2_000.0 * RiskLimits.ATR_STOP_MULTIPLIER);
+    }
+
+    @Test
     @DisplayName("ATR 산출 불가 → 손절선 미장착 (타임컷이 최후 방어선)")
     void no_arm_when_atr_unavailable() {
         when(marketDataService.getDailyCandles(anyString(), anyInt())).thenReturn(List.of());
