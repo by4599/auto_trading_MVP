@@ -36,3 +36,6 @@ Thumbs.db
 
 # 자동 검증 리포트 (예약 작업 산출물)
 logs/
+build-*/
+# ollama-pair 작업 파일 (지시서/출력/백업)
+.ollama-pair/

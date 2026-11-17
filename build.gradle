@@ -7,9 +7,10 @@ plugins {
 group   = 'com.trading'
 version = '0.0.1-SNAPSHOT'
 
-// 프로젝트 경로에 한글('개발')이 포함되어 Gradle test worker의 URL ClassLoader가
-// Korean 문자를 percent-encode하지 못해 ClassNotFoundException이 발생한다.
-// build 출력 디렉터리를 ASCII 경로로 우회한다.
+// [이력] 예전 프로젝트 경로에 한글('개발')이 포함돼 Gradle test worker의 URL ClassLoader가
+// Korean 문자를 percent-encode하지 못해 ClassNotFoundException이 발생했다. 이 우회로 대응했었다.
+// 2026-07: 부모 폴더를 'workspace'(ASCII)로 rename해 근본 원인이 해소됐다. 아래 우회는
+// 더는 필수가 아니지만 무해하므로 유지한다(다른 머신 이식·안전망 목적).
 // 다른 머신에서는 -PbuildDir=/path/to/build 또는 TRADING_BUILD_DIR 환경변수로 오버라이드한다.
 def buildBase = System.getenv('TRADING_BUILD_DIR') ?: project.findProperty('buildDir') ?: 'C:/Users/SAMSUNG/auto_trading-build'
 layout.buildDirectory.set(file(buildBase))

@@ -51,7 +51,7 @@ class OrderSizingServiceTest {
 
     private static BucketProperties bucketProps(boolean enabled) {
         return new BucketProperties(enabled, "2026-07-20",
-                10_000_000, 10_000_000, 10_000_000, false, false);
+                10_000_000, 10_000_000, 10_000_000, 10_000_000, false, false, false);
     }
 
     private OrderSizingService newSut(BucketProperties props) {
@@ -59,7 +59,7 @@ class OrderSizingServiceTest {
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         return new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), props,
-                new BucketAccountService(props, positionRepository, tradeResultRepository));
+                new BucketAccountService(props, positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     private void givenAtr(double atr) {
@@ -100,6 +100,70 @@ class OrderSizingServiceTest {
 
         assertThat(result.executable()).isFalse();
         assertThat(result.skipReason()).contains("1R");
+    }
+
+    @Test
+    @DisplayName("1주 강제 매수 스위치 ON — 고가 종목도 1주는 산다 (기본 OFF)")
+    void buys_one_share_when_min_one_share_enabled() {
+        givenAtr(100_000);            // 손절폭 = 150,000 > 1R 100,000
+        givenEquity(10_000_000);
+        RiskLimitsProperties limits = new RiskLimitsProperties();
+        limits.setSizingMinOneShare(true);
+        BucketProperties props = bucketProps(false);
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
+                new BucketAccountService(props, positionRepository, tradeResultRepository),
+                com.trading.bucket.BucketTestSupport.defaultParams(limits, new com.trading.strategy.FilterProperties()));
+
+        OrderSizingService.SizingResult result = sut.sizeBuy("005930");
+
+        assertThat(result.executable()).isTrue();
+        assertThat(result.quantity()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("1주 강제 매수 상한 — 1주 리스크가 1R × 배수를 넘으면 스킵, 이하면 1주")
+    void one_share_cap_limits_forced_buy() {
+        givenAtr(100_000);            // 손절폭 150,000 = 1R(100,000)의 1.5배
+        givenEquity(10_000_000);
+        RiskLimitsProperties limits = new RiskLimitsProperties();
+        limits.setSizingMinOneShare(true);
+        BucketProperties props = bucketProps(false);
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
+                new BucketAccountService(props, positionRepository, tradeResultRepository),
+                com.trading.bucket.BucketTestSupport.defaultParams(limits, new com.trading.strategy.FilterProperties()));
+
+        limits.setSizingMinOneShareMaxRiskMultiple(1.2);
+        assertThat(sut.sizeBuy("005930").executable()).isFalse();
+
+        limits.setSizingMinOneShareMaxRiskMultiple(2.0);
+        assertThat(sut.sizeBuy("005930").quantity()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("칸 오버라이드만으로 1주 매수 — 전역 OFF여도 TREND는 1R×3 이하면 1주, 넘으면 스킵, VB는 영향 없음")
+    void bucket_override_enables_one_share_only_for_that_bucket() {
+        com.trading.bucket.BucketParameters.Overrides trend = new com.trading.bucket.BucketParameters.Overrides();
+        trend.setRiskFractionPerTrade(0.0025);          // 1R = 1천만 × 0.25% = 25,000
+        trend.setAtrStopMultiplier(1.0);
+        trend.setMinOneShare(true);
+        trend.setMinOneShareMaxRiskMultiple(3.0);       // 1주 리스크 ≤ 75,000
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        params.setOverrides(new java.util.EnumMap<>(java.util.Map.of(StrategyBucket.TREND, trend)));
+        RiskLimitsProperties limits = new RiskLimitsProperties();   // 전역 1주 매수 OFF
+        BucketProperties props = bucketProps(false);
+        sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(), limits, props,
+                new BucketAccountService(props, positionRepository, tradeResultRepository),
+                new com.trading.bucket.BucketParameterResolver(params, limits, new com.trading.strategy.FilterProperties()));
+        givenEquity(10_000_000);
+
+        givenAtr(70_000);             // TREND 손절폭 70,000 = 2.8R / VB 손절폭 105,000 > 1R 100,000
+        OrderSizingService.SizingResult trendResult = sut.sizeBuy("005930", StrategyBucket.TREND);
+        assertThat(trendResult.executable()).isTrue();
+        assertThat(trendResult.quantity()).isEqualTo(1);
+        assertThat(sut.sizeBuy("005930", StrategyBucket.VB).executable()).isFalse();
+
+        givenAtr(80_000);             // TREND 손절폭 80,000 = 3.2R > 상한 3R
+        assertThat(sut.sizeBuy("005930", StrategyBucket.TREND).executable()).isFalse();
     }
 
     @Test
@@ -165,7 +229,7 @@ class OrderSizingServiceTest {
         when(positionRepository.findAll()).thenReturn(List.of(held));
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), bucketProps(true),
-                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository));
+                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         givenAtr(2_000);
         givenEquity(50_000_000);
@@ -184,7 +248,7 @@ class OrderSizingServiceTest {
         when(positionRepository.findAll()).thenReturn(List.of(held));
         sut = new OrderSizingService(marketDataService, positionManager, new AtrCalculator(),
                 new RiskLimitsProperties(), bucketProps(true),
-                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository));
+                new BucketAccountService(bucketProps(true), positionRepository, tradeResultRepository), com.trading.bucket.BucketTestSupport.defaultParams());
         when(tradeResultRepository.findAll()).thenReturn(List.of());
         givenAtr(2_000);
         givenEquity(50_000_000);

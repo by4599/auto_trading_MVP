@@ -18,6 +18,16 @@ public class PerformanceService {
 
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
 
+    /**
+     * 이 응답의 출처와 그 한계. 모의 체결조회가 매도에 빈 응답을 주는 결함(CLAUDE.md 결함 5) 때문에
+     * trade_result.sell_price가 0원으로 기록된 행이 있어 손익이 과대계상된다 — 화면이 이 숫자를
+     * 정본으로 읽지 않도록 응답 자체에 경고를 싣는다. 정확한 금액은 /api/performance/account
+     * (daily_equity 기준)를 본다. 표본·감사 이력이라 이 API 자체는 남겨 둔다.
+     */
+    static final String SOURCE_WARNING =
+            "trade_result — 모의 매도 체결가 결함(CLAUDE.md 결함 5)으로 손익이 과대계상됨. "
+                    + "정확한 계좌 기준 성적은 /api/performance/account 를 볼 것";
+
     private final TradeResultRepository tradeResultRepository;
 
     public PerformanceService(TradeResultRepository tradeResultRepository) {
@@ -30,6 +40,7 @@ public class PerformanceService {
         List<TradeResult> results = tradeResultRepository.findByTradeDateBetweenOrderBySoldAtAsc(from, to);
 
         Map<String, Object> out = new LinkedHashMap<>();
+        out.put("source", SOURCE_WARNING);
         out.put("period", period);
         out.put("from", from.toString());
         out.put("to", to.toString());

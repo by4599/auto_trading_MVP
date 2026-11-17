@@ -40,19 +40,22 @@ public class OrderSizingService {
     private final RiskLimitsProperties limits;
     private final BucketProperties bucketProperties;
     private final BucketAccountService bucketAccountService;
+    private final com.trading.bucket.BucketParameterResolver bucketParams;
 
     public OrderSizingService(MarketDataService marketDataService,
                               PositionManager positionManager,
                               AtrCalculator atrCalculator,
                               RiskLimitsProperties limits,
                               BucketProperties bucketProperties,
-                              BucketAccountService bucketAccountService) {
+                              BucketAccountService bucketAccountService,
+                              com.trading.bucket.BucketParameterResolver bucketParams) {
         this.marketDataService = marketDataService;
         this.positionManager = positionManager;
         this.atrCalculator = atrCalculator;
         this.limits = limits;
         this.bucketProperties = bucketProperties;
         this.bucketAccountService = bucketAccountService;
+        this.bucketParams = bucketParams;
     }
 
     public SizingResult sizeBuy(String stockCode) {
@@ -77,10 +80,15 @@ public class OrderSizingService {
             return SizingResult.skip("자산 조회 불가 (equity<=0) — 사이징 불성립");
         }
 
-        double stopDistance = atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
-        double oneR = equity * limits.getRiskFractionPerTrade();
+        double stopDistance = atrOpt.getAsDouble() * bucketParams.atrStopMultiplier(bucket);
+        double oneR = equity * bucketParams.riskFractionPerTrade(bucket);
 
         int quantity = (int) Math.floor(oneR / stopDistance);
+        boolean forcedOneShare = quantity < 1 && bucketParams.minOneShare(bucket)
+                && withinOneShareCap(stopDistance, oneR, bucketParams.minOneShareMaxRiskMultiple(bucket));
+        if (forcedOneShare) {
+            quantity = 1;
+        }
         if (quantity < 1) {
             return SizingResult.skip(String.format(
                     "1주 리스크(%.0f)가 1R(%.0f) 초과 — 고가 종목 스킵", stopDistance, oneR));
@@ -88,7 +96,7 @@ public class OrderSizingService {
 
         double actualRisk = quantity * stopDistance;
         double distortion = Math.abs(actualRisk - oneR) / oneR;
-        if (distortion > limits.getSizingMaxDistortion()) {
+        if (!forcedOneShare && distortion > limits.getSizingMaxDistortion()) {
             return SizingResult.skip(String.format(
                     "단주 내림 왜곡 %.0f%% > 한도 %.0f%% — 스킵",
                     distortion * 100, limits.getSizingMaxDistortion() * 100));
@@ -111,10 +119,15 @@ public class OrderSizingService {
             }
         }
 
-        log.info("[Sizing] {} 수량={} (칸={}, 1R={}, 손절폭={}, 실제리스크={})",
-                stockCode, quantity, bucket, String.format("%.0f", oneR),
+        log.info("[Sizing] {} 수량={}{} (칸={}, 1R={}, 손절폭={}, 실제리스크={})",
+                stockCode, quantity, forcedOneShare ? " [1주 강제]" : "", bucket, String.format("%.0f", oneR),
                 String.format("%.0f", stopDistance), String.format("%.0f", quantity * stopDistance));
         return SizingResult.ok(quantity, stopDistance);
+    }
+
+    /** 1주 강제 매수 상한 — 1주 리스크가 1R × 배수 이하일 때만 (배수 0 이하면 상한 없음) */
+    private static boolean withinOneShareCap(double stopDistance, double oneR, double cap) {
+        return cap <= 0 || stopDistance <= oneR * cap;
     }
 
     /** executable=false면 quantity/stopDistance는 무의미, skipReason만 유효 */

@@ -26,4 +26,9 @@ public interface CandleHistoryRepository extends JpaRepository<CandleHistory, Lo
 
     long countByStockCodeAndTimeframeAndCandleDate(
             String stockCode, Timeframe timeframe, LocalDate date);
+
+    long countByTimeframeAndCandleDateBefore(Timeframe timeframe, LocalDate date);
+
+    /** 운영 DB 보존 기간 정리용 — 일봉은 건드리지 않도록 timeframe을 반드시 지정한다 */
+    long deleteByTimeframeAndCandleDateBefore(Timeframe timeframe, LocalDate date);
 }

@@ -11,7 +11,8 @@ import java.util.List;
 /**
  * 매매 유니버스 관리.
  *
- * 상한 20종목 (방법론 §2.5 — 1초 루프의 API 호출 한도와 감시 품질의 상한).
+ * 상한 60종목 (방법론 §2.5). 매매 루프는 틱당 1종목 라운드로빈이라 종목 수가 늘어도 KIS 호출 속도는
+ * 그대로이고, 종목마다 다시 보는 간격만 N초로 벌어진다 — 일봉 돌파·다일 보유인 A동에는 1분 안팎이면 충분하다.
  * 최초 기동 시 테이블이 비어 있으면 삼성전자(005930)를 시드해
  * 기존 Phase 1 동작(1종목)을 그대로 보존한다.
  */
@@ -20,7 +21,7 @@ public class TradingUniverseService {
 
     private static final Logger log = LoggerFactory.getLogger(TradingUniverseService.class);
 
-    public static final int MAX_UNIVERSE_SIZE = 20;
+    public static final int MAX_UNIVERSE_SIZE = 60;
 
     private static final String SEED_STOCK_CODE = "005930";
     private static final String SEED_STOCK_NAME = "삼성전자";

@@ -69,7 +69,7 @@ class KisBrokerageApiClientTest {
 
     @Test
     void actual_account_asset_maps_holdings_from_balance() {
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, 0,
                 List.of(new Holding("005930", 3, 79_000, 80_000),
                         new Holding("000660", 2, 190_000, 200_000))));
 
@@ -81,7 +81,7 @@ class KisBrokerageApiClientTest {
 
     @Test
     void holding_quantity_returns_zero_for_unknown_ticker() {
-        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000,
+        when(balanceClient.fetchBalance()).thenReturn(new BalanceSnapshot(50_000_000, 0,
                 List.of(new Holding("005930", 3, 79_000, 80_000))));
 
         assertThat(sut.getActualHoldingQuantity("005930")).isEqualTo(3);
@@ -114,8 +114,8 @@ class KisBrokerageApiClientTest {
         when(orderHistoryRepository.findByStatusIn(anyList())).thenReturn(List.of(o1, o2));
         when(orderHistoryRepository.findById(1L)).thenReturn(Optional.of(o1));
         when(orderHistoryRepository.findById(2L)).thenReturn(Optional.of(o2));
-        when(cancelClient.cancelAll("ORD-1")).thenReturn(true);
-        when(cancelClient.cancelAll("ORD-2")).thenReturn(true);
+        when(cancelClient.cancelAll("ORD-1")).thenReturn(OrderCancelClient.CancelOutcome.SENT);
+        when(cancelClient.cancelAll("ORD-2")).thenReturn(OrderCancelClient.CancelOutcome.SENT);
 
         sut.cancelAllPendingOrders();
 
@@ -129,8 +129,8 @@ class KisBrokerageApiClientTest {
         OrderHistory o2 = acceptedOrder(2L, "000660", "ORD-2");
         when(orderHistoryRepository.findByStatusIn(anyList())).thenReturn(List.of(o1, o2));
         when(orderHistoryRepository.findById(2L)).thenReturn(Optional.of(o2));
-        when(cancelClient.cancelAll("ORD-1")).thenReturn(false); // 접수 실패
-        when(cancelClient.cancelAll("ORD-2")).thenReturn(true);
+        when(cancelClient.cancelAll("ORD-1")).thenReturn(OrderCancelClient.CancelOutcome.FAILED); // 접수 실패
+        when(cancelClient.cancelAll("ORD-2")).thenReturn(OrderCancelClient.CancelOutcome.SENT);
 
         sut.cancelAllPendingOrders();
 

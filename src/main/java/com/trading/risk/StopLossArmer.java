@@ -5,6 +5,7 @@ import com.trading.market.MarketDataService;
 import com.trading.order.OrderFilledEvent;
 import com.trading.order.OrderPartialFilledEvent;
 import com.trading.order.OrderSide;
+import com.trading.position.Position;
 import com.trading.position.PositionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,16 +37,16 @@ public class StopLossArmer {
     private final MarketDataService marketDataService;
     private final AtrCalculator atrCalculator;
     private final PositionRepository positionRepository;
-    private final RiskLimitsProperties limits;
+    private final com.trading.bucket.BucketParameterResolver bucketParams;
 
     public StopLossArmer(MarketDataService marketDataService,
                          AtrCalculator atrCalculator,
                          PositionRepository positionRepository,
-                         RiskLimitsProperties limits) {
+                         com.trading.bucket.BucketParameterResolver bucketParams) {
         this.marketDataService = marketDataService;
         this.atrCalculator = atrCalculator;
         this.positionRepository = positionRepository;
-        this.limits = limits;
+        this.bucketParams = bucketParams;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -67,8 +68,13 @@ public class StopLossArmer {
         arm(event.stockCode(), event.avgPrice());
     }
 
-    void arm(String stockCode, double fillPrice) {
+    /**
+     * @param fillPrice 손절선 기준가. 체결 경로에서는 실제 체결가, 브로커 기준 보정 경로에서는
+     *                  브로커가 알려준 평균단가를 넣는다.
+     */
+    public void arm(String stockCode, double fillPrice) {
         try {
+            if (armFixedPctStop(stockCode, fillPrice)) return;
             OptionalDouble atrOpt = atrCalculator.atr(
                     marketDataService.getDailyCandles(stockCode, AtrCalculator.PERIOD + 1));
             if (atrOpt.isEmpty()) {
@@ -76,17 +82,35 @@ public class StopLossArmer {
                 return;
             }
 
-            double stopPrice = fillPrice - atrOpt.getAsDouble() * limits.getAtrStopMultiplier();
+            // 손절 배수는 칸마다 다르다(다일 보유 1.0 / 당일 단타 1.5) — 보유 칸 기준으로 정한다
             positionRepository.findByStockCode(stockCode).ifPresentOrElse(pos -> {
+                double multiplier = bucketParams.atrStopMultiplier(pos.getBucket());
+                double stopPrice = fillPrice - atrOpt.getAsDouble() * multiplier;
                 pos.armStopLoss(stopPrice);
                 positionRepository.save(pos);
-                log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (ATR={})",
+                log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (ATR={} × {})",
                         stockCode, String.format("%.0f", fillPrice),
                         String.format("%.0f", stopPrice),
-                        String.format("%.0f", atrOpt.getAsDouble()));
+                        String.format("%.0f", atrOpt.getAsDouble()),
+                        String.format("%.1f", multiplier));
             }, () -> log.error("[StopLoss] Position 없음 — 손절선 미장착: {}", stockCode));
         } catch (Exception e) {
             log.error("[StopLoss] 손절선 장착 실패 — 수동 확인 필요: {}", stockCode, e);
         }
+    }
+
+    /** 보유 칸이 고정% 손절을 쓰면 진입가 × (1 − pct)를 장착한다 (ATR 조회 불필요). 아니면 false */
+    private boolean armFixedPctStop(String stockCode, double fillPrice) {
+        Position pos = positionRepository.findByStockCode(stockCode).orElse(null);
+        if (pos == null) return false;
+        double pct = bucketParams.fixedStopPct(pos.getBucket());
+        if (pct <= 0) return false;
+        double stopPrice = fillPrice * (1 - pct);
+        pos.armStopLoss(stopPrice);
+        positionRepository.save(pos);
+        log.info("[StopLoss] 손절선 장착: {} 체결가={} 손절가={} (고정 −{}%)",
+                stockCode, String.format("%.0f", fillPrice), String.format("%.0f", stopPrice),
+                String.format("%.1f", pct * 100));
+        return true;
     }
 }

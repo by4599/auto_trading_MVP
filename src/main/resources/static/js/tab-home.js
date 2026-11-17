@@ -158,7 +158,7 @@ async function loadPnl() {
     subEl.textContent = '';
     const lines = [
       `오늘 체결: ${d.tradeCount}건`,
-      `실현손익: Sprint 3 예정`,
+      `실현손익: ${SIGN(d.realizedPnl)}${KRW(d.realizedPnl)}`,
     ];
     lines.forEach(t => {
       const span = document.createElement('div');

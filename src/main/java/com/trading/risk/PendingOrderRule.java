@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
  * BUY 신호에 대해 두 가지를 순서대로 검사한다.
  *   1. 이미 해당 종목을 보유 중인 경우 (Position 테이블 quantity > 0)
  *   2. 아직 체결 확인 전인 ACCEPTED 매수 주문이 있는 경우 (FillPoller 처리 전)
+ *   3. 취소 접수 후 최종 확인 전인 CANCEL_REQUESTED 매수 주문이 있는 경우 — 취소 창에서 체결됐을 수 있다
  *
  * 이 룰 덕분에 "1초마다 BUY 신호가 반복 발생해도 한 번만 주문"이 보장된다.
  * RiskEngine에 별도 등록 없이 @Component만으로 자동 주입된다.
@@ -51,6 +52,13 @@ public class PendingOrderRule implements RiskRule {
                 .existsByStockCodeAndSideAndStatus(stockCode, OrderSide.BUY, OrderStatus.ACCEPTED);
         if (hasPendingBuy) {
             return RiskResult.reject("미체결 매수 주문 대기 중: " + stockCode);
+        }
+
+        // 3. 취소 확정 전인 매수 주문 존재 — 확정(취소/체결)되거나 대사로 정리될 때까지 재매수 보류
+        boolean hasCancellingBuy = orderHistoryRepository
+                .existsByStockCodeAndSideAndStatus(stockCode, OrderSide.BUY, OrderStatus.CANCEL_REQUESTED);
+        if (hasCancellingBuy) {
+            return RiskResult.reject("취소 확인 중인 매수 주문 있음: " + stockCode);
         }
 
         return RiskResult.pass();

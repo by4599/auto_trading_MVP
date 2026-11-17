@@ -518,3 +518,62 @@ input:focus { border-color: var(--blue); }
 .badge-sm.set    { background: var(--green-bg); color: var(--green); }
 .badge-sm.notset { background: var(--red-bg);   color: var(--red); }
 .preview-text { color: var(--subtle); font-family: monospace; font-size: 0.75rem; margin-right: 6px; }
+
+/* ── 요약 칸 (실적 · 진단 탭) ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.stat-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.stat-box.warn   { border-color: var(--yellow); }
+.stat-box.danger { border-color: #da3633; }
+.stat-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+}
+.stat-value { font-size: 1.05rem; font-weight: 700; margin-top: 4px; }
+.stat-note  { font-size: 0.7rem;  color: var(--subtle); margin-top: 4px; line-height: 1.45; }
+
+/* 카드 안 소제목 */
+.sub-hdr { font-size: 0.78rem; font-weight: 600; color: var(--text); margin: 18px 0 8px; }
+
+/* 차트 바깥 상자 */
+.chart-wrap { overflow-x: auto; margin-bottom: 6px; }
+.chart-wrap svg { min-width: 480px; }
+
+/* 버튼 한 줄 (기간 선택 · 쪽 넘김) */
+.btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 12px; }
+.wl-del.active { color: var(--blue); border-color: var(--blue); font-weight: 700; }
+.wl-del:disabled { opacity: 0.35; cursor: not-allowed; }
+.wl-del:disabled:hover { color: var(--subtle); border-color: var(--border); }
+
+/* 주의 상자 (노랑) */
+.msg.warn      { background: #3d2f00; color: var(--yellow); border: 1px solid var(--yellow); }
+.badge-sm.warn { background: #3d2f00; color: var(--yellow); }
+
+/* 접히는 참고 카드 */
+details.card > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: '▸ '; }
+details.card[open] > summary::before { content: '▾ '; }
+details.card[open] > summary { margin-bottom: 10px; }
+
+/* ── 기록·성적 탭 (2026-09-22) ── */
+/* 성적 탭 맨 위 고정 경고 — 작은 글씨로는 안 읽힌다 */
+.msg.lead { font-size: 0.95rem; padding: 14px 16px; line-height: 1.65; }
+
+/* 위험한 상태 전환 (전부 파는 중 · 비상 정지) — 이익=빨강과 헷갈리지 않게 선명한 색 */
+.orders-table .cell-alarm { color: #ff7b72; font-weight: 700; }
+
+/* 프로그램이 남긴 원문·부연 설명처럼 길어지는 칸 */
+.orders-table .reason-cell { color: var(--subtle); font-size: 0.72rem; }

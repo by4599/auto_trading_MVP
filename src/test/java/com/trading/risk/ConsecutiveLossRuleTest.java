@@ -78,9 +78,9 @@ class ConsecutiveLossRuleTest {
     @Test
     @DisplayName("차단 개시 시 스트릭 리셋 — 1시간 후 무기한 재차단 방지")
     void resets_streak_when_block_engages() {
-        tracker.recordSellFill("005930", 1, 72_000.0, 73_000.0);
-        tracker.recordSellFill("005930", 1, 71_000.0, 72_000.0);
-        tracker.recordSellFill("005930", 1, 70_000.0, 71_000.0);
+        tracker.recordRoundTrip("005930", -1_000.0);
+        tracker.recordRoundTrip("005930", -1_000.0);
+        tracker.recordRoundTrip("005930", -1_000.0);
         assertThat(tracker.getConsecutiveLossCount()).isEqualTo(3);
 
         rule.validate(Signal.buy("005930", "test"), accountWithLossCount(3));

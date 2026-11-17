@@ -20,8 +20,8 @@ public class BacktestStubs {
 
     @Bean
     public OrderCancelClient backtestOrderCancelClient() {
-        // 동기 체결이라 미체결 잔량이 존재하지 않는다 — 취소는 항상 성공 처리
-        return orderNo -> true;
+        // 동기 체결이라 미체결 잔량이 존재하지 않는다 — 취소는 항상 접수 성공 처리
+        return orderNo -> OrderCancelClient.CancelOutcome.SENT;
     }
 
     @Bean

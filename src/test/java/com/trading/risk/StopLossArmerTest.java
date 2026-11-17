@@ -37,7 +37,7 @@ class StopLossArmerTest {
     void setUp() {
         marketDataService = mock(MarketDataService.class);
         positionRepository = mock(PositionRepository.class);
-        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository, new RiskLimitsProperties());
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository, com.trading.bucket.BucketTestSupport.defaultParams());
     }
 
     private void givenAtr(double range) {
@@ -60,6 +60,48 @@ class StopLossArmerTest {
         sut.arm("005930", 72_500.0);
 
         assertThat(pos.getStopPrice()).isEqualTo(72_500.0 - 2_000.0 * RiskLimits.ATR_STOP_MULTIPLIER);
+    }
+
+    @Test
+    @DisplayName("칸에 고정% 손절이 지정되면 ATR 대신 진입가 × (1 − pct) — ATR이 없어도 장착된다")
+    void arms_fixed_pct_stop_for_bucket_override() {
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        com.trading.bucket.BucketParameters.Overrides trend = new com.trading.bucket.BucketParameters.Overrides();
+        trend.setFixedStopPct(0.15);
+        params.setOverrides(new java.util.EnumMap<>(java.util.Map.of(com.trading.bucket.StrategyBucket.TREND, trend)));
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository,
+                new com.trading.bucket.BucketParameterResolver(params, new com.trading.risk.RiskLimitsProperties(),
+                        new com.trading.strategy.FilterProperties()));
+        Position pos = Position.empty("005930");
+        pos.assignBucketIfAbsent(com.trading.bucket.StrategyBucket.TREND);
+        pos.applyBuy(10, 100_000.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.arm("005930", 100_000.0);
+
+        assertThat(pos.getStopPrice()).isEqualTo(85_000.0);
+    }
+
+    @Test
+    @DisplayName("이름표 없는 포지션은 TREND 고정% 손절을 쓰지 않고 전역 ATR 손절로 장착된다")
+    void untagged_position_falls_back_to_global_atr_stop() {
+        com.trading.bucket.BucketParameters params = new com.trading.bucket.BucketParameters();
+        com.trading.bucket.BucketParameters.Overrides trend = new com.trading.bucket.BucketParameters.Overrides();
+        trend.setFixedStopPct(0.15);
+        trend.setAtrStopMultiplier(1.0);
+        params.setOverrides(new java.util.EnumMap<>(java.util.Map.of(com.trading.bucket.StrategyBucket.TREND, trend)));
+        sut = new StopLossArmer(marketDataService, new AtrCalculator(), positionRepository,
+                new com.trading.bucket.BucketParameterResolver(params, new com.trading.risk.RiskLimitsProperties(),
+                        new com.trading.strategy.FilterProperties()));
+        givenAtr(2_000);
+        Position pos = Position.empty("005930");
+        pos.applyBuy(10, 100_000.0);
+        when(positionRepository.findByStockCode("005930")).thenReturn(Optional.of(pos));
+
+        sut.arm("005930", 100_000.0);
+
+        assertThat(pos.getBucket()).isNull();
+        assertThat(pos.getStopPrice()).isEqualTo(100_000.0 - 2_000.0 * RiskLimits.ATR_STOP_MULTIPLIER);
     }
 
     @Test

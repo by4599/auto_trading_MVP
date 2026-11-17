@@ -29,6 +29,18 @@ public final class Account {
     private final double dailyPnlPercent;        // DailyLossRule 사용
     private final int    consecutiveLossCount;    // ConsecutiveLossRule 사용
     private final List<PositionSnapshot> positions;
+    /**
+     * 이 스냅샷이 KIS 실잔고로 갓 조회된 신선한 값인지 여부.
+     * 잔고 API 실패로 낡은 캐시/DB 폴백을 쓰면 false — 청산처럼 신선 데이터가
+     * 필수인 판정(RiskMonitor)은 false일 때 건너뛴다(낡은 값 오판 방지).
+     */
+    private final boolean fresh;
+    /**
+     * 잔고 총자산 대조 판정 (2026-10-11, 결함 6) — {@code fresh}와 같은 방식의 표시다.
+     * 기본값은 판정 불가(= 전고점 인정 가능)라 공개 생성자를 쓰는 곳(백테스트 포함)은 동작이 그대로다.
+     * 지금은 {@code ShadowPortfolio}의 전고점 인정 여부에만 쓰인다.
+     */
+    private final EquityCrossCheck equityCheck;
 
     public Account(double totalAssetValue,
                    double dailyPnlPercent,
@@ -38,10 +50,37 @@ public final class Account {
         this.dailyPnlPercent      = dailyPnlPercent;
         this.consecutiveLossCount = consecutiveLossCount;
         this.positions            = List.copyOf(positions);
+        this.fresh                = true;
+        this.equityCheck          = EquityCrossCheck.unchecked();
     }
 
-    public double getTotalAssetValue()             { return totalAssetValue; }
-    public double getDailyPnlPercent()            { return dailyPnlPercent; }
+    /** 표시(신선도·대조 판정)만 바꾼 사본 — 값은 그대로 */
+    private Account(Account base, boolean fresh, EquityCrossCheck equityCheck) {
+        this.totalAssetValue      = base.totalAssetValue;
+        this.dailyPnlPercent      = base.dailyPnlPercent;
+        this.consecutiveLossCount = base.consecutiveLossCount;
+        this.positions            = base.positions;
+        this.fresh                = fresh;
+        this.equityCheck          = equityCheck;
+    }
+
+    /** 낡은(폴백) 스냅샷 표시본 — 신선 데이터가 필요한 판정에서 걸러내기 위함. 대조 판정은 그대로 둔다 */
+    public Account asStale() {
+        return new Account(this, false, equityCheck);
+    }
+
+    /** 대조 판정을 단 사본 — 신선도는 그대로 둔다. null이면 판정 불가 */
+    public Account withEquityCheck(EquityCrossCheck check) {
+        return new Account(this, fresh, check == null ? EquityCrossCheck.unchecked() : check);
+    }
+
+    public EquityCrossCheck getEquityCheck()       { return equityCheck; }
+    /** 증권사 총자산이 직접 계산한 값과 허용오차 넘게 어긋났는가 — 전고점 인정 거부 신호 */
+    public boolean isEquityMismatch()              { return equityCheck.isMismatch(); }
+
+    public double  getTotalAssetValue()            { return totalAssetValue; }
+    public double  getDailyPnlPercent()            { return dailyPnlPercent; }
+    public boolean isFresh()                       { return fresh; }
     public int    getConsecutiveLossCount()        { return consecutiveLossCount; }
     public int    getPositionCount()               { return positions.size(); }
     public List<PositionSnapshot> getPositions()  { return positions; }

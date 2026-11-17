@@ -29,12 +29,14 @@ class MovingAverageBreakoutStrategyTest {
 
     private MarketDataService marketDataService;
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-20T00:00:00Z"), ZoneOffset.UTC);
+    private MaBreakoutProperties properties;
     private MovingAverageBreakoutStrategy sut;
 
     @BeforeEach
     void setUp() {
         marketDataService = mock(MarketDataService.class);
-        sut = new MovingAverageBreakoutStrategy(marketDataService, new MovingAverageCalculator(), clock);
+        properties = new MaBreakoutProperties();
+        sut = new MovingAverageBreakoutStrategy(marketDataService, new MovingAverageCalculator(), clock, properties);
     }
 
     /** 과거→최신 순 단조 증가 종가 125개 — 정배열(MA5>MA20>MA60>MA120)이 자연히 성립 */
@@ -104,6 +106,18 @@ class MovingAverageBreakoutStrategyTest {
     void no_signal_when_insufficient_history() {
         when(marketDataService.getDailyCandles(anyString(), anyInt()))
                 .thenReturn(risingHistory(50, 100));
+
+        List<Signal> signals = sut.evaluate("005930", tick(300));
+
+        assertThat(signals).isEmpty();
+    }
+
+    @Test
+    @DisplayName("enabled=false면 정배열 돌파여도 신호를 내지 않는다 (BACKTEST-DESIGN §13 격리 스위치)")
+    void no_signal_when_disabled() {
+        properties.setEnabled(false);
+        when(marketDataService.getDailyCandles(anyString(), anyInt()))
+                .thenReturn(risingHistory(125, 100));
 
         List<Signal> signals = sut.evaluate("005930", tick(300));
 

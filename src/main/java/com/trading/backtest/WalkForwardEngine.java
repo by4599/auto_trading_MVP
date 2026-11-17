@@ -79,6 +79,7 @@ public class WalkForwardEngine {
         List<WindowResult> results = new ArrayList<>();
 
         for (int i = 0; i < windows.size(); i++) {
+            long windowStart = System.nanoTime();
             Window w = windows.get(i);
             double chosenK;
             BacktestMetrics trainMetrics = null;
@@ -109,8 +110,11 @@ public class WalkForwardEngine {
 
             results.add(new WindowResult(w, chosenK, trainMetrics, validate.metrics(),
                     validate.trades()));
-            log.info("[WalkForward] 윈도우 {} 완료: K={} 검증 {}", i, chosenK,
-                    validate.metrics().summaryLine());
+            // 진행률·경과 시간 — 장시간 스윕에서 "멈춘 건지 도는 건지" 구분용 (로그 전용)
+            log.info("[WalkForward] 윈도우 {}/{} 완료 ({}초): K={} 검증 {}",
+                    i + 1, windows.size(),
+                    String.format("%.1f", (System.nanoTime() - windowStart) / 1_000_000_000.0),
+                    chosenK, validate.metrics().summaryLine());
         }
 
         strategyParameters.setK(0.5); // 기본값 복원

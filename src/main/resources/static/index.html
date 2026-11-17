@@ -4,12 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoTrading MVP</title>
-  <link rel="stylesheet" href="css/app.css?v=6">
-  <script defer src="js/core.js?v=6"></script>
-  <script defer src="js/tab-home.js?v=6"></script>
-  <script defer src="js/tab-performance.js?v=6"></script>
-  <script defer src="js/tab-positions.js?v=6"></script>
-  <script defer src="js/tab-review.js?v=6"></script>
+  <link rel="stylesheet" href="css/app.css?v=8">
+  <script defer src="js/core.js?v=8"></script>
+  <script defer src="js/chart-svg.js?v=8"></script>
+  <script defer src="js/ui-parts.js?v=8"></script>
+  <script defer src="js/tab-home.js?v=8"></script>
+  <script defer src="js/tab-performance.js?v=8"></script>
+  <script defer src="js/tab-stats.js?v=8"></script>
+  <script defer src="js/stats-tables.js?v=8"></script>
+  <script defer src="js/tab-diagnostics.js?v=8"></script>
+  <script defer src="js/diag-history.js?v=8"></script>
+  <script defer src="js/tab-positions.js?v=8"></script>
+  <script defer src="js/tab-review.js?v=8"></script>
 </head>
 <body>
 
@@ -29,6 +35,8 @@
 <nav class="tab-bar">
   <button class="tab-btn active" data-tab="home"      onclick="switchTab('home')">홈</button>
   <button class="tab-btn"        data-tab="perf"      onclick="switchTab('perf')">실적</button>
+  <button class="tab-btn"        data-tab="stats"     onclick="switchTab('stats')">성적</button>
+  <button class="tab-btn"        data-tab="diag"      onclick="switchTab('diag')">진단</button>
   <button class="tab-btn"        data-tab="positions" onclick="switchTab('positions')">보유종목</button>
   <button class="tab-btn"        data-tab="review"    onclick="switchTab('review')">검토종목</button>
 </nav>
@@ -127,9 +135,90 @@
 <!-- ══ 실적 탭 ══ -->
 <main class="tab-panel" id="tab-perf">
 <div class="dashboard">
-  <div class="card full-width" id="perfCard">
-    <div class="card-label">📈 기간별 누적 실적</div>
-    <div id="perfBody"><div class="empty-state">준비 중</div></div>
+  <div class="card full-width" id="perfAccountCard">
+    <div class="card-label">📈 계좌 성적
+      <span class="reco-note">통장 잔고로 계산한 진짜 숫자 (수수료·세금 포함)</span>
+    </div>
+    <div id="perfAccountBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <details class="card full-width" id="perfLegacyCard">
+    <summary class="card-label">📒 (참고) 거래 기록으로 계산한 옛 숫자 — 왜 다른가</summary>
+    <div id="perfLegacyBody"><div class="empty-state">불러오는 중...</div></div>
+  </details>
+</div>
+</main>
+
+<!-- ══ 성적 탭 ══ -->
+<main class="tab-panel" id="tab-stats">
+<div class="dashboard">
+  <div class="card full-width" id="statsWarnCard">
+    <div class="card-label">📌 먼저 읽어 주세요</div>
+    <div id="statsWarnBody"></div>
+  </div>
+
+  <div class="card full-width" id="statsSummaryCard">
+    <div class="card-label">🎯 거래 성적 (최근 30일)
+      <span class="reco-note">사고팔기를 한 번 끝낸 거래만 셉니다 · 추정치</span>
+    </div>
+    <div id="statsSummaryBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="statsStockCard">
+    <div class="card-label">📊 종목별 성적
+      <span class="reco-note">어디서 벌고 어디서 잃었나 · 추정치</span>
+    </div>
+    <div id="statsStockBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="statsBucketCard">
+    <div class="card-label">👛 지갑 칸별 성적
+      <span class="reco-note">방식마다 따로 나눠 둔 돈 · 추정치</span>
+    </div>
+    <div id="statsBucketBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+</div>
+</main>
+
+<!-- ══ 진단 탭 ══ -->
+<main class="tab-panel" id="tab-diag">
+<div class="dashboard">
+  <div class="card full-width" id="ddCard">
+    <div class="card-label">🚨 낙폭 감시
+      <span class="reco-note">가장 많았을 때보다 얼마나 줄었나 · 자동 멈춤까지 남은 돈</span>
+    </div>
+    <div id="ddBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="openOrdersCard">
+    <div class="card-label">⏳ 미체결 주문
+      <span class="reco-note">주문은 넣었지만 아직 사거나 팔리지 않은 것</span>
+    </div>
+    <div id="openOrdersBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="streakCard">
+    <div class="card-label">📅 연속 무중단 가동일</div>
+    <div id="streakBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="allOrdersCard">
+    <div class="card-label">📜 체결 내역 전체 보기</div>
+    <div id="allOrdersBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="modeHistCard">
+    <div class="card-label">🔀 상태 바뀐 기록
+      <span class="reco-note">언제 멈췄고 언제 다시 움직였나 · 최근 30일</span>
+    </div>
+    <div id="modeHistBody"><div class="empty-state">불러오는 중...</div></div>
+  </div>
+
+  <div class="card full-width" id="riskBlockCard">
+    <div class="card-label">🚫 사려다 멈춘 이유
+      <span class="reco-note">안전장치가 매수를 막은 횟수 · 최근 7일</span>
+    </div>
+    <div id="riskBlockBody"><div class="empty-state">불러오는 중...</div></div>
   </div>
 </div>
 </main>
@@ -157,119 +246,9 @@
 <!-- 토스트 알림 -->
 <div class="toast" id="toast"></div>
 
-<!-- ── 설정 모달 ── -->
-<div class="overlay" id="overlay" onclick="overlayClick(event)">
-  <div class="modal">
-    <div class="modal-hdr">
-      <h2>⚙ 설정</h2>
-      <button class="btn-close" onclick="closeSettings()">✕</button>
-    </div>
-
-    <div class="modal-tabs">
-      <button class="modal-tab-btn active" id="modalTabBtnApi"    onclick="switchModalTab('api')">API 키</button>
-      <button class="modal-tab-btn"        id="modalTabBtnParams" onclick="switchModalTab('params')">투자 파라미터</button>
-    </div>
-
-    <div id="modalTabApi">
-    <div class="section-hdr">📋 현재 설정 상태</div>
-    <div id="settingStatusRows"><span style="color:var(--subtle);font-size:0.8rem">조회 중...</span></div>
-
-    <hr class="divider">
-
-    <div class="section-hdr">🏦 KIS Open API 자격증명</div>
-    <p class="hint">
-      <a href="https://apiportal.koreainvestment.com" target="_blank">KIS Developers</a>에서
-      <strong style="color:var(--text)">모의투자</strong> 앱키를 발급받으세요.
-    </p>
-
-    <div class="field">
-      <label>KIS_APPKEY</label>
-      <div class="input-wrap">
-        <input type="password" id="appkey" placeholder="PSxxxxxxxxxxxxxxxxxx...">
-        <span class="eye" onclick="toggle('appkey')">👁</span>
-      </div>
-    </div>
-    <div class="field">
-      <label>KIS_SECRETKEY</label>
-      <div class="input-wrap">
-        <input type="password" id="secretkey" placeholder="시크릿키 입력">
-        <span class="eye" onclick="toggle('secretkey')">👁</span>
-      </div>
-    </div>
-    <div class="field">
-      <label>KIS_ACCOUNT_NO</label>
-      <input type="text" id="account_no" placeholder="50000000-01">
-      <div class="field-hint">계좌번호-상품코드 형식 (예: 50000000-01)</div>
-    </div>
-
-    <button class="btn-save green" onclick="saveKis()">저장 (재시작 불필요)</button>
-    <div class="msg" id="kisMsg"></div>
-
-    <hr class="divider">
-
-    <div class="section-hdr">💬 텔레그램 알림 <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
-    <p class="hint">비워두면 알림 없이 거래만 진행됩니다.</p>
-
-    <div class="field">
-      <label>TELEGRAM_BOT_TOKEN</label>
-      <div class="input-wrap">
-        <input type="password" id="tg_token" placeholder="@BotFather에서 발급">
-        <span class="eye" onclick="toggle('tg_token')">👁</span>
-      </div>
-    </div>
-    <div class="field">
-      <label>TELEGRAM_CHAT_ID</label>
-      <input type="text" id="tg_chat" placeholder="123456789">
-    </div>
-
-    <button class="btn-save ghost" onclick="saveTelegram()">텔레그램 저장</button>
-    <div class="msg" id="tgMsg"></div>
-
-    <hr class="divider">
-
-    <div class="section-hdr">📋 DART 공시 API <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
-    <p class="hint">
-      <a href="https://opendart.fss.or.kr" target="_blank">DART Open API</a>에서 무료 발급.
-      비워두면 공시 수집 없이 뉴스만 수집됩니다.
-    </p>
-    <div class="field">
-      <label>DART_API_KEY</label>
-      <div class="input-wrap">
-        <input type="password" id="dart_key" placeholder="40자리 인증키">
-        <span class="eye" onclick="toggle('dart_key')">👁</span>
-      </div>
-    </div>
-    <button class="btn-save ghost" onclick="saveDart()">DART 저장</button>
-    <div class="msg" id="dartMsg"></div>
-
-    <hr class="divider">
-
-    <div class="section-hdr">💓 데드맨 스위치 <span style="color:var(--subtle);font-weight:400">(선택)</span></div>
-    <p class="hint">
-      <a href="https://healthchecks.io" target="_blank">healthchecks.io</a> 등에서 만든 ping URL.
-      5분마다 현재 모드·보유 종목 수를 전송합니다 — 앱이 죽으면 이 신호도 끊기므로
-      외부 서비스 쪽에서 무응답 경고를 설정해야 완성됩니다. 비워두면 전송하지 않습니다.
-    </p>
-    <div class="field">
-      <label>HEARTBEAT_URL</label>
-      <input type="text" id="heartbeat_url" placeholder="https://hc-ping.com/xxxxxxxx-xxxx-...">
-    </div>
-    <button class="btn-save ghost" onclick="saveHeartbeat()">데드맨 스위치 저장</button>
-    <div class="msg" id="heartbeatMsg"></div>
-    </div><!-- /modalTabApi -->
-
-    <div id="modalTabParams" style="display:none">
-      <p class="hint">
-        투자 기준을 세부 조정합니다. 각 항목은 안전 범위 안에서만 저장되며,
-        저장 즉시 반영됩니다 (재시작 불필요).
-      </p>
-      <div id="paramGroups"><div class="empty-state">불러오는 중...</div></div>
-      <button class="btn-save green" onclick="saveParams()">파라미터 저장</button>
-      <button class="btn-save ghost" onclick="resetParams()">기본값 원복</button>
-      <div class="msg" id="paramMsg"></div>
-    </div><!-- /modalTabParams -->
-  </div>
-</div>
+<!-- ── 설정 모달 ── 화면 뼈대는 js/settings-modal.js가 이 자리에 끼워 넣는다
+     (defer 없음 = 문서를 읽는 도중 바로 실행 → core.js가 openSettings()를 부르기 전에 만들어진다) -->
+<script src="js/settings-modal.js?v=8"></script>
 
 </body>
 </html>
