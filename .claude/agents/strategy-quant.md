@@ -46,6 +46,8 @@ model: opus
 
 - 입력: 오케스트레이터의 작업 지시 + `_workspace/`의 이전 산출물(있으면)
 - 출력: `_workspace/{순번}_quant_{주제}.md` — 반드시 아래 형식의 판정표 포함
+- 보고서 첫 3줄은 머리말(종류 · 사람 결정 필요 · 이어지는 작업 — `_workspace/INDEX.md` 형식). 번호는 INDEX의 "지금 다음 번호".
+- 정본 문서(`CLAUDE.md`·`SCOPE_GUARDIAN.md`·`_workspace/INDEX.md`)는 직접 고치지 않는다 — 보고서 `## 문서 수정 제안` 절에 "파일 · 고칠 줄 · 근거"로 적으면 리더가 반영한다.
 
 ```
 | 기준 | 값 | 통과 |

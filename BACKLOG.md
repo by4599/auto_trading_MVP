@@ -616,3 +616,17 @@
   (`OrderSizingServiceTest`), 이름표 없는 포지션은 전역 ATR 손절로 장착(`StopLossArmerTest`). 코드를 일부러 망가뜨리면 두 테스트만 실패(Red-Green).
   전체 1187/1187 통과(종료 코드 0). 테스트만 추가 — 매매 코드 무변경.
 - 재검토 시점: M-2는 첫 비상 정지 때 또는 A동 표본 20건 시점. M-3·M-4는 다음 리스크 룰 묶음. 근거 `_workspace/62_audit_trend-sleeve-100pct-fixed-stop.md`
+
+## [2026-11-18] 개발 하네스 정리 3건 — munder-difflin 참고 (사용자 요청, 검토만·코드 무변경)
+- 배경: 다중 AI 협업 앱 `HarnessMD/munder-difflin`(HIVE.md 설계 문서 기준, 실제 코드 `hive.ts`는 미확인)을 참고해 우리 개발 하네스
+  (`.claude/agents/`·`trading-orchestrator`·`_workspace/`)와 대조했다. 뼈대는 이미 있어 아래 3건만 빌려 오기로 했다. 매매 코드(`src/`)는 대상 아님.
+- ① 작업 목록 한 장(`_workspace/INDEX.md`) — 번호·주제·상태(진행/끝/결정 대기)·파일 위치. 정리(아카이브) 때 번호를 1로 되돌리지 않는다.
+  근거 사고: 번호가 다시 시작돼 CLAUDE.md가 가리키는 `_workspace/7_quant_baseline-drift.md`·`12_impl_paper-file-logging.md`가 실제로는
+  `_workspace_20260901_203948/`에 있다(인용이 깨짐). "사용자 결정 대기" 항목이 문서 곳곳에 흩어져 한눈에 안 보인다 — 목록의 "결정 대기" 줄이 결재함 역할.
+- ② 정본 문서(CLAUDE.md·SCOPE_GUARDIAN.md)는 리더만 고친다 — 전문 에이전트는 보고서에 "이 줄을 이렇게 고치자" 제안만 적고, 리더가 증거 확인 후 반영.
+  근거 사고: SCOPE_GUARDIAN.md에 "데드맨 스위치 실동작 확인"이 사실과 다르게 남아 있었다(2026-10-11 정정).
+- ③ 보고서 첫머리 3칸 고정 — 종류(판정/요청/알림) · 사람 결정 필요(예/아니오) · 이어지는 작업 번호. ①의 목록을 채우는 입력이 된다.
+- 빼기로 한 것: 사무실 화면·자율 팀장+원격 승인(주문·청산은 사람이 누른다는 규칙과 충돌)·Stop 훅 반복·의미 검색 기억장치·여러 AI 제공자·앱 설치(출시 전·사용 기록 전송·유료판).
+- 바뀔 곳(적용 시): `_workspace/INDEX.md` 신설(옛 폴더 2개 포함) · `.claude/skills/trading-orchestrator/SKILL.md` Phase 0·4·5 · `.claude/agents/*.md` 5개에 한 줄씩.
+- ✅ **2026-11-18 적용(사용자 지시 "여기서 한번에 진행해")** — `_workspace/INDEX.md` 신설(작업 목록 105줄 · 옛 폴더 2개 포함 · 결재함 8건 ·
+  다음 번호 64), `trading-orchestrator` Phase 0·데이터 전달·Phase 4·5·금지 목록, 에이전트 5개에 머리말·제안 규칙. 문서만 — 매매 코드 무변경.

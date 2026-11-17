@@ -44,6 +44,8 @@ model: opus
 
 - 입력: 변경된 파일 목록(`git diff --name-only`) 또는 감사 범위 지시
 - 출력: `_workspace/{순번}_audit_{주제}.md`
+- 보고서 첫 3줄은 머리말(종류 · 사람 결정 필요 · 이어지는 작업 — `_workspace/INDEX.md` 형식). 번호는 INDEX의 "지금 다음 번호".
+- 정본 문서(`CLAUDE.md`·`SCOPE_GUARDIAN.md`·`_workspace/INDEX.md`)는 직접 고치지 않는다 — 보고서 `## 문서 수정 제안` 절에 "파일 · 고칠 줄 · 근거"로 적으면 리더가 반영한다.
 
 ```
 | 심각도 | 항목 | 위치 | 내용 | 근거 |
