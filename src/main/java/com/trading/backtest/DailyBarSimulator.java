@@ -59,6 +59,7 @@ public class DailyBarSimulator {
     private final AccumulationProperties accumulationProperties;
     private final ScaleInExecutor scaleIn; // 기본 OFF — 켜졌을 때만 금액 비중 진입·분할 매수 (2026-11 연구)
     private final BacktestStopRules stopRules; // 기본값 = 엔진 기본 동작(진입 당일부터 손절 판정, 손절 배수 = 사이징 배수)
+    private final BearRsGate bearRs; // 기본 OFF — 켜졌을 때만 하락장 날 돌파 진입을 상대강도로 거른다 (55_quant)
 
     public DailyBarSimulator(BacktestMarketDataService market,
                              SignalDispatcher signalDispatcher,
@@ -72,7 +73,8 @@ public class DailyBarSimulator {
                              RsiProperties rsiProperties,
                              AccumulationProperties accumulationProperties,
                              ScaleInExecutor scaleIn,
-                             BacktestStopRules stopRules) {
+                             BacktestStopRules stopRules,
+                             BearRsGate bearRs) {
         this.market = market;
         this.signalDispatcher = signalDispatcher;
         this.riskEngine = riskEngine;
@@ -86,6 +88,7 @@ public class DailyBarSimulator {
         this.accumulationProperties = accumulationProperties;
         this.scaleIn = scaleIn;
         this.stopRules = stopRules;
+        this.bearRs = bearRs;
     }
 
     public void simulateDay(String stockCode, LocalDate date) {
@@ -136,6 +139,10 @@ public class DailyBarSimulator {
                 stockCode, market.getRecentCandles(stockCode));
         Signal buy = signals.stream().filter(Signal::isBuy).findFirst().orElse(null);
         if (buy == null) return;
+        if (!bearRs.permits(stockCode, date)) {
+            log.debug("[Sim] {} {} 하락장 상대강도 예외 불허", date, stockCode);
+            return;
+        }
 
         double entryPrice = resolveEntryPrice(stockCode, date, bar);
         market.setSimPrice(stockCode, entryPrice);
@@ -148,7 +155,7 @@ public class DailyBarSimulator {
         if (scaleIn.isEnabled()) {
             scaleIn.enter(stockCode, buy, entryPrice); // 수량만 금액 비중 — 흐름은 RiskEngine 통과 후 OrderEngine
         } else {
-            orderEngine.execute(buy);
+            bearRs.executeSized(date, () -> orderEngine.execute(buy)); // 꺼져 있으면 그대로 실행
             stopRules.applyAfterEntry(stockCode, date);
         }
     }

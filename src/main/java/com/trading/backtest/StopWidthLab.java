@@ -99,7 +99,8 @@ public class StopWidthLab {
         knobs.setFixedStopPct(p.fixedStopPct());          // 0 = ATR 손절 경로 그대로
     }
 
-    private void restoreDefaults() {
+    /** 고정 조건 복원 — 다른 랩(55_quant BearRsLab)이 같은 구성을 재사용할 때도 부른다 */
+    void restoreDefaults() {
         stopRules.resetDefaults();
         knobs.setFixedStopPct(0);
         knobs.setSizingMinOneShare(false);

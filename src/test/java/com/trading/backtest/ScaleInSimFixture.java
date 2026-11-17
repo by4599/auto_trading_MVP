@@ -112,7 +112,8 @@ final class ScaleInSimFixture {
         SignalDispatcher dispatcher = new SignalDispatcher(
                 List.of(new VolatilityBreakoutStrategy(new StrategyParameters(), filters)));
         sut = new DailyBarSimulator(market, dispatcher, riskEngine, orderEngine, positions, positionManager,
-                trailing, exits, clock, new RsiProperties(), new AccumulationProperties(), scaleIn, stopRules);
+                trailing, exits, clock, new RsiProperties(), new AccumulationProperties(), scaleIn, stopRules,
+                BearRsGates.off());
         stats.beginRun("WF00-validate-K0.5");
         market.setSimDate(TODAY);
     }

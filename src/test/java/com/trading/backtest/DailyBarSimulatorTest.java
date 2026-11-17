@@ -121,7 +121,8 @@ class DailyBarSimulatorTest {
         sut = new DailyBarSimulator(market, dispatcher, riskEngine,
                 orderEngine, positionRepository, positionManager,
                 trailingStopTracker, exits, clock, new RsiProperties(), new AccumulationProperties(),
-                disabledScaleIn(positionRepository, orderEngine), disabledStopFix(positionRepository));
+                disabledScaleIn(positionRepository, orderEngine), disabledStopFix(positionRepository),
+                BearRsGates.off());
 
         market.setSimDate(TODAY);
     }

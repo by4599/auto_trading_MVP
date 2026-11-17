@@ -14,6 +14,7 @@ import java.util.List;
  *   <li>{@code scale-in-lab} — 본 격자 15칸 + SZ2 비교행</li>
  *   <li>{@code scale-in-sens} — {@code --backtest.scale-in-base=<코드>} 프로필의 ±20%·비용 민감도</li>
  *   <li>{@code stop-width-lab} — 손절 폭 스윕 15칸(56_quant) / {@code stop-width-sens} — {@code --backtest.stop-width-base=<코드>}</li>
+ *   <li>{@code bear-rs-anchor} — D0′ 앵커만 / {@code bear-rs-lab} — 하락장 상대강도 예외 14칸 × 진입일 가정 2 (55_quant)</li>
  * </ul>
  */
 @Component
@@ -24,25 +25,34 @@ public class ScaleInLabRouter {
     static final String SLUG = "DONCHIAN-P3";
     static final String STOP_LABEL = "돈치안 + 트레일 + 최대20일 + 0.25R·동시5 + 지수MA120 · 손절 폭 스윕";
     static final String STOP_SLUG = "DONCHIAN-SZ2-IDX120";
+    static final String BEAR_LABEL = "A동 D0′(돈치안 · −15% 손절 · 0.25R · 1주 상한 1R×3 · 지수MA120) · 하락장 상대강도 예외";
+    static final String BEAR_SLUG = "DONCHIAN-F15-MIN1CAP3";
 
     private final CandidateLabRouter candidateRouter;
     private final ScaleInLab lab;
     private final String sensBase;
     private final StopWidthLab stopWidthLab;
     private final String stopWidthBase;
+    private final BearRsLab bearRsLab;
 
     public ScaleInLabRouter(CandidateLabRouter candidateRouter, ScaleInLab lab,
                             @Value("${backtest.scale-in-base:}") String sensBase,
                             StopWidthLab stopWidthLab,
-                            @Value("${backtest.stop-width-base:}") String stopWidthBase) {
+                            @Value("${backtest.stop-width-base:}") String stopWidthBase,
+                            BearRsLab bearRsLab) {
         this.candidateRouter = candidateRouter;
         this.lab = lab;
         this.sensBase = sensBase;
         this.stopWidthLab = stopWidthLab;
         this.stopWidthBase = stopWidthBase;
+        this.bearRsLab = bearRsLab;
     }
 
     public boolean route(String mode) {
+        if ("bear-rs-anchor".equalsIgnoreCase(mode) || "bear-rs-lab".equalsIgnoreCase(mode)) {   // 55_quant
+            runBearRs(mode, "bear-rs-anchor".equalsIgnoreCase(mode) ? BearRsProfile.anchor() : BearRsProfile.grid());
+            return true;
+        }
         if ("stop-width-lab".equalsIgnoreCase(mode)) {
             stopWidthLab.run(candidateRouter.stressScope(mode, STOP_LABEL, STOP_SLUG), StopWidthProfile.grid(), "본 격자");
             return true;
@@ -101,6 +111,14 @@ public class ScaleInLabRouter {
             return true;
         }
         return false;
+    }
+
+    private void runBearRs(String mode, List<BearRsProfile> profiles) {
+        for (String code : List.of("F15-S", "F15-X")) {
+            String tag = (profiles.size() == 1 ? "ANCHOR-" : "") + code;
+            bearRsLab.run(candidateRouter.stressScope(mode, BEAR_LABEL + " · " + tag, BEAR_SLUG + "-" + tag),
+                    findStopProfile(code), profiles);
+        }
     }
 
     private void runSizing(String mode, List<StopWidthProfile> profiles, double riskFraction, boolean minOneShare, String tag) {

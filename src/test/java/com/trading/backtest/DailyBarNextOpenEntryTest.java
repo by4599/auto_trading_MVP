@@ -127,7 +127,7 @@ class DailyBarNextOpenEntryTest {
                 new ScaleInExecutor(new ScaleInProperties(), market, positions, positionManager, orderEngine,
                         List.of(), mock(com.trading.risk.IndexRegimeSource.class), new AtrCalculator(), clock,
                         new BacktestCostProperties(), new ScaleInRunStats(), stopFixOff(positions)),
-                stopFixOff(positions));
+                stopFixOff(positions), BearRsGates.off());
     }
 
     /** 손절 규칙 기본값 — 엔진 기본 동작 그대로 */
