@@ -15,6 +15,7 @@ import java.util.List;
  *   <li>{@code scale-in-sens} — {@code --backtest.scale-in-base=<코드>} 프로필의 ±20%·비용 민감도</li>
  *   <li>{@code stop-width-lab} — 손절 폭 스윕 15칸(56_quant) / {@code stop-width-sens} — {@code --backtest.stop-width-base=<코드>}</li>
  *   <li>{@code bear-rs-anchor} — D0′ 앵커만 / {@code bear-rs-lab} — 하락장 상대강도 예외 14칸 × 진입일 가정 2 (55_quant)</li>
+ *   <li>{@code bear-inverse-*} — 하락장 인버스 ETF 보유 (63_quant, {@link BearInverseRouter})</li>
  * </ul>
  */
 @Component
@@ -34,21 +35,25 @@ public class ScaleInLabRouter {
     private final StopWidthLab stopWidthLab;
     private final String stopWidthBase;
     private final BearRsLab bearRsLab;
+    private final BearInverseRouter bearInverseRouter;
 
     public ScaleInLabRouter(CandidateLabRouter candidateRouter, ScaleInLab lab,
                             @Value("${backtest.scale-in-base:}") String sensBase,
                             StopWidthLab stopWidthLab,
                             @Value("${backtest.stop-width-base:}") String stopWidthBase,
-                            BearRsLab bearRsLab) {
+                            BearRsLab bearRsLab,
+                            BearInverseRouter bearInverseRouter) {
         this.candidateRouter = candidateRouter;
         this.lab = lab;
         this.sensBase = sensBase;
         this.stopWidthLab = stopWidthLab;
         this.stopWidthBase = stopWidthBase;
         this.bearRsLab = bearRsLab;
+        this.bearInverseRouter = bearInverseRouter;
     }
 
     public boolean route(String mode) {
+        if (bearInverseRouter.route(mode)) return true;   // 63_quant
         if ("bear-rs-anchor".equalsIgnoreCase(mode) || "bear-rs-lab".equalsIgnoreCase(mode)) {   // 55_quant
             runBearRs(mode, "bear-rs-anchor".equalsIgnoreCase(mode) ? BearRsProfile.anchor() : BearRsProfile.grid());
             return true;

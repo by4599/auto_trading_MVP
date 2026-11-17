@@ -188,7 +188,7 @@ public class BacktestRunner {
 
         double dayEndEquity = positionManager.snapshotAccount().getTotalAssetValue();
         tradeRecorder.recordDayEnd(dayEndEquity);
-        runStats.sampleDayEnd(positionManager.getCash(), dayEndEquity);
+        runStats.sampleDayEnd(date, positionManager.getCash(), dayEndEquity);
     }
 
     private List<Position> heldPositions() {
