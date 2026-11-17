@@ -2,7 +2,7 @@
 모든 작업 보고서의 목차이자, 사람이 정해야 할 일을 모아 두는 결재함이다.
 
 ## 번호 규칙
-- 다음 번호 = 이 파일 작업 목록의 마지막 번호 + 1. **지금 다음 번호: 64**
+- 다음 번호 = 이 파일 작업 목록의 마지막 번호 + 1. **지금 다음 번호: 65**
 - `_workspace/`를 `_workspace_{YYYYMMDD_HHMMSS}/`로 옮겨 정리할 때도 번호를 1로 되돌리지 않는다.
   (사고: 번호가 다시 시작돼 `7_quant_baseline-drift.md`·`12_impl_paper-file-logging.md` 인용이 옛 폴더 파일을 가리키게 됐다.)
 - 옮긴 파일은 이름을 바꾸지 않고, 작업 목록의 "파일" 칸에 폴더째 적는다.
@@ -39,6 +39,7 @@
 | 6 | 종목당 10% 룰이 신규 매수 수량을 못 막음(M-4) · 칸 이름표 유실(M-3) 수정 — 백테스트 A/B 후 | `62_audit` | 2026-11-14 |
 | 7 | 데드맨 스위치 감시 서비스 계정 만들고 `HEARTBEAT_URL` 넣기(사람만 가능) | `44_audit` §3-B | 2026-10-11 |
 | 8 | 루트의 커밋된 `auto-start-paper.bat`(미추적)·저장소 루트 낡은 `.java` 중복 파일 정리 여부 | CLAUDE.md "낡은 중복 파일" | 2026-11-17 |
+| 9 | 대시보드 화면 고칠 범위(1안전·휴대폰 / 2결론 먼저 / 3정리) | `64_audit` | 2026-11-18 |
 <!-- INBOX -->
 
 ## 작업 목록
@@ -151,4 +152,5 @@
 | 61 | min-one-share-cap | 판정 | 끝 | `_workspace/61_quant_min-one-share-cap.md` |
 | 62 | trend-sleeve-100pct-fixed-stop | 감사 | 끝 | `_workspace/62_audit_trend-sleeve-100pct-fixed-stop.md` |
 | 63 | bear-inverse-etf | 판정 | 끝(기각) | `_workspace/63_quant_bear-inverse-etf.md` |
+| 64 | dashboard-ui-ux | 감사 | 결정 대기 | `_workspace/64_audit_dashboard-ui-ux.md` |
 <!-- ROWS -->
